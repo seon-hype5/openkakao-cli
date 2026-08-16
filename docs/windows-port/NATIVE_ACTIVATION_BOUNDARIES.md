@@ -186,13 +186,15 @@ process/HWND/creation binding, no-follow file and ancestor checks, normalized
 volume-GUID path, fixed-volume classification, content-free file identity,
 WinTrust provider extraction, bounded SPKI DER hashing, and an exactly-once
 RAII CLOSE fallback. It is compiled but has no production constructor call,
-and automated tests never invoke WinTrust or open an installed executable.
+and automated tests never invoke the production observer or open an installed
+executable. A bounded repository-fixture test now invokes WinTrust only with
+the frozen cache-only/noninteractive policy and closes its state exactly once;
+a separate in-memory test validates PE structure, certificate DER, and SPKI.
 The adapter intentionally emits no installation-root digest, so even direct
 construction cannot satisfy the pure trust verifier. Reviewed signer and root
-profile material, fixture-backed API integration evidence, independent unsafe
-review, and production wiring remain activation blockers. Native code avoids
-dynamic panic payloads because `catch_unwind` does not suppress the
-process-wide panic hook.
+profile material, independent fixture-backed unsafe review, and production
+wiring remain activation blockers. Native code avoids dynamic panic payloads
+because `catch_unwind` does not suppress the process-wide panic hook.
 
 A focused successor audit found that identity comparisons alone did not close
 an ABA race around the path-only Windows version API. Discovery remains
@@ -275,6 +277,10 @@ file/path/settings pointers, and null-reserved fields. Provider
 `pWintrustData`, `pgActionID`, and `pSigSettings` must point to those exact
 allocations. With zero secondary signatures, `dwVerifiedSigIndex` must be zero.
 Any drift is provider uncertainty and refuses before certificate extraction.
+`WINTRUST_SIGNATURE_SETTINGS.dwFlags` is an in/out field: the input-mask bits
+must still equal exactly `WSS_GET_SECONDARY_SIG_COUNT`, only documented
+`WSS_OUT_*` bits may be added, and any other input or unknown bit refuses. This
+distinction is covered by both pure drift tests and the real fixture call.
 
 Every `WTD_STATEACTION_VERIFY` attempt that produced state is paired with
 exactly one `WTD_STATEACTION_CLOSE`, including trust failure, extraction
@@ -353,6 +359,11 @@ open the installed KakaoTalk binary.
 - WinTrust zero/nonzero return handling, secondary-signature refusal,
   state-close on every path, null/malformed provider chain, and SPKI bound
   checks through a fake native adapter;
+- fixed fixture/build-script/source/certificate/SPKI hashes, bounded PE32+
+  security-directory and single-`WIN_CERTIFICATE` structure, and in-memory DER
+  SPKI extraction without executing the fixture;
+- an actual cache-only/noninteractive fixture VERIFY followed by exactly one
+  CLOSE, accepting either trust result and opening no installed executable;
 - signer/root/profile mismatch and identity/path replacement with zero UI
   calls and zero execution claims; and
 - exact discovery-versus-verification share modes; verification excludes write,
@@ -376,16 +387,20 @@ all later gates still require a fresh, explicitly named approval.
 4. Implement the trust observer behind a fakeable native adapter without a
    real KakaoTalk probe; keep production wiring unavailable. The call-policy,
    state-lifetime orchestration, and disconnected native API adapter are
-   complete; no real executable was opened or verified.
+   complete; no installed or production executable was opened or verified.
+   Only the repository-owned inert fixture now reaches the exact offline
+   WinTrust state boundary in automated tests.
 5. Wire the production ledger through a side-effect-free lazy factory only
    after trust verification, with one-shot non-retryable initialization
    failure. Complete; current trust refusal leaves all native location/file
    calls unreachable and no live store has been opened.
 6. Obtain signed release provenance, add a repository-owned reviewed fixture,
    independently audit the unsafe adapter, and review signer/root profile
-   material. The provenance/fixture acceptance plan is frozen in
-   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md), but no fixture or production
-   value exists and the current adapter deliberately returns no root digest.
+   material. The fixture, reproducible build record, structural/SPKI test, and
+   cache-only VERIFY/CLOSE test now exist as described in
+   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md). Independent review, production
+   provenance, root derivation, and every production value remain absent; the
+   current adapter deliberately returns no root digest.
 7. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 

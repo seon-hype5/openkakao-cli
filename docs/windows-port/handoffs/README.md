@@ -40,3 +40,7 @@ why production still cannot observe or authorize a self target.
 [`root-native-trust-unsafe-audit.md`](root-native-trust-unsafe-audit.md)
 records the focused native trust/API audit, retained write/delete exclusion
 guards, and the still-missing signed-fixture and independent-review evidence.
+[`root-signed-fixture.md`](root-signed-fixture.md) records the repository-owned
+self-signed fixture, its structural/SPKI and offline VERIFY/CLOSE tests, the
+WinTrust in/out-flag correction, and the still-missing independent review and
+production provenance.

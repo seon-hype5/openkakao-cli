@@ -79,11 +79,12 @@ expected profile.
 
 ## Repository-owned signed fixture
 
-The fixture validates native API shape and lifetime only; it can never provide
-Kakao production pins. Its visible product, company, file, and certificate
-names use `OPENKAKAO_SYNTHETIC_*` canaries.
+The repository now contains a synthetic fixture for bounded PE/signature
+structure, SPKI encoding, and native WinTrust state-lifetime tests. It can
+never provide Kakao production pins. Its visible product, company, file, and
+certificate names use `OPENKAKAO_SYNTHETIC_*` canaries.
 
-The future fixture directory is fixed as:
+The fixture directory is fixed as:
 
 ```text
 tests/fixtures/windows-authenticode/
@@ -96,14 +97,20 @@ tests/fixtures/windows-authenticode/
   build-manifest.toml
 ```
 
-`README.md` records source commit, compiler/linker versions, exact build and
-signing commands, PE hash before and after signing, certificate DER hash, leaf
-SPKI hash, signature count, and license. `build-manifest.toml` contains only
-synthetic values and hashes. A dedicated test key must never be reused for a
-release or accepted by a production profile. If a private fixture key is kept
-for reproducibility, it is conspicuously test-only and the test profile remains
-crate-private; otherwise the manifest records that the one-purpose key was
-destroyed after signing.
+`README.md` points to the canonical build script, license, and replacement
+review procedure. `build-manifest.toml` records the build-script and source
+hashes, compiler/linker/resource-compiler/SDK/signing-tool versions, unsigned
+and signed PE hashes, certificate DER hash, leaf-SPKI hash, signature count,
+and timestamp status. The Git commit accepting those files supplies the source
+revision without creating a self-referential manifest hash.
+
+The script creates a new in-memory 2048-bit RSA key and self-signed
+code-signing certificate for each regeneration, exports a temporary PFX only
+under ignored `.target`, signs exactly once without a timestamp, removes the
+PFX, clears its byte buffer, and disposes the certificate and key. Only the
+public certificate is retained. The manifest records that the one-purpose key
+is not retained after signing. That key or signer must never be reused for a
+release or accepted by a production profile.
 
 Normal CI must not install a certificate, alter a trust store, contact a
 revocation server, or weaken the production WinTrust policy. Because the
@@ -112,22 +119,36 @@ depend on runner cache state. Therefore:
 
 - deterministic success/refusal decisions remain covered by the fake native
   adapter;
-- a repository fixture test may assert bounded parsing, state cleanup, pointer
-  shape, SPKI extraction, and fail-closed handling without requiring trust
-  success; and
+- one repository fixture test checks the fixed artifact/certificate hashes,
+  manifest-to-script/source consistency, PE32+ security directory, one bounded
+  `WIN_CERTIFICATE`, DER parsing, and the exact leaf-SPKI digest entirely from
+  committed bytes;
+- a second test opens only the committed fixture through no-follow fixed-volume
+  guards, calls WinTrust with the exact production offline/noninteractive
+  flags, accepts either cached trust result, validates the state shape, and
+  attempts CLOSE exactly once; and
 - a positive real-WinTrust fixture run is a separate reviewed Windows image
   qualification, never a reason to add online fallback or weaker flags.
 
-The fixture test must use its repository path only, run serially, produce no
-certificate/path dump, and verify that every VERIFY state receives exactly one
-CLOSE attempt. It must not enumerate windows or open any installed application.
+The tests use only embedded bytes or the repository fixture path, run within
+one test process, produce no certificate/path dump, and never execute the PE.
+They do not install/enumerate certificates, alter a trust store, enumerate
+windows, or open any installed application. The real WinTrust test retains
+`WTD_CACHE_ONLY_URL_RETRIEVAL`, `WTD_UI_NONE`, and the noninteractive HWND, so
+it has no network or UI fallback.
+
+The local fixture build, structural/SPKI test, and offline VERIFY/CLOSE test
+are complete. A pinned clean Windows CI run and a second independent unsafe
+review remain required; a self-signed refusal does not exercise the successful
+provider-chain extraction path on an independently qualified image.
 
 ## Review and activation gates
 
 The following remain separate decisions:
 
-1. accept the synthetic fixture provenance;
-2. pass fixture-backed native lifetime tests on the pinned Windows image;
+1. independently accept the synthetic fixture provenance and reproduce its
+   clean pinned-Windows tests;
+2. independently audit the fixture-backed native pointer/lifetime path;
 3. accept a Kakao release provenance bundle;
 4. implement and audit runtime root-relation derivation;
 5. connect the native observer while capability remains false;

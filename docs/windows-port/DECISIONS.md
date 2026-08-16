@@ -310,3 +310,32 @@ process-creation/three-identity checks, and keep the adapter disconnected with
 no installation-root digest. Freeze fixture and production evidence acceptance
 in `TRUST_PROVENANCE.md`; this decision supplies no Kakao signer, path, root,
 selector, or capability activation.
+
+## ADR-030: Commit a non-retained-key Authenticode fixture and preserve WinTrust in/out flags
+
+Generate one inert PE from committed C/resource source, sign it once without a
+timestamp using a one-purpose self-signed code-signing certificate, retain only
+the public DER certificate, remove the temporary PFX, clear its byte buffer,
+and dispose the certificate/key objects after signing. The repository retains
+no private key. Record
+build-script/source/unsigned/signed/certificate/SPKI hashes and
+the exact reviewed Windows toolchain in a committed manifest. Regeneration
+creates a new key and requires explicit review of every changed artifact and
+hash. The fixture signer can never satisfy a production profile.
+
+Use one deterministic test to bind those committed bytes to a bounded PE32+
+security directory, exactly one `WIN_CERTIFICATE`, parseable certificate DER,
+and the expected SPKI digest without executing the PE. Use a separate Windows
+test to open only that repository fixture through no-follow fixed-volume
+guards, call `WinVerifyTrust` with the unchanged cache-only/noninteractive
+production policy, accept either cached trust result, and attempt CLOSE exactly
+once. Do not install a certificate, alter a trust store, weaken flags, or make
+trust success a normal-CI requirement.
+
+Treat `WINTRUST_SIGNATURE_SETTINGS.dwFlags` as the documented in/out field it
+is. After VERIFY, require the input mask to remain exactly
+`WSS_GET_SECONDARY_SIG_COUNT`, allow only documented `WSS_OUT_*` result bits,
+and reject every changed input or unknown bit. The fixture call demonstrated
+that byte-for-byte flag equality incorrectly rejects real WinTrust output.
+This decision changes no production reference, root digest, selector, or
+capability.

@@ -1,0 +1,9 @@
+scripts/build-windows-authenticode-fixture.ps1 text eol=lf
+tests/fixtures/windows-authenticode/*.md text eol=lf
+tests/fixtures/windows-authenticode/*.txt text eol=lf
+tests/fixtures/windows-authenticode/*.toml text eol=lf
+tests/fixtures/windows-authenticode/*.sha256 text eol=lf
+tests/fixtures/windows-authenticode/source/*.c text eol=lf
+tests/fixtures/windows-authenticode/source/*.rc text eol=lf
+tests/fixtures/windows-authenticode/*.exe binary
+tests/fixtures/windows-authenticode/*.cer binary

@@ -8,8 +8,11 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
+      - ".gitattributes"
+      - "scripts/build-windows-authenticode-fixture.ps1"
       - ".github/workflows/windows.yml"
       - "docs/windows-port/CI.md"
+      - "docs/windows-port/TRUST_PROVENANCE.md"
       - "docs/windows-port/manuals/**"
   pull_request:
     paths:
@@ -18,8 +21,11 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
+      - ".gitattributes"
+      - "scripts/build-windows-authenticode-fixture.ps1"
       - ".github/workflows/windows.yml"
       - "docs/windows-port/CI.md"
+      - "docs/windows-port/TRUST_PROVENANCE.md"
       - "docs/windows-port/manuals/**"
   workflow_dispatch:
 

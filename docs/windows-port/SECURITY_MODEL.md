@@ -121,12 +121,19 @@ or write authority.
   runtime SPKI/path observations from becoming expected pins by accident, and
   provider extraction exact-checks the owned
   WinTrust state/pointer links and verified primary index. No production path
-  constructs the adapter, tests never call it, and it deliberately emits no
-  installation-root digest. A focused source/API audit added retained
+  constructs the process/HWND-bound adapter, tests never construct that full
+  adapter, and it deliberately emits no installation-root digest. A focused
+  source/API audit added retained
   read-share-only canonical file and parent guards around the path-only version
-  query, VERIFY/CLOSE, and final reopen. Reviewed signer/root provenance,
-  signed-fixture evidence, a second independent unsafe review, and real native
-  observations remain absent. Production refuses at
+  query, VERIFY/CLOSE, and final reopen. A repository-owned self-signed fixture
+  now binds its build/source/artifact/certificate/SPKI hashes, checks one
+  bounded embedded signature without execution, and exercises the real
+  cache-only/noninteractive VERIFY/CLOSE lifetime. That call exposed and fixed
+  an over-strict invariant: documented `WSS_OUT_*` result bits may be added to
+  the exact input flags, while changed input or unknown bits still refuse.
+  Reviewed Kakao signer/root provenance, a second independent unsafe review,
+  runtime root derivation, and real application observations remain absent.
+  Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
 - Modal evidence remains narrower than a full application-wide model.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.
@@ -147,8 +154,11 @@ weaken the gates.
 
 ## Test and live-validation policy
 
-Automated gates may compile all features and exercise fake/synthetic ports,
-but must not launch a live UI probe or product write command. CI has no
+Automated gates may compile all features and exercise fake/synthetic ports.
+They may parse the committed synthetic Authenticode fixture in memory and call
+WinTrust on that fixture only with the frozen cache-only/noninteractive policy;
+they must not execute it, change a certificate store, launch a live UI probe,
+open an installed application, or run a product write command. CI has no
 credentials, app setup, secret injection, UI dump, screenshot, trace, or
 artifact upload.
 

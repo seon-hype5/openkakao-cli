@@ -28,8 +28,8 @@ The job runs in this order and stops on the first failure:
 |---|---|---|
 | Format | `cargo fmt --all -- --check` | Source-only formatting check |
 | Lint | `cargo clippy --locked --all-targets --all-features -- -D warnings` | Compiles/lints targets; does not execute the product |
-| Library | `cargo test --locked --lib` | Unit tests use synthetic values and pure mappings |
-| Guarded transaction | `cargo test --locked --lib --all-features platform::windows` | Runs only the named synthetic Windows unit-test subtree with the default-off write feature compiled |
+| Library | `cargo test --locked --lib` | Unit tests use synthetic values; the only native trust call targets the committed inert fixture with cache-only/no-UI policy and exactly one CLOSE |
+| Guarded transaction | `cargo test --locked --lib --all-features platform::windows` | Runs only the named synthetic Windows unit-test subtree with the default-off write feature compiled, including the same bounded fixture lifetime test |
 | Binary unit | `cargo test --locked --bin openkakao-cli` | Parser and unit coverage; no command dispatch against a live app |
 | Windows contracts | `cargo test --locked --test windows_backend --test windows_policy --test windows_cli` | Capability, fake, policy, redaction, and zero-mutation coverage |
 | Guarded backend contract | `cargo test --locked --all-features --test windows_backend` | Verifies the feature-enabled production backend remains fail-closed without calling `inspect`, `stage`, or `commit` |
@@ -55,6 +55,11 @@ performs no UI mutation, and cannot read user or application state.
 - No step runs the built executable with `doctor --ui` or `local-send`.
 - The production-backend integration target checks only advertised
   capabilities and redacted formatting; it does not call `inspect`.
+- Executable-trust tests parse the committed inert fixture without execution.
+  One test opens only that repository file through no-follow fixed-volume
+  guards and calls WinTrust with `WTD_CACHE_ONLY_URL_RETRIEVAL`, `WTD_UI_NONE`,
+  and the noninteractive HWND. It accepts trust or refusal, closes state once,
+  performs no trust-store change, and has no network/UI fallback.
 - Stage and commit are exercised only as policy/fake states with mutation
   counters fixed at zero, plus a synthetic in-memory transaction port. The
   production backend contract test never calls either mutation method.
@@ -72,8 +77,10 @@ decision seams are covered synthetically. The production ledger is composed
 through a side-effect-free lazy factory strictly behind executable-trust
 verification; current production trust returns
 `windows_executable_trust_unavailable`, so CI never resolves LocalAppData or
-opens the real DPAPI/ACL store. Synthetic contracts retain closed
-unavailable/uncertain-ledger coverage.
+opens the real DPAPI/ACL store. The repository fixture reaches only the
+disconnected WinTrust state seam and cannot supply a production root digest or
+caller. Synthetic contracts retain closed unavailable/uncertain-ledger
+coverage.
 All-feature CI is compile and synthetic behavior coverage only; it must never
 be interpreted as permission to run a live UI command.
 

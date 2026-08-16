@@ -24,6 +24,10 @@ use windows::Win32::Foundation::{
     CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, FILETIME, GENERIC_READ, HANDLE, HWND,
     INVALID_HANDLE_VALUE,
 };
+#[cfg(test)]
+use windows::Win32::Security::Cryptography::{
+    CertCreateCertificateContext, CertFreeCertificateContext,
+};
 use windows::Win32::Security::Cryptography::{
     CryptEncodeObjectEx, CERT_CONTEXT, CERT_INFO, CRYPT_ENCODE_OBJECT_FLAGS, X509_ASN_ENCODING,
     X509_PUBLIC_KEY_INFO,
@@ -35,9 +39,10 @@ use windows::Win32::Security::WinTrust::{
     WINTRUST_DATA_PROVIDER_FLAGS, WINTRUST_DATA_REVOCATION_CHECKS, WINTRUST_DATA_STATE_ACTION,
     WINTRUST_DATA_UICHOICE, WINTRUST_DATA_UICONTEXT, WINTRUST_DATA_UNION_CHOICE,
     WINTRUST_FILE_INFO, WINTRUST_SIGNATURE_SETTINGS, WINTRUST_SIGNATURE_SETTINGS_FLAGS,
-    WSS_GET_SECONDARY_SIG_COUNT, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE,
-    WTD_DISABLE_MD2_MD4, WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN,
-    WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UICONTEXT_EXECUTE, WTD_UI_NONE,
+    WSS_GET_SECONDARY_SIG_COUNT, WSS_INPUT_FLAG_MASK, WSS_OUTPUT_FLAG_MASK,
+    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4,
+    WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
+    WTD_STATEACTION_VERIFY, WTD_UICONTEXT_EXECUTE, WTD_UI_NONE,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FileAttributeTagInfo, FileIdInfo, GetDriveTypeW, GetFileInformationByHandleEx,
@@ -756,9 +761,23 @@ impl WindowsTrustState {
             && self.file_info.pgKnownSubject.is_null()
             && self.signature_settings.cbStruct as usize == size_of::<WINTRUST_SIGNATURE_SETTINGS>()
             && self.signature_settings.dwIndex == 0
-            && self.signature_settings.dwFlags == policy.signature_flags
+            && signature_settings_flags_are_exact(
+                self.signature_settings.dwFlags,
+                policy.signature_flags,
+            )
             && self.signature_settings.pCryptoPolicy.is_null()
     }
+}
+
+fn signature_settings_flags_are_exact(
+    observed: WINTRUST_SIGNATURE_SETTINGS_FLAGS,
+    expected_input: WINTRUST_SIGNATURE_SETTINGS_FLAGS,
+) -> bool {
+    // WinTrust preserves the input mask and may add only the documented
+    // WSS_OUT_* result bits to this in/out field. Unknown or changed input
+    // bits still fail closed.
+    observed.0 & WSS_INPUT_FLAG_MASK == expected_input.0
+        && observed.0 & !(WSS_INPUT_FLAG_MASK | WSS_OUTPUT_FLAG_MASK) == 0
 }
 
 impl Drop for WindowsTrustState {
@@ -1379,6 +1398,278 @@ fn query_file_version(path: &Path) -> Option<FileVersion> {
 mod tests {
     use super::*;
 
+    const SIGNED_FIXTURE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/windows-authenticode/fixture.exe"
+    ));
+    const FIXTURE_CERTIFICATE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/windows-authenticode/signer.cer"
+    ));
+    const FIXTURE_MANIFEST: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/windows-authenticode/build-manifest.toml"
+    ));
+    const FIXTURE_SHA256_FILE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/windows-authenticode/fixture.exe.sha256"
+    ));
+    const FIXTURE_SOURCE_C: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/windows-authenticode/source/fixture.c"
+    ));
+    const FIXTURE_SOURCE_RC: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/windows-authenticode/source/fixture.rc"
+    ));
+    const FIXTURE_BUILD_SCRIPT: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scripts/build-windows-authenticode-fixture.ps1"
+    ));
+    const SIGNED_FIXTURE_SHA256: [u8; 32] = [
+        0xc3, 0x57, 0x08, 0x40, 0xec, 0xb6, 0xa9, 0x47, 0x5a, 0x85, 0xcc, 0x89, 0x1a, 0xb3, 0x9a,
+        0xa9, 0x5d, 0x1f, 0xe2, 0x63, 0xc0, 0xbc, 0xcc, 0xd4, 0x2e, 0x2d, 0x09, 0x25, 0x60, 0x79,
+        0x38, 0x7f,
+    ];
+    const FIXTURE_CERTIFICATE_SHA256: [u8; 32] = [
+        0x90, 0x66, 0xc5, 0x35, 0x3f, 0xad, 0x59, 0x14, 0x29, 0x65, 0xc5, 0x50, 0xa8, 0xc5, 0x5d,
+        0xb7, 0xd3, 0xbe, 0xab, 0x0d, 0x16, 0xec, 0xa0, 0xb7, 0x55, 0x05, 0x44, 0xcd, 0xd4, 0x3e,
+        0xba, 0xae,
+    ];
+    const FIXTURE_SPKI_SHA256: [u8; 32] = [
+        0x1e, 0x21, 0xb2, 0x53, 0x43, 0xc9, 0x0c, 0xfc, 0x99, 0x24, 0x4c, 0x16, 0x20, 0x08, 0xb2,
+        0xe6, 0xb5, 0x7e, 0xba, 0xd6, 0x31, 0xcd, 0x39, 0xc3, 0x16, 0x94, 0x6f, 0x60, 0x79, 0x90,
+        0xb1, 0x90,
+    ];
+
+    fn fixture_u16(offset: usize) -> u16 {
+        let bytes: [u8; 2] = fixture_slice(offset, 2).try_into().unwrap();
+        u16::from_le_bytes(bytes)
+    }
+
+    fn fixture_u32(offset: usize) -> u32 {
+        let bytes: [u8; 4] = fixture_slice(offset, 4).try_into().unwrap();
+        u32::from_le_bytes(bytes)
+    }
+
+    fn fixture_slice(offset: usize, length: usize) -> &'static [u8] {
+        let end = offset
+            .checked_add(length)
+            .expect("fixture range must not overflow");
+        SIGNED_FIXTURE
+            .get(offset..end)
+            .expect("fixture range must be in bounds")
+    }
+
+    struct OwnedFixtureCertificateContext(*mut CERT_CONTEXT);
+
+    impl Drop for OwnedFixtureCertificateContext {
+        fn drop(&mut self) {
+            // SAFETY: this pointer came from CertCreateCertificateContext and
+            // ownership is released exactly once by this guard.
+            let released = unsafe { CertFreeCertificateContext(Some(self.0)) };
+            debug_assert!(released.as_bool());
+        }
+    }
+
+    #[test]
+    fn repository_fixture_is_exact_bounded_signed_pe_without_execution() {
+        const PE32_PLUS_MAGIC: u16 = 0x020b;
+        const OPTIONAL_HEADER_DATA_DIRECTORIES: usize = 112;
+        const NUMBER_OF_RVA_AND_SIZES: usize = 108;
+        const SECURITY_DIRECTORY_INDEX: usize = 4;
+        const WIN_CERT_REVISION_2_0: u16 = 0x0200;
+        const WIN_CERT_TYPE_PKCS_SIGNED_DATA: u16 = 0x0002;
+
+        let fixture_digest: [u8; 32] = Sha256::digest(SIGNED_FIXTURE).into();
+        let certificate_digest: [u8; 32] = Sha256::digest(FIXTURE_CERTIFICATE).into();
+        assert_eq!(fixture_digest, SIGNED_FIXTURE_SHA256);
+        assert_eq!(certificate_digest, FIXTURE_CERTIFICATE_SHA256);
+
+        let manifest: toml::Value = toml::from_str(FIXTURE_MANIFEST).unwrap();
+        let manifest_string = |key: &str| {
+            manifest
+                .get(key)
+                .and_then(toml::Value::as_str)
+                .expect("fixture manifest string must exist")
+        };
+        assert_eq!(
+            manifest
+                .get("schema_version")
+                .and_then(toml::Value::as_integer),
+            Some(1)
+        );
+        assert_eq!(
+            manifest
+                .get("signature_count")
+                .and_then(toml::Value::as_integer),
+            Some(1)
+        );
+        assert_eq!(
+            manifest.get("timestamped").and_then(toml::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            manifest_string("private_key_retention"),
+            "not_retained_after_signing"
+        );
+        assert_eq!(
+            manifest_string("fixture_sha256"),
+            hex::encode(fixture_digest)
+        );
+        assert_eq!(
+            manifest_string("certificate_sha256"),
+            hex::encode(certificate_digest)
+        );
+        assert_eq!(
+            manifest_string("leaf_spki_sha256"),
+            hex::encode(FIXTURE_SPKI_SHA256)
+        );
+        assert_eq!(
+            manifest_string("source_c_sha256"),
+            hex::encode(Sha256::digest(FIXTURE_SOURCE_C))
+        );
+        assert_eq!(
+            manifest_string("source_rc_sha256"),
+            hex::encode(Sha256::digest(FIXTURE_SOURCE_RC))
+        );
+        assert_eq!(
+            manifest_string("build_script_sha256"),
+            hex::encode(Sha256::digest(FIXTURE_BUILD_SCRIPT))
+        );
+        assert_eq!(
+            FIXTURE_SHA256_FILE,
+            format!("{}  fixture.exe\n", hex::encode(fixture_digest))
+        );
+
+        assert_eq!(fixture_slice(0, 2), b"MZ");
+        let pe_offset = usize::try_from(fixture_u32(0x3c)).unwrap();
+        assert_eq!(fixture_slice(pe_offset, 4), b"PE\0\0");
+
+        let optional_header_offset = pe_offset.checked_add(24).unwrap();
+        let optional_header_size = usize::from(fixture_u16(pe_offset.checked_add(20).unwrap()));
+        let optional_header_end = optional_header_offset
+            .checked_add(optional_header_size)
+            .unwrap();
+        fixture_slice(optional_header_offset, optional_header_size);
+        assert_eq!(fixture_u16(optional_header_offset), PE32_PLUS_MAGIC);
+        assert!(fixture_u32(optional_header_offset + NUMBER_OF_RVA_AND_SIZES) > 4);
+
+        let security_directory_offset = optional_header_offset
+            .checked_add(OPTIONAL_HEADER_DATA_DIRECTORIES)
+            .and_then(|offset| offset.checked_add(SECURITY_DIRECTORY_INDEX * 8))
+            .unwrap();
+        assert!(security_directory_offset + 8 <= optional_header_end);
+        let certificate_table_offset =
+            usize::try_from(fixture_u32(security_directory_offset)).unwrap();
+        let certificate_table_size =
+            usize::try_from(fixture_u32(security_directory_offset + 4)).unwrap();
+        assert_ne!(certificate_table_size, 0);
+        assert_eq!(certificate_table_offset % 8, 0);
+        let certificate_table = fixture_slice(certificate_table_offset, certificate_table_size);
+        assert_eq!(
+            certificate_table_offset + certificate_table_size,
+            SIGNED_FIXTURE.len()
+        );
+
+        let certificate_length = usize::try_from(fixture_u32(certificate_table_offset)).unwrap();
+        assert!((8..=certificate_table.len()).contains(&certificate_length));
+        assert_eq!(
+            fixture_u16(certificate_table_offset + 4),
+            WIN_CERT_REVISION_2_0
+        );
+        assert_eq!(
+            fixture_u16(certificate_table_offset + 6),
+            WIN_CERT_TYPE_PKCS_SIGNED_DATA
+        );
+        let aligned_certificate_length = certificate_length.checked_add(7).unwrap() & !7;
+        assert_eq!(aligned_certificate_length, certificate_table.len());
+        assert!(certificate_table[certificate_length..]
+            .iter()
+            .all(|byte| *byte == 0));
+
+        // SAFETY: the committed DER allocation remains live for the call; the
+        // returned independent context is checked and immediately owned.
+        let certificate_context =
+            unsafe { CertCreateCertificateContext(X509_ASN_ENCODING, FIXTURE_CERTIFICATE) };
+        assert!(!certificate_context.is_null());
+        let certificate_context = OwnedFixtureCertificateContext(certificate_context);
+        // SAFETY: the owning guard keeps the context live and the API promises
+        // a valid CERT_CONTEXT with a valid pCertInfo on success.
+        let certificate_info = unsafe { (*certificate_context.0).pCertInfo.as_ref() }
+            .expect("fixture certificate info must exist");
+        let observed_spki = spki_digest(certificate_info).unwrap();
+        let expected_spki = TrustDigest::from_bytes(FIXTURE_SPKI_SHA256).unwrap();
+        assert_eq!(observed_spki, expected_spki);
+    }
+
+    #[test]
+    fn repository_fixture_wintrust_state_is_offline_and_closed_once() {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("windows-authenticode")
+            .join("fixture.exe");
+        validate_absolute_path(&fixture_path).unwrap();
+
+        let _source_parent_guards = open_reparse_free_parent_chain(&fixture_path).unwrap();
+        let process_image_file = open_regular_file_no_follow(&fixture_path).unwrap();
+        validate_regular_file_handle(&process_image_file).unwrap();
+        let canonical_path = canonical_file_path(&process_image_file).unwrap();
+        assert!(is_fixed_local_volume(&canonical_path).unwrap());
+        let canonical_parent_guards = open_reparse_free_parent_chain(&canonical_path).unwrap();
+        let verification_file = open_guarded_regular_file_no_follow(&canonical_path).unwrap();
+        validate_regular_file_handle(&verification_file).unwrap();
+        assert_eq!(
+            canonical_file_path(&verification_file).unwrap(),
+            canonical_path
+        );
+        let runtime_fixture = std::fs::read(&canonical_path).unwrap();
+        let runtime_digest: [u8; 32] = Sha256::digest(&runtime_fixture).into();
+        assert_eq!(runtime_digest, SIGNED_FIXTURE_SHA256);
+
+        let identity = file_identity(&verification_file, 1).unwrap();
+        assert_eq!(file_identity(&process_image_file, 1).unwrap(), identity);
+        let path_state = WindowsPathState {
+            process_image_file,
+            verification_file,
+            _canonical_parent_guards: canonical_parent_guards,
+            canonical_path: Zeroizing::new(wide_path(&canonical_path).unwrap()),
+            identity,
+        };
+
+        let policy = WinTrustCallPolicy::offline_embedded();
+        assert!(policy.is_exact());
+        let mut trust_state = WindowsTrustState::new(&path_state, policy).unwrap();
+        assert!(trust_state.debug_invariants());
+        trust_state.verify(policy);
+        assert!(trust_state.verify_attempted);
+        assert!(!trust_state.close_attempted);
+        assert_ne!(trust_state.verify_status, i32::MIN);
+        assert!(trust_state.debug_invariants());
+
+        let observation = extract_windows_authenticode(&trust_state).unwrap();
+        assert!(!observation.catalog_choice_used);
+        assert_eq!(observation.secondary_signature_count, 0);
+        if observation.winverifytrust_status == 0 {
+            assert_eq!(observation.primary_signer_count, 1);
+            assert_eq!(
+                observation.signer_digest,
+                Some(TrustDigest::from_bytes(FIXTURE_SPKI_SHA256).unwrap())
+            );
+        } else {
+            assert_eq!(observation.primary_signer_count, 0);
+            assert_eq!(observation.signer_digest, None);
+        }
+
+        trust_state.close_once(policy).unwrap();
+        assert!(trust_state.close_attempted);
+        assert_eq!(
+            trust_state.close_once(policy),
+            Err(NativeTrustFailure::StateClose)
+        );
+    }
+
     static SYNTHETIC_SIGNER_BYTES: [u8; 32] = [1; 32];
     static SYNTHETIC_ROOT_RELATION: &[&str] = &["SyntheticVendor", "SyntheticApp", "Synthetic.exe"];
 
@@ -1823,6 +2114,21 @@ mod tests {
 
         let mut state = inert_windows_state();
         state.signature_settings.dwFlags = WINTRUST_SIGNATURE_SETTINGS_FLAGS(0);
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.signature_settings.dwFlags =
+            WINTRUST_SIGNATURE_SETTINGS_FLAGS(WSS_GET_SECONDARY_SIG_COUNT.0 | WSS_OUTPUT_FLAG_MASK);
+        assert!(state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.signature_settings.dwFlags =
+            WINTRUST_SIGNATURE_SETTINGS_FLAGS(WSS_GET_SECONDARY_SIG_COUNT.0 | 0x0000_0001);
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.signature_settings.dwFlags =
+            WINTRUST_SIGNATURE_SETTINGS_FLAGS(WSS_GET_SECONDARY_SIG_COUNT.0 | 0x0000_0008);
         assert!(!state.debug_invariants());
 
         let mut state = inert_windows_state();

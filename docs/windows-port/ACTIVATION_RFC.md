@@ -274,8 +274,10 @@ has zero production references. Production therefore remains
 `UnavailableExecutableTrust`.
 
 [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md) now freezes the evidence bundle,
-synthetic signed-fixture, and canonical-root derivation plan. It supplies no
-fixture, signer pin, root relation, or live authorization.
+synthetic signed-fixture, and canonical-root derivation plan. The repository
+fixture now exists with bounded structural/SPKI and cache-only VERIFY/CLOSE
+tests; it supplies no production signer pin, root relation, or live
+authorization.
 
 ## E. Activation order
 
@@ -287,9 +289,10 @@ fixture, signer pin, root relation, or live authorization.
    implemented. The LocalAppData/volume constructor is now wired through a
    side-effect-free lazy factory strictly after executable-trust verification;
    current unavailable trust makes its production initialization unreachable.
-   The native executable API adapter remains disconnected, while independent
-   unsafe review, signed-fixture evidence, signer/root provenance, and the
-   trust production-wiring decision remain incomplete.
+   The native executable API adapter remains disconnected. Repository-owned
+   signed-fixture evidence now exists, while independent unsafe review,
+   signer/root provenance, runtime root derivation, and the trust
+   production-wiring decision remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

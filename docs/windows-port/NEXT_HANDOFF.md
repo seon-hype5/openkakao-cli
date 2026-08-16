@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`1e11569c69ba2d7fdf5b99f44abc5d33806ae75c`. The commit containing this
+`27f50c8d0a272eb0b9af35d99568c431001157b5`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -36,6 +36,10 @@ concurrency limit.
   integrated at `280a35e`;
 - root guarded orchestration and contract chain: `ebc9368`, `5550384`,
   `8a89431`, `658b541`, `a61b3d7`, `f60876c`, and `60adc01`; and
+- request-scoped target binding and exhaustive snapshot invalidation:
+  `aaac7beb2681a9258197531063ebd8fcad32e68c`;
+- canonical trust-path share-guard audit and remediation:
+  `27f50c8d0a272eb0b9af35d99568c431001157b5`; and
 - final root adversarial reconciliation, CI, tests, and documentation:
   `272c8cb70c716066e22b9d5a6cf8e2d8da3a3d43`.
 
@@ -114,6 +118,19 @@ enter while the guards live. This path still has no production reference or
 root digest. [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md) freezes the synthetic
 fixture and production evidence plan without adding a fixture or Kakao value.
 
+The current successor implements that synthetic fixture plan. It commits an
+inert self-signed PE, public certificate, source, license, hash/toolchain
+manifest, and regeneration script that removes the temporary PFX and retains
+no private key.
+One test validates the manifest, bounded PE signature structure, certificate,
+and SPKI entirely from committed bytes. A second opens only that fixture and
+performs an actual cache-only/noninteractive WinTrust VERIFY/CLOSE cycle
+without executing it or requiring trust success. The real call exposed that
+WinTrust adds documented output bits to the signature-settings flag field; the
+native invariant now preserves exact input bits, permits only those output
+bits, and rejects every unknown bit. No production value or reference was
+added.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -148,6 +165,9 @@ fixture and production evidence plan without adding a fixture or Kakao value.
 - The disconnected executable-trust adapter retains read-share-only canonical
   file and parent guards across its path-only version query, VERIFY/CLOSE, and
   final identity reopen; write/delete/rename conflicts refuse.
+- The repository-owned Authenticode fixture binds its build/source/artifact/
+  certificate/SPKI hashes, is never executed, and exercises one exact offline
+  WinTrust state lifetime without changing a trust store or requiring success.
 - Same-process foreground popups count as user activity. Mutex contention,
   abandonment, wait failure, and every error/panic after SetValue entry are
   `SubmissionUncertain`, exit 21, and never retry-safe.
@@ -177,14 +197,14 @@ must not be weakened merely to make a live test possible.
 
 ## Final non-live verification
 
-All Rust commands used the ignored
+All recorded final-matrix Rust commands used the ignored
 `C:\Users\ihvna\source\openkakao-dev\repo\.target\wave2-root` directory.
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 171 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 97 passed |
+| `cargo test --locked --lib` | 173 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 99 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -199,8 +219,9 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 97 passed |
-| Markdown local links and pinned-action policy | passed |
+| release all-feature Windows synthetic tests | 99 passed |
+| fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
+| Markdown local links and pinned-action policy | 39 files, 41 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -223,6 +244,7 @@ its first GitHub-hosted run remains an external integration check.
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
 - actual messages sent: 0;
+- synthetic fixture executable launches: 0;
 - KakaoTalk files/databases read: 0;
 - credential/token reads: 0;
 - screenshots/UI dumps/process-memory reads/injection/hooks: 0;
@@ -265,9 +287,11 @@ implementation; it likewise authorizes no probe or production wiring.
   cannot become a pin. The adapter has zero production references,
   deliberately returns no install-root digest, and has never been called
   against KakaoTalk. A focused source/API audit closed the permissive-sharing
-  ABA gap and froze the fixture/provenance plan. Reviewed signer/root values,
-  the signed fixture, a second independent fixture-backed unsafe review, and
-  production wiring remain absent and fail closed.
+  ABA gap. The signed synthetic fixture, structural/SPKI checks, and a real
+  offline VERIFY/CLOSE lifetime test now exist; that test also corrected the
+  signature-settings in/out-flag invariant. Reviewed Kakao signer/root values,
+  runtime root derivation, a second independent fixture-backed unsafe review,
+  and production wiring remain absent and fail closed.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
@@ -283,12 +307,14 @@ The offline multiple-window remediation, target-binding scaffold,
 replay-ledger scaffold, explicit-synthetic-base native ledger store,
 trust-ordered lazy production ledger factory, pure executable-trust decision
 seam, disconnected native trust API adapter, focused source/API audit, and
-fixture/root-provenance plan are implemented and must pass the full safe
-regression matrix. The next safe offline work is a repository-owned synthetic
-signed fixture plus its content-free native lifetime tests, followed by a
-second independent unsafe review. Further synthetic target-binding adversarial
-review is also permitted. None of these tasks requires or authorizes a real
-KakaoTalk path/signature/label probe or a trust-store change.
+repository-owned signed fixture with bounded structural/SPKI and offline
+VERIFY/CLOSE tests are implemented and must pass the full safe regression
+matrix. The next safe work is a second independent unsafe review and a clean
+pinned-Windows CI reproduction, followed separately by reviewed production
+signer/root provenance and runtime root-relation implementation. Further
+synthetic target-binding adversarial review is also permitted. None of these
+tasks requires or authorizes a real KakaoTalk path/signature/label probe or a
+trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in
