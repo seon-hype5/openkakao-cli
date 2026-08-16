@@ -25,31 +25,14 @@
 // `mod stub` never needs to match a chat row at all — they're otherwise
 // flagged as dead code by the real (non-test) build.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ChatMatch {
-    Found(usize),
-    NotFound,
-    Ambiguous(usize),
-}
+pub(crate) use openkakao_cli::platform::ExactMatch as ChatMatch;
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn match_chat_row(row_names: &[Option<String>], target: &str) -> ChatMatch {
-    let mut matches = row_names
-        .iter()
-        .enumerate()
-        .filter(|(_, name)| name.as_deref() == Some(target));
-
-    match (matches.next(), matches.next()) {
-        (None, _) => ChatMatch::NotFound,
-        (Some((idx, _)), None) => ChatMatch::Found(idx),
-        (Some(_), Some(_)) => {
-            let count = row_names
-                .iter()
-                .filter(|name| name.as_deref() == Some(target))
-                .count();
-            ChatMatch::Ambiguous(count)
-        }
-    }
+    openkakao_cli::platform::exact_unique_match(
+        row_names.iter().map(|name| name.as_deref()),
+        target,
+    )
 }
 
 #[cfg(test)]
@@ -507,16 +490,9 @@ mod imp {
     /// `chat_display_name` (relevant when more than one chat window is already
     /// open) and falling back to a whole-app search otherwise.
     fn find_input_field(app: &AXUIElement, chat_display_name: &str) -> Result<AXUIElement> {
-        if let Ok(windows) = app.windows() {
-            if let Some(window) = windows.iter().find(|w| {
-                w.title()
-                    .map(|t| t.to_string())
-                    .ok()
-                    .is_some_and(|t| t.contains(chat_display_name))
-            }) {
-                if let Some(field) = find_input_field_in(&window) {
-                    return Ok(field);
-                }
+        if let Some(window) = find_chat_window(app, chat_display_name)? {
+            if let Some(field) = find_input_field_in(&window) {
+                return Ok(field);
             }
         }
         find_input_field_in(app).ok_or_else(|| {
@@ -589,17 +565,23 @@ mod imp {
 
     /// Find an already-open chat window whose title matches `chat_display_name`
     /// (the other party's — or your own, for the self/memo chat — display name).
-    fn find_chat_window(app: &AXUIElement, chat_display_name: &str) -> Option<AXUIElement> {
-        app.windows()
-            .ok()?
+    fn find_chat_window(app: &AXUIElement, chat_display_name: &str) -> Result<Option<AXUIElement>> {
+        let windows = match app.windows() {
+            Ok(windows) => windows,
+            Err(_) => return Ok(None),
+        };
+        let titles: Vec<Option<String>> = windows
             .iter()
-            .find(|w| {
-                w.title()
-                    .map(|t| t.to_string())
-                    .ok()
-                    .is_some_and(|t| t.contains(chat_display_name))
-            })
-            .map(|w| w.clone())
+            .map(|window| window.title().map(|title| title.to_string()).ok())
+            .collect();
+
+        match super::match_chat_row(&titles, chat_display_name) {
+            super::ChatMatch::Found(index) => Ok(Some(windows[index].clone())),
+            super::ChatMatch::NotFound => Ok(None),
+            super::ChatMatch::Ambiguous(count) => Err(anyhow!(
+                "chat name matches {count} already-open windows exactly — ambiguous, refusing to guess"
+            )),
+        }
     }
 
     /// Read the most recent `count` messages visible in a chat's AX message list,
@@ -620,7 +602,7 @@ mod imp {
 
         let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
         let mut messages = loop {
-            if let Some(window) = find_chat_window(&app, chat_display_name) {
+            if let Some(window) = find_chat_window(&app, chat_display_name)? {
                 let msgs = read_visible_messages(&window);
                 if !msgs.is_empty() {
                     break msgs;
@@ -644,8 +626,8 @@ mod imp {
     /// automation. Returns after KakaoTalk accepts the Return key event; callers
     /// must treat delivery as unconfirmed and avoid automatic retries.
     ///
-    /// `chat_display_name` should be a substring of the chat's title as shown
-    /// in the chat list (same matching convention as kakaocli's `send`).
+    /// `chat_display_name` must match exactly one observed chat title. Partial
+    /// and duplicate matches are refused before selecting an input field.
     pub fn send_via_ax(chat_display_name: &str, message: &str) -> Result<()> {
         let pid = find_kakaotalk_pid()?;
         ensure_ax_permission()?;
@@ -654,7 +636,7 @@ mod imp {
         // Fast path for an already-open chat. Avoiding a full snapshot of the
         // main chat-list window cuts tens of seconds on large chat histories
         // and does not change the selected/folded state of that window.
-        let field = find_chat_window(&app, chat_display_name)
+        let field = find_chat_window(&app, chat_display_name)?
             .and_then(|window| find_input_field_in(&window));
 
         let field = if let Some(field) = field {
@@ -688,7 +670,7 @@ mod imp {
         // still confirming delivery instead of assuming it.
         let deadline = Instant::now() + VERIFY_TIMEOUT;
         loop {
-            if let Some(window) = find_chat_window(&app, chat_display_name) {
+            if let Some(window) = find_chat_window(&app, chat_display_name)? {
                 if read_visible_messages(&window)
                     .iter()
                     .any(|m| m.text == message)

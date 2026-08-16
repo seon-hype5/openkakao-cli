@@ -95,3 +95,56 @@ openkakao-cli send 123 "hello" --dry-run --json
 openkakao-cli doctor --json        # Check installation, credentials, local DB access
 openkakao-cli auth-status --json   # Check auth recovery state
 ```
+
+## Windows MVP Session Rules
+
+The rules below apply to the Windows port work rooted at
+`C:\Users\ihvna\source\openkakao-dev`. The user's current session constraints
+override the general examples above.
+
+- Do not access KakaoTalk data directories, databases, credentials, tokens,
+  cookies, sessions, process memory, or private conversation content.
+- Do not send a message or mutate KakaoTalk UI. In particular: no focus or
+  Z-order changes, `ValuePattern.SetValue`, button invocation, key input, or
+  clipboard changes.
+- Do not run `doctor` in its legacy form because it checks the local database.
+  Windows UI diagnosis must use the new read-only probe seam only.
+- Do not push, create a pull request, release, force-update a branch, use
+  `git reset --hard`, or use `git clean`.
+- Build only under this repository or its assigned worktrees, never under
+  System32 or OneDrive. Keep artifacts in each worktree's ignored `.target`.
+- Before editing, verify the exact git top-level, assigned branch, clean
+  status, and ancestry from the frozen contract commit.
+- Children do not install packages and do not spawn subagents.
+
+### Ownership after `contract/windows-mvp-v1`
+
+- root: manifests and lockfile, `src/main.rs`, `src/lib.rs`, common platform
+  contracts and module indexes, common JSON/exit-code contract, and contract
+  documentation.
+- Child A: `src/platform/windows/**`, `tests/windows_backend/**`, and
+  `docs/windows-port/handoffs/child-a.md`.
+- Child B: `src/safety/**`, `src/config/windows*`,
+  `tests/windows_policy/**`, and its handoff.
+- Child C: `src/cli/windows/**`, `src/output/windows/**`,
+  `tests/windows_cli/**`, and its handoff.
+
+Children must request a root RFC instead of editing a manifest, common type,
+trait, module index, or another owner's path. Every handoff includes an atomic
+commit SHA, changed files, tests, skipped tests, assumptions, residual risks,
+and any contract/dependency RFC.
+
+### Windows implementation invariants
+
+- Core types expose no HWND, COM, or UI Automation types.
+- Unsafe Windows calls live in the smallest possible wrapper and document
+  pointer validity, ownership, lifetime, and failure handling.
+- Cross-process synchronous window messages use `SendMessageTimeoutW`.
+- Target matching is case-sensitive, exact, and unique; zero or multiple
+  candidates fail closed.
+- Dry-run accepts only the read-only probe trait and performs zero mutations.
+- A send backend accepts only `ApprovedSend`; uncertain submission is
+  `Indeterminate` and is never automatically retried.
+- Message text and real room/profile names never appear in Debug, Display,
+  errors, JSON, logs, snapshots, fixtures, screenshots, or committed files.
+- Tests use synthetic canaries and fake backends only during Phase 0/Wave 1.

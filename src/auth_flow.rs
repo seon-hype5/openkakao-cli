@@ -797,9 +797,15 @@ fn non_empty_secret(value: Option<&str>) -> Option<String> {
 }
 
 fn run_shell_command(cmd: &str) -> Result<String> {
+    #[cfg(target_os = "windows")]
+    let output = Command::new("cmd.exe")
+        .args(["/D", "/S", "/C", cmd])
+        .output()
+        .map_err(|err| anyhow!("could not spawn command: {}", err))?;
+
+    #[cfg(not(target_os = "windows"))]
     let output = Command::new("sh")
-        .arg("-lc")
-        .arg(cmd)
+        .args(["-lc", cmd])
         .output()
         .map_err(|err| anyhow!("could not spawn command: {}", err))?;
 
@@ -924,8 +930,8 @@ mod tests {
             String::new(),
         );
         let policy = AuthPolicy {
-            password_cmd: Some("printf 'doppler-pw'".into()),
-            email_cmd: Some("printf 'user@example.com'".into()),
+            password_cmd: Some("echo doppler-pw".into()),
+            email_cmd: Some("echo user@example.com".into()),
             ..AuthPolicy::default()
         };
         let params =
@@ -947,8 +953,8 @@ mod tests {
             String::new(),
         );
         let policy = AuthPolicy {
-            password_cmd: Some("printf 'pw'".into()),
-            email_cmd: Some("printf 'cmd@example.com'".into()),
+            password_cmd: Some("echo pw".into()),
+            email_cmd: Some("echo cmd@example.com".into()),
             ..AuthPolicy::default()
         };
         let params = resolve_login_params(&creds, None, Some("override@example.com"), &policy)
@@ -968,8 +974,8 @@ mod tests {
             String::new(),
         );
         let policy = AuthPolicy {
-            password_cmd: Some("printf 'doppler-pw'".into()),
-            email_cmd: Some("printf 'user@example.com'".into()),
+            password_cmd: Some("echo doppler-pw".into()),
+            email_cmd: Some("echo user@example.com".into()),
             ..AuthPolicy::default()
         };
         let params = resolve_login_params(&creds, Some("manual-pw"), None, &policy)
@@ -990,7 +996,7 @@ mod tests {
         );
         creds.email = Some("saved@example.com".to_string());
         let policy = AuthPolicy {
-            password_cmd: Some("printf 'pw'".into()),
+            password_cmd: Some("echo pw".into()),
             ..AuthPolicy::default()
         };
         let params =
@@ -1061,13 +1067,13 @@ mod tests {
 
     #[test]
     fn run_shell_command_captures_output() {
-        let output = run_shell_command("printf 'hello'").expect("should succeed");
+        let output = run_shell_command("echo hello").expect("should succeed");
         assert_eq!(output, "hello");
     }
 
     #[test]
     fn run_shell_command_trims_whitespace() {
-        let output = run_shell_command("printf '  trimmed  \\n'").expect("should succeed");
+        let output = run_shell_command("echo   trimmed  ").expect("should succeed");
         assert_eq!(output, "trimmed");
     }
 }

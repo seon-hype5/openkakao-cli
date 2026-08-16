@@ -625,7 +625,27 @@ fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) 
     Ok(())
 }
 
+#[cfg(target_os = "windows")]
 fn main() -> Result<()> {
+    // The generated clap command tree is large enough to overflow the default
+    // Windows main-thread stack before argument validation (even for --help).
+    // Keep the existing dispatch unchanged and run it on an explicitly sized
+    // stack. No desktop/UI thread is created or touched here.
+    std::thread::Builder::new()
+        .name("openkakao-cli-main".to_string())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(run_cli)
+        .context("failed to start CLI worker")?
+        .join()
+        .map_err(|_| anyhow::anyhow!("CLI worker panicked"))?
+}
+
+#[cfg(not(target_os = "windows"))]
+fn main() -> Result<()> {
+    run_cli()
+}
+
+fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config()?;
     set_auth_policy(AuthPolicy::from_config(&config.auth));
