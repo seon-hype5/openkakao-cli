@@ -1123,9 +1123,14 @@ impl MutationPort for NativeMutationPort<'_> {
         // observer cannot assert any target identity and must not read Value.
         let target = observe_self_target(hwnd)?;
         fresh.self_chat_verified = target.self_chat_verified;
+        fresh.target_binding_verified = target.target_binding_verified;
         fresh.exact_target = target.exact;
         fresh.unique_target = target.unique;
-        fresh.draft = if target.self_chat_verified && target.exact && target.unique {
+        fresh.draft = if target.self_chat_verified
+            && target.target_binding_verified
+            && target.exact
+            && target.unique
+        {
             classify_current_value(&opened.value_pattern, self.message_utf16)?
         } else {
             DraftState::Unobserved
@@ -1279,6 +1284,7 @@ fn foreground_indicates_user_activity(
 #[cfg(feature = "windows-ui-write")]
 struct TargetEvidence {
     self_chat_verified: bool,
+    target_binding_verified: bool,
     exact: bool,
     unique: bool,
 }
@@ -1289,6 +1295,7 @@ fn observe_self_target(_hwnd: HWND) -> Result<TargetEvidence, UiError> {
     // selector. Do not inspect Name/title text or substitute process identity.
     Ok(TargetEvidence {
         self_chat_verified: false,
+        target_binding_verified: false,
         exact: false,
         unique: false,
     })
@@ -1297,7 +1304,12 @@ fn observe_self_target(_hwnd: HWND) -> Result<TargetEvidence, UiError> {
 #[cfg(feature = "windows-ui-write")]
 fn verify_self_target(hwnd: HWND) -> Result<bool, UiError> {
     let target = observe_self_target(hwnd)?;
-    Ok(target.self_chat_verified && target.exact && target.unique)
+    Ok(
+        target.self_chat_verified
+            && target.target_binding_verified
+            && target.exact
+            && target.unique,
+    )
 }
 
 #[cfg(feature = "windows-ui-write")]

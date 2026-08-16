@@ -16,6 +16,8 @@ A Windows UI write is unavailable unless every independent layer permits it:
 - `safety.allow_windows_ui_write` is explicitly true;
 - the backend advertises the required send capability;
 - the requested target occurs exactly once in the configured allowlist;
+- request-scoped opaque evidence binds that exact requested label to the
+  independently observed target and complete redacted snapshot;
 - the request is self-chat, stdin-only, opened-only, explicitly confirmed,
   and within the fixed input limits;
 - policy evidence proves a supported profile, exact unique self target, empty
@@ -36,6 +38,10 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
 - Only a deterministically verified self-chat may progress beyond inspection.
 - Matching is byte-exact and unique; partial, normalized, case-folded, absent,
   unreadable, or duplicate candidates are refusals.
+- Missing, replayed, state-moved, wrong-case, whitespace-changed,
+  Unicode-normalized, or unpaired-surrogate target evidence is a refusal.
+- Fresh native state must re-establish target binding; setting only
+  self/exact/unique flags cannot authorize draft access or mutation.
 - PID alone is insufficient. A run-local digest includes executable identity
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;
@@ -69,6 +75,13 @@ operation strings are replaced with `redacted_operation` in both streams.
 A rejected legacy positional message is handled by generic parse output so
 clap cannot echo it.
 
+The offline target-binding contract uses a new random HMAC-SHA-256 key for
+each policy inspection. It streams the configured label through UTF-16 without
+allocating a second label buffer. Returned proof bytes have no public accessor,
+format only as redacted, are never serialized, commit to the full snapshot,
+and cannot validate under another request key. No production label read was
+added; therefore production cannot currently create such proof.
+
 No KakaoTalk data directory, database, token, cookie, credential, process
 memory, injection, hook, unofficial login, or telemetry is used by this port.
 
@@ -97,8 +110,9 @@ The proposed contracts and activation order are in
 [`ACTIVATION_RFC.md`](ACTIVATION_RFC.md). Merging that proposal grants no live
 or write authority.
 
-- No privacy-safe measured selector proves that the current room is the
-  requested self-chat.
+- The privacy-safe request/proof and fresh-state gates exist synthetically,
+  but no approved, measured native selector or ephemeral UTF-16 observer can
+  yet prove that the current room is the requested self-chat.
 - No live-measured exact unique send-button selector/InvokePattern is
   configured.
 - A pure signing/canonical-root decision seam, fakeable VERIFY/extract/CLOSE

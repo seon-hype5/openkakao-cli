@@ -50,6 +50,9 @@ pub(super) struct FreshState {
     pub window_enabled: bool,
     pub modal_present: bool,
     pub self_chat_verified: bool,
+    /// True only when a fresh ephemeral observed UTF-16 label matched the
+    /// policy-carried target-binding permit for this exact state.
+    pub target_binding_verified: bool,
     pub exact_target: bool,
     pub unique_target: bool,
     pub window_fingerprint: Option<String>,
@@ -82,6 +85,7 @@ impl FreshState {
             window_enabled: false,
             modal_present: false,
             self_chat_verified: false,
+            target_binding_verified: false,
             exact_target: false,
             unique_target: false,
             window_fingerprint: None,
@@ -197,6 +201,7 @@ impl<'a> ExpectedState<'a> {
         if !snapshot.target.self_chat_verified
             || !snapshot.target.exact_match
             || !snapshot.target.unique_match
+            || !approved.target_binding_verified()
         {
             return Err(error(
                 UiErrorKind::TargetNotSelf,
@@ -558,7 +563,11 @@ fn validate_fresh(
     if fresh.modal_present {
         return Err(error(UiErrorKind::ModalPresent, "windows_fresh_modal"));
     }
-    if !fresh.self_chat_verified || !fresh.exact_target || !fresh.unique_target {
+    if !fresh.self_chat_verified
+        || !fresh.target_binding_verified
+        || !fresh.exact_target
+        || !fresh.unique_target
+    {
         return Err(error(
             UiErrorKind::TargetNotSelf,
             "windows_fresh_target_identity",
@@ -928,6 +937,7 @@ mod tests {
             window_enabled: true,
             modal_present: false,
             self_chat_verified: true,
+            target_binding_verified: true,
             exact_target: true,
             unique_target: true,
             window_fingerprint: Some("run:window".to_string()),
@@ -957,6 +967,7 @@ mod tests {
         WindowDisabled,
         Modal,
         SelfUnverified,
+        TargetBindingMissing,
         TargetInexact,
         TargetAmbiguous,
         WindowChanged,
@@ -988,6 +999,7 @@ mod tests {
             Refusal::WindowDisabled => state.window_enabled = false,
             Refusal::Modal => state.modal_present = true,
             Refusal::SelfUnverified => state.self_chat_verified = false,
+            Refusal::TargetBindingMissing => state.target_binding_verified = false,
             Refusal::TargetInexact => state.exact_target = false,
             Refusal::TargetAmbiguous => state.unique_target = false,
             Refusal::WindowChanged => {
@@ -1025,6 +1037,7 @@ mod tests {
             Refusal::WindowDisabled,
             Refusal::Modal,
             Refusal::SelfUnverified,
+            Refusal::TargetBindingMissing,
             Refusal::TargetInexact,
             Refusal::TargetAmbiguous,
             Refusal::WindowChanged,
@@ -1056,6 +1069,7 @@ mod tests {
         let claim = FakeClaim::accepting();
         let mut fresh = valid(DraftState::Empty);
         fresh.self_chat_verified = false;
+        fresh.target_binding_verified = false;
         fresh.exact_target = false;
         fresh.unique_target = false;
         fresh.draft = DraftState::Unobserved;
@@ -1063,6 +1077,20 @@ mod tests {
 
         let error = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
         assert_eq!(error.kind, UiErrorKind::TargetNotSelf);
+        assert_eq!(claim.calls.get(), 0);
+        port.assert_no_mutation();
+    }
+
+    #[test]
+    fn forged_target_booleans_cannot_replace_fresh_label_binding() {
+        let claim = FakeClaim::accepting();
+        let mut fresh = valid(DraftState::Empty);
+        fresh.target_binding_verified = false;
+        let mut port = FakePort::with_states([fresh]);
+
+        let error = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(error.kind, UiErrorKind::TargetNotSelf);
+        assert_eq!(error.operation, "windows_fresh_target_identity");
         assert_eq!(claim.calls.get(), 0);
         port.assert_no_mutation();
     }

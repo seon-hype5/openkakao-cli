@@ -12,8 +12,8 @@ use clap::Args;
 use zeroize::Zeroize;
 
 use crate::platform::{
-    inspect_dry_run, InspectRequest, PlatformProbe, SecretMessage, SendMode, TargetKind, UiError,
-    UiErrorKind, UiSnapshot,
+    inspect_dry_run, InspectRequest, PlatformProbe, SecretMessage, SendMode, UiError, UiErrorKind,
+    UiSnapshot,
 };
 use crate::safety::MAX_MESSAGE_UTF8_BYTES;
 
@@ -263,12 +263,7 @@ fn inspect_self_chat<P: PlatformProbe>(probe: &P) -> Result<UiSnapshot, UiError>
         ));
     }
 
-    inspect_dry_run(
-        probe,
-        &InspectRequest {
-            target: TargetKind::SelfChat,
-        },
-    )
+    inspect_dry_run(probe, &InspectRequest::self_chat())
 }
 
 #[cfg(test)]

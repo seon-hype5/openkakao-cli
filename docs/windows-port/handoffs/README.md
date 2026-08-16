@@ -34,3 +34,6 @@ the later trust-ordered lazy production-ledger composition and why no real
 LocalAppData call becomes reachable.
 [`root-native-trust-hardening.md`](root-native-trust-hardening.md) records the
 strict WinTrust state-link checks and typed installation-root relation codec.
+[`root-target-binding-scaffold.md`](root-target-binding-scaffold.md) records
+the request-scoped nonserializing target proof, fresh transaction gate, and
+why production still cannot observe or authorize a self target.

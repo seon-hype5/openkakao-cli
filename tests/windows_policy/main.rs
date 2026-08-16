@@ -108,6 +108,7 @@ fn safe_snapshot() -> UiSnapshot {
             composer: Some(COMPOSER_FINGERPRINT.to_string()),
             observed_at_unix_ms: 9_000,
             expires_at_unix_ms: 11_000,
+            target_binding: None,
         },
         input: InputSnapshot {
             present: true,
@@ -148,7 +149,7 @@ fn dry_intent(message: impl Into<String>, nonce: &str) -> SendIntent {
 }
 
 fn dry_run_error(snapshot: UiSnapshot) -> UiError {
-    let backend = FakeBackend::new(snapshot);
+    let backend = bound_backend(snapshot);
     policy()
         .dry_run(&backend, LABEL, &dry_intent("SYNTHETIC_BODY", "nonce-1"))
         .expect_err("unsafe synthetic snapshot must be refused")
@@ -156,7 +157,7 @@ fn dry_run_error(snapshot: UiSnapshot) -> UiError {
 
 #[test]
 fn dry_run_is_non_approved_and_never_calls_mutation() {
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     let request = dry_intent("SYNTHETIC_DRY_RUN_CANARY", "dry-run-nonce");
 
     let plan = policy()
@@ -173,8 +174,29 @@ fn dry_run_is_non_approved_and_never_calls_mutation() {
 }
 
 #[test]
+fn target_binding_requires_the_exact_observed_label_and_never_mutates() {
+    for backend in [
+        FakeBackend::new(safe_snapshot()),
+        FakeBackend::new(safe_snapshot()).with_observed_target_label("SYNTHETIC_WRONG_TARGET"),
+    ] {
+        let error = policy()
+            .dry_run(
+                &backend,
+                LABEL,
+                &dry_intent("SYNTHETIC_BODY", "binding-refusal"),
+            )
+            .expect_err("missing or mismatched binding evidence must fail closed");
+        assert_eq!(error.kind, UiErrorKind::TargetNotSelf);
+        assert_eq!(error.operation, "policy_target_binding");
+        assert_eq!(backend.inspect_calls(), 1);
+        assert_eq!(backend.stage_calls(), 0);
+        assert_eq!(backend.commit_calls(), 0);
+    }
+}
+
+#[test]
 fn non_self_intent_is_refused_before_inspection() {
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     let request = intent(
         TargetKind::Other,
         "SYNTHETIC_BODY",
@@ -213,7 +235,7 @@ fn allowlist_requires_exact_bytes_and_rejects_duplicates() {
         "SYNTHETIC_SELF_CHAT\u{3000}",
         "SYNTHET\u{0406}C_SELF_CHAT",
     ] {
-        let backend = FakeBackend::new(safe_snapshot());
+        let backend = bound_backend(safe_snapshot());
         let error = policy()
             .dry_run(&backend, variant, &dry_intent("SYNTHETIC_BODY", "nonce-1"))
             .expect_err("partial/case/whitespace variant must fail");
@@ -227,7 +249,7 @@ fn allowlist_does_not_normalize_unicode() {
     const COMPOSED: &str = "SYNTHETIC_CAF\u{00c9}";
     const DECOMPOSED: &str = "SYNTHETIC_CAFE\u{0301}";
     let configured = WindowsSafetyPolicy::with_clock(config_for(COMPOSED), FixedClock(NOW_MS));
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = FakeBackend::new(safe_snapshot()).with_observed_target_label(COMPOSED);
 
     let error = configured
         .dry_run(
@@ -499,7 +521,7 @@ fn stale_future_and_overlong_ttl_snapshots_are_refused() {
 fn message_boundaries_and_controls_are_refused_without_inspection() {
     assert_eq!(MAX_MESSAGE_UTF8_BYTES, MAX_MESSAGE_SCALARS * 4);
     let accepted = "\u{1f642}".repeat(MAX_MESSAGE_SCALARS);
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     policy()
         .dry_run(&backend, LABEL, &dry_intent(accepted, "nonce-ok"))
         .expect("exact scalar limit should pass");
@@ -519,7 +541,7 @@ fn message_boundaries_and_controls_are_refused_without_inspection() {
     ];
 
     for (index, value) in invalid.into_iter().enumerate() {
-        let backend = FakeBackend::new(safe_snapshot());
+        let backend = bound_backend(safe_snapshot());
         let error = policy()
             .dry_run(
                 &backend,
@@ -544,7 +566,7 @@ fn nonce_is_bounded_and_syntax_checked_before_inspection() {
     ];
 
     for value in invalid {
-        let backend = FakeBackend::new(safe_snapshot());
+        let backend = bound_backend(safe_snapshot());
         let error = policy()
             .dry_run(&backend, LABEL, &dry_intent("SYNTHETIC_BODY", &value))
             .expect_err("invalid nonce must fail");
@@ -557,7 +579,7 @@ fn nonce_is_bounded_and_syntax_checked_before_inspection() {
 #[test]
 fn stage_and_commit_require_yes_and_can_be_represented_without_mutation() {
     for mode in [SendMode::StageOnly, SendMode::Commit] {
-        let backend = FakeBackend::new(safe_snapshot());
+        let backend = bound_backend(safe_snapshot());
         let no = intent(
             TargetKind::SelfChat,
             "SYNTHETIC_BODY",
@@ -630,7 +652,7 @@ fn authorize_refuses_adversarial_state_without_calling_mutation() {
     cases.push((state, UiErrorKind::StaleSnapshot));
 
     for (index, (state, expected_kind)) in cases.into_iter().enumerate() {
-        let backend = FakeBackend::new(state);
+        let backend = bound_backend(state);
         let error = policy()
             .authorize(
                 &backend,
@@ -659,7 +681,7 @@ fn message_label_and_nonce_never_appear_in_formats_or_json() {
 
     let dry_policy = WindowsSafetyPolicy::with_clock(config, FixedClock(NOW_MS));
     assert!(!format!("{dry_policy:?}").contains(LABEL));
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     let plan = dry_policy
         .dry_run(&backend, LABEL, &dry_intent(SECRET, NONCE))
         .expect("dry-run should validate");
@@ -728,7 +750,7 @@ fn external_probe_and_clock_errors_are_rewritten_to_fixed_policy_operations() {
     assert_eq!(probe.inspect_calls(), 2);
 
     let clock_policy = WindowsSafetyPolicy::with_clock(config_for(LABEL), ErrorClock);
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     let clock_error = clock_policy
         .dry_run(
             &backend,
@@ -747,7 +769,7 @@ fn external_probe_and_clock_errors_are_rewritten_to_fixed_policy_operations() {
 
 #[test]
 fn approved_nonce_is_one_shot_but_dry_run_does_not_consume_it() {
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     let policy = policy();
     let request = dry_intent("SYNTHETIC_BODY", "reusable-dry-run");
     policy
@@ -818,13 +840,17 @@ impl PlatformProbe for SequenceProbe {
         }
     }
 
-    fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+    fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {
         self.inspect_calls.fetch_add(1, Ordering::SeqCst);
-        self.snapshots
+        let snapshot = self
+            .snapshots
             .lock()
             .expect("synthetic sequence mutex")
             .pop_front()
-            .ok_or_else(|| UiError::new(UiErrorKind::ProcessNotFound, "synthetic_sequence_empty"))
+            .ok_or_else(|| {
+                UiError::new(UiErrorKind::ProcessNotFound, "synthetic_sequence_empty")
+            })?;
+        Ok(bind_snapshot_for_request(request, snapshot, LABEL))
     }
 }
 
@@ -859,12 +885,12 @@ fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
     assert_eq!(probe.inspect_calls(), 1);
 
     let later = probe
-        .inspect(&InspectRequest {
-            target: TargetKind::SelfChat,
-        })
+        .inspect(&InspectRequest::self_chat())
         .expect("synthetic later state");
     assert_ne!(approval.snapshot(), &later);
-    assert_eq!(approval.snapshot(), &initial);
+    let mut approved_snapshot = approval.snapshot().clone();
+    approved_snapshot.target.target_binding = None;
+    assert_eq!(approved_snapshot, initial);
     assert_ne!(
         approval
             .snapshot()
@@ -882,7 +908,7 @@ fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
 
 #[test]
 fn approved_operation_consumes_the_only_public_execution_capability() {
-    let backend = FakeBackend::new(safe_snapshot());
+    let backend = bound_backend(safe_snapshot());
     let policy = policy();
     let approval = policy
         .authorize(
@@ -906,6 +932,21 @@ fn approved_operation_consumes_the_only_public_execution_capability() {
     assert!(!outcome.retry_safe());
     assert_eq!(backend.commit_calls(), 1);
     assert_eq!(backend.stage_calls(), 0);
+}
+
+fn bound_backend(snapshot: UiSnapshot) -> FakeBackend {
+    FakeBackend::new(snapshot).with_observed_target_label(LABEL)
+}
+
+fn bind_snapshot_for_request(
+    request: &InspectRequest,
+    mut snapshot: UiSnapshot,
+    observed_label: &str,
+) -> UiSnapshot {
+    snapshot.target.target_binding = None;
+    let observed_utf16: Vec<u16> = observed_label.encode_utf16().collect();
+    snapshot.target.target_binding = request.bind_observed_target_utf16(&observed_utf16, &snapshot);
+    snapshot
 }
 
 #[derive(Clone)]
@@ -940,9 +981,13 @@ impl PlatformProbe for ConcurrentProbe {
         }
     }
 
-    fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+    fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {
         self.inspect_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(self.snapshot.clone())
+        Ok(bind_snapshot_for_request(
+            request,
+            self.snapshot.clone(),
+            LABEL,
+        ))
     }
 }
 

@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
 
 use super::ApprovalToken;
+use crate::platform::contract::TargetBindingPermit;
 use crate::platform::{
     exact_unique_match, ApprovedSend, ExactMatch, InspectRequest, MessageSender, PlatformProbe,
     SendIntent, SendMode, SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind,
@@ -63,6 +64,8 @@ const OP_TARGET_SNAPSHOT: &str = "policy_target_snapshot";
 const OP_INPUT_SNAPSHOT: &str = "policy_input_snapshot";
 const OP_CURRENT_TIME: &str = "policy_current_time";
 const OP_CORRELATION_RNG: &str = "policy_correlation_rng";
+const OP_TARGET_BINDING_RNG: &str = "policy_target_binding_rng";
+const OP_TARGET_BINDING: &str = "policy_target_binding";
 
 /// Configuration kept at the safety boundary until root wires the legacy
 /// flat configuration module into the Windows CLI.
@@ -221,9 +224,10 @@ where
         }
 
         validate_inspect_capability(probe.capabilities())?;
-        let snapshot = inspect_for_policy(probe, OP_DRY_RUN_INSPECT)?;
+        let (snapshot, target_binding) =
+            inspect_for_policy(probe, requested_label, OP_DRY_RUN_INSPECT)?;
         let now_unix_ms = policy_now(&self.clock)?;
-        validate_snapshot(&snapshot, intent.target, now_unix_ms)?;
+        validate_snapshot(&snapshot, intent.target, now_unix_ms, &target_binding)?;
 
         Ok(DryRunPlan {
             schema_version: 1,
@@ -284,15 +288,17 @@ where
             return Err(policy_error(UiErrorKind::InvalidInput, OP_NONCE_REPLAY));
         }
 
-        let snapshot = inspect_for_policy(probe, OP_AUTHORIZE_INSPECT)?;
+        let (snapshot, target_binding) =
+            inspect_for_policy(probe, requested_label, OP_AUTHORIZE_INSPECT)?;
         let now_unix_ms = policy_now(&self.clock)?;
-        validate_snapshot(&snapshot, intent.target, now_unix_ms)?;
+        validate_snapshot(&snapshot, intent.target, now_unix_ms, &target_binding)?;
 
         let transaction_correlation = generate_transaction_correlation()?;
         let approved_intent = redact_intent_nonce(intent);
         let approved = ApprovedSend::from_policy(
             approved_intent,
             snapshot,
+            target_binding,
             now_unix_ms,
             transaction_correlation,
             ApprovalToken::issue(),
@@ -520,15 +526,20 @@ fn validate_send_capability(capabilities: UiCapabilities) -> Result<(), UiError>
     }
 }
 
-fn inspect_for_policy<P>(probe: &P, operation: &'static str) -> Result<UiSnapshot, UiError>
+fn inspect_for_policy<P>(
+    probe: &P,
+    requested_label: &str,
+    operation: &'static str,
+) -> Result<(UiSnapshot, TargetBindingPermit), UiError>
 where
     P: PlatformProbe + ?Sized,
 {
-    probe
-        .inspect(&InspectRequest {
-            target: TargetKind::SelfChat,
-        })
-        .map_err(|error| sanitize_external_error(error, operation))
+    let binding_key = generate_target_binding_key()?;
+    let (request, permit) = InspectRequest::bound_self_chat(requested_label, binding_key);
+    let snapshot = probe
+        .inspect(&request)
+        .map_err(|error| sanitize_external_error(error, operation))?;
+    Ok((snapshot, permit))
 }
 
 fn policy_now<C>(clock: &C) -> Result<u64, UiError>
@@ -550,10 +561,11 @@ fn validate_snapshot(
     snapshot: &UiSnapshot,
     requested_target: TargetKind,
     now_unix_ms: u64,
+    target_binding: &TargetBindingPermit,
 ) -> Result<(), UiError> {
     validate_app_snapshot(snapshot)?;
     validate_snapshot_time(snapshot, now_unix_ms)?;
-    validate_target_snapshot(snapshot, requested_target)?;
+    validate_target_snapshot(snapshot, requested_target, target_binding)?;
     validate_input_snapshot(snapshot)
 }
 
@@ -615,6 +627,7 @@ fn validate_snapshot_time(snapshot: &UiSnapshot, now_unix_ms: u64) -> Result<(),
 fn validate_target_snapshot(
     snapshot: &UiSnapshot,
     requested_target: TargetKind,
+    target_binding: &TargetBindingPermit,
 ) -> Result<(), UiError> {
     let target = &snapshot.target;
     if requested_target != TargetKind::SelfChat
@@ -650,6 +663,9 @@ fn validate_target_snapshot(
             UiErrorKind::UnknownUiProfile,
             OP_TARGET_SNAPSHOT,
         ));
+    }
+    if !target_binding.verifies_snapshot(snapshot) {
+        return Err(policy_error(UiErrorKind::TargetNotSelf, OP_TARGET_BINDING));
     }
     Ok(())
 }
@@ -719,6 +735,21 @@ fn generate_transaction_correlation() -> Result<[u8; 16], UiError> {
     Ok(correlation)
 }
 
+fn generate_target_binding_key() -> Result<[u8; 32], UiError> {
+    let mut key = [0_u8; 32];
+    OsRng
+        .try_fill_bytes(&mut key)
+        .map_err(|_| policy_error(UiErrorKind::UnsupportedCapability, OP_TARGET_BINDING_RNG))?;
+    if key == [0; 32] {
+        key.zeroize();
+        return Err(policy_error(
+            UiErrorKind::UnsupportedCapability,
+            OP_TARGET_BINDING_RNG,
+        ));
+    }
+    Ok(key)
+}
+
 fn redact_intent_nonce(mut intent: SendIntent) -> SendIntent {
     intent.nonce.zeroize();
     intent.nonce.push_str(REDACTED_NONCE);
@@ -762,6 +793,7 @@ mod tests {
                 composer: Some("run:33333333333333333333333333333333".to_string()),
                 observed_at_unix_ms: 1_000,
                 expires_at_unix_ms: 2_000,
+                target_binding: None,
             },
             input: InputSnapshot {
                 present: true,
@@ -869,8 +901,12 @@ mod tests {
             }
         }
 
-        fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
-            Ok(self.0.clone())
+        fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+            let mut snapshot = self.0.clone();
+            let observed_utf16: Vec<u16> = "SYNTHETIC_SELF_CHAT".encode_utf16().collect();
+            snapshot.target.target_binding =
+                request.bind_observed_target_utf16(&observed_utf16, &snapshot);
+            Ok(snapshot)
         }
     }
 
@@ -940,6 +976,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        assert!(approval.approved.target_binding_verified());
         let debug = format!("{approval:?}");
         assert!(!debug.contains("synthetic-correlation"));
         assert!(debug.contains("<redacted>"));

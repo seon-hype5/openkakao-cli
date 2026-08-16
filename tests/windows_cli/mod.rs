@@ -64,6 +64,7 @@ fn safe_snapshot() -> UiSnapshot {
             composer: Some(COMPOSER_CANARY.to_string()),
             observed_at_unix_ms: 10,
             expires_at_unix_ms: 20,
+            target_binding: None,
         },
         input: InputSnapshot {
             present: true,

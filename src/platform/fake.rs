@@ -1,5 +1,7 @@
 use std::cell::Cell;
 
+use zeroize::{Zeroize, Zeroizing};
+
 use super::{
     ApprovedSend, InspectRequest, MessageSender, PlatformProbe, SendOutcome, UiCapabilities,
     UiError, UiSnapshot,
@@ -9,6 +11,7 @@ use super::{
 /// observable without touching a real desktop application.
 pub struct FakeBackend {
     snapshot: UiSnapshot,
+    observed_target_label: Option<String>,
     inspect_calls: Cell<usize>,
     stage_calls: Cell<usize>,
     commit_calls: Cell<usize>,
@@ -18,10 +21,21 @@ impl FakeBackend {
     pub fn new(snapshot: UiSnapshot) -> Self {
         Self {
             snapshot,
+            observed_target_label: None,
             inspect_calls: Cell::new(0),
             stage_calls: Cell::new(0),
             commit_calls: Cell::new(0),
         }
+    }
+
+    /// Supplies a synthetic observed target label for policy-binding tests.
+    /// The value is redacted from all formatting and zeroized on drop.
+    pub fn with_observed_target_label(mut self, label: impl Into<String>) -> Self {
+        if let Some(mut previous) = self.observed_target_label.take() {
+            previous.zeroize();
+        }
+        self.observed_target_label = Some(label.into());
+        self
     }
 
     pub fn inspect_calls(&self) -> usize {
@@ -48,9 +62,25 @@ impl PlatformProbe for FakeBackend {
         }
     }
 
-    fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+    fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {
         self.inspect_calls.set(self.inspect_calls.get() + 1);
-        Ok(self.snapshot.clone())
+        let mut snapshot = self.snapshot.clone();
+        snapshot.target.target_binding = None;
+        if let Some(label) = self.observed_target_label.as_deref() {
+            let mut observed = Zeroizing::new(Vec::with_capacity(label.len()));
+            observed.extend(label.encode_utf16());
+            snapshot.target.target_binding =
+                request.bind_observed_target_utf16(&observed, &snapshot);
+        }
+        Ok(snapshot)
+    }
+}
+
+impl Drop for FakeBackend {
+    fn drop(&mut self) {
+        if let Some(label) = self.observed_target_label.as_mut() {
+            label.zeroize();
+        }
     }
 }
 
@@ -114,6 +144,7 @@ mod tests {
                 composer: Some("composer-digest".to_string()),
                 observed_at_unix_ms: 1,
                 expires_at_unix_ms: 2,
+                target_binding: None,
             },
             input: InputSnapshot {
                 present: true,
@@ -130,9 +161,7 @@ mod tests {
     #[test]
     fn dry_run_can_only_inspect_and_never_mutates() {
         let backend = FakeBackend::new(safe_snapshot());
-        let request = InspectRequest {
-            target: TargetKind::SelfChat,
-        };
+        let request = InspectRequest::self_chat();
 
         let result = inspect_dry_run(&backend, &request).expect("fake inspect should succeed");
 

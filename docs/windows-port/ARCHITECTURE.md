@@ -23,6 +23,7 @@ Windows CLI / redacted output
         |
         v
 Windows safety policy --> dry-run report
+        |      `--> request-scoped exact target-binding proof
         |
         `--> consumed ApprovedOperation
                    |
@@ -74,6 +75,14 @@ properties, room/profile labels, or draft text. It consequently leaves
 `doctor --ui` can return this redacted diagnostic state; production
 `local-send` cannot turn it into an approval.
 
+For policy inspection, a per-request random HMAC key and the configured label
+tag are hidden inside `InspectRequest`. A probe receives no raw configured
+label. It can return opaque evidence only after an exact UTF-16 candidate
+match; that evidence commits to the entire redacted snapshot and is omitted
+from every serialized report. Replays under another request key and evidence
+moved to another state refuse. This is an offline contract only: the Windows
+probe has no observed-label reader and returns no proof.
+
 Read-only narrowing does not apply to the native transaction path. Fresh
 write observation and final mutation preflight still require raw top-level
 enumeration itself to contain exactly one window. This asymmetry lets doctor
@@ -91,7 +100,8 @@ graph. Write orchestration additionally requires all of the following:
 4. stdin-only input within 4,000 UTF-8 bytes and 1,000 Unicode scalars;
 5. an exact, unique configured self-chat label;
 6. an explicit `--stage-only --yes` or `--commit --yes` request; and
-7. a fresh, fully validated policy snapshot.
+7. a fresh, fully validated policy snapshot whose exact observed target is
+   bound to the requested allowlist entry by request-scoped evidence.
 
 The production backend intentionally fails item 3. The separate Windows
 configuration flag prevents a macOS `allow_ax_send` opt-in from silently
@@ -119,9 +129,11 @@ ownership, timeout, poisoning, or stale evidence refuses without retry.
 Fresh validation binds the approval to the platform, target, process ID,
 executable-instance fingerprint, process creation time, session, HWND,
 window/composer fingerprints, UI profile, modal/focus/draft state, and a
-half-open expiry interval. The native boundary immediately requeries the PID,
-HWND, executable path, process creation time, session, integrity, and exact UIA
-element before the execution claim.
+half-open expiry interval. A separate fresh target-binding flag is mandatory;
+the prior self/exact/unique booleans cannot substitute for it. The native
+boundary immediately requeries the PID, HWND, executable path, process
+creation time, session, integrity, and exact UIA element before the execution
+claim.
 
 Stage-only is designed as:
 
@@ -138,9 +150,9 @@ verified exact Invoke selector, and makes at most one `Invoke` call. Every
 failure or panic after that call begins is `SubmissionUncertain` with
 `retry_safe=false`; there is no automatic retry edge.
 
-The current native profile sets live self-target evidence false and its commit
-selector to unconfigured. It therefore never reaches draft Value access,
-`SetValue`, or `Invoke` in production.
+The current native profile sets live self-target and target-binding evidence
+false and its commit selector to unconfigured. It therefore never reaches
+draft Value access, `SetValue`, or `Invoke` in production.
 
 ## Threading and native resource ownership
 

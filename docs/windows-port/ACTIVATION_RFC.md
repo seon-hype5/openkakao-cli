@@ -26,6 +26,19 @@ can be implemented and tested offline only after this RFC is accepted.
 
 ## A. Requested self-chat binding
 
+Offline contract status: implemented synthetically, not activated. Each
+policy inspection now creates an opaque request-scoped HMAC key/label tag. A
+probe can produce nonserializing redacted evidence only from an exact observed
+UTF-16 candidate, and the proof commits to the complete redacted snapshot.
+The approval retains a private permit, and fresh mutation state independently
+requires `target_binding_verified`. Wrong-case, whitespace, normalization,
+surrogate, replay, and state-movement negatives are covered without live UI.
+
+The production Windows observer remains deliberately disconnected: it reads
+no title/Name/label, produces no proof, leaves target binding false, and cannot
+read draft Value. This scaffold satisfies no measurement requirement below
+and grants no live or write authority.
+
 The current policy checks that a requested label occurs exactly once in the
 configured allowlist, while the native snapshot independently leaves
 `self_chat_verified=false`. A future implementation must bind the exact

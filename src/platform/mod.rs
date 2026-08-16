@@ -11,8 +11,8 @@ mod matcher;
 pub use contract::{
     inspect_dry_run, ActionReport, AppSnapshot, ApprovedSend, BackendKind, ChatTargetSnapshot,
     ExitCode, InputSnapshot, InspectRequest, MessageSender, PlatformProbe, ProcessFingerprint,
-    SecretMessage, SendIntent, SendMode, SendOutcome, TargetKind, UiCapabilities, UiError,
-    UiErrorKind, UiPlatform, UiSnapshot,
+    SecretMessage, SendIntent, SendMode, SendOutcome, TargetBindingEvidence, TargetKind,
+    UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 pub use matcher::{exact_unique_match, ExactMatch};
 

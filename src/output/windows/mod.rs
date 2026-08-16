@@ -35,6 +35,8 @@ const OPERATION_CODES: &[&str] = &[
     "policy_nonce_replay",
     "policy_send_capability",
     "policy_snapshot_time",
+    "policy_target_binding",
+    "policy_target_binding_rng",
     "policy_target_snapshot",
     "policy_validate_confirmation",
     "policy_validate_message",

@@ -2793,6 +2793,7 @@ mod tests {
                 composer: Some("run:33333333333333333333333333333333".to_string()),
                 observed_at_unix_ms: now,
                 expires_at_unix_ms: now.saturating_add(5_000),
+                target_binding: None,
             },
             input: InputSnapshot {
                 present: true,
@@ -2819,7 +2820,8 @@ mod tests {
     fn windows_write_config_refuses_before_input_or_probe() {
         for mode in ["--stage-only", "--commit"] {
             let options = windows_local_send_options(mode);
-            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot())
+                .with_observed_target_label("SYNTHETIC_SELF_CHAT");
             let mut input =
                 ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
 
@@ -2872,7 +2874,8 @@ mod tests {
     fn windows_synthetic_dry_run_inspects_once_without_mutation_or_secret_output() {
         for json in [false, true] {
             let options = windows_local_send_options("--dry-run");
-            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot())
+                .with_observed_target_label("SYNTHETIC_SELF_CHAT");
             let mut input =
                 ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
             let nonce = "SYNTHETIC_NONCE_CANARY";
@@ -2908,7 +2911,8 @@ mod tests {
     #[test]
     fn windows_allowlist_refuses_before_input_or_probe() {
         let options = windows_local_send_options("--dry-run");
-        let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+        let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot())
+            .with_observed_target_label("SYNTHETIC_SELF_CHAT");
         let mut input = ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
         let mut config = windows_write_test_config();
         config.safety.allowed_send_chats = vec!["DIFFERENT_SYNTHETIC_TARGET".to_string()];
@@ -2948,7 +2952,8 @@ mod tests {
             for json in [false, true] {
                 let options = windows_local_send_options(mode);
                 let backend =
-                    openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+                    openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot())
+                        .with_observed_target_label("SYNTHETIC_SELF_CHAT");
                 let mut input =
                     ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
                 let nonce = format!("synthetic-{expected_outcome}-{json}");

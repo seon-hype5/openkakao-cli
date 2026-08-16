@@ -1,8 +1,11 @@
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex;
 
+use hmac::{Hmac, Mac};
 use serde::Serialize;
+use sha2::Sha256;
 use zeroize::Zeroize;
 
 use crate::safety::ApprovalToken;
@@ -79,6 +82,10 @@ pub struct ChatTargetSnapshot {
     pub composer: Option<String>,
     pub observed_at_unix_ms: u64,
     pub expires_at_unix_ms: u64,
+    /// Request-scoped proof that an ephemeral observed UTF-16 label matched
+    /// the configured target exactly. It is never serialized or formatted.
+    #[serde(skip)]
+    pub target_binding: Option<TargetBindingEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -99,9 +106,306 @@ pub struct UiSnapshot {
     pub input: InputSnapshot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A read-only inspection request. Target-binding material, when present, is
+/// opaque and redacted; callers cannot obtain the configured target label.
 pub struct InspectRequest {
     pub target: TargetKind,
+    target_binding: Option<TargetBindingRequest>,
+}
+
+impl InspectRequest {
+    pub const fn new(target: TargetKind) -> Self {
+        Self {
+            target,
+            target_binding: None,
+        }
+    }
+
+    pub const fn self_chat() -> Self {
+        Self::new(TargetKind::SelfChat)
+    }
+
+    /// Returns whether this request requires an exact observed-label binding.
+    /// No key, digest, or label bytes are exposed.
+    pub fn requires_target_binding(&self) -> bool {
+        self.target_binding.is_some()
+    }
+
+    /// Produces opaque evidence only when `observed_label_utf16` is an exact
+    /// code-unit match for the policy-configured target. The caller must keep
+    /// the observed buffer ephemeral and zeroize it after this call.
+    ///
+    /// The proof commits to the complete redacted snapshot, so moving it to a
+    /// different process/window/composer/time/input state cannot validate.
+    pub fn bind_observed_target_utf16(
+        &self,
+        observed_label_utf16: &[u16],
+        snapshot: &UiSnapshot,
+    ) -> Option<TargetBindingEvidence> {
+        if self.target != snapshot.target.kind {
+            return None;
+        }
+        self.target_binding
+            .as_ref()?
+            .bind_observed_target_utf16(observed_label_utf16, snapshot)
+    }
+
+    pub(crate) fn bound_self_chat(
+        requested_label: &str,
+        key: [u8; 32],
+    ) -> (Self, TargetBindingPermit) {
+        let secret = Arc::new(TargetBindingSecret::new(requested_label, key));
+        (
+            Self {
+                target: TargetKind::SelfChat,
+                target_binding: Some(TargetBindingRequest {
+                    secret: Arc::clone(&secret),
+                }),
+            },
+            TargetBindingPermit { secret },
+        )
+    }
+}
+
+impl fmt::Debug for InspectRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("InspectRequest")
+            .field("target", &self.target)
+            .field(
+                "target_binding",
+                &self.target_binding.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
+type HmacSha256 = Hmac<Sha256>;
+
+const TARGET_LABEL_DOMAIN: &[u8] = b"openkakao.windows.target-label.v1\0";
+const TARGET_EVIDENCE_DOMAIN: &[u8] = b"openkakao.windows.target-evidence.v1\0";
+
+struct TargetBindingSecret {
+    key: [u8; 32],
+    expected_label_tag: [u8; 32],
+}
+
+impl TargetBindingSecret {
+    fn new(requested_label: &str, key: [u8; 32]) -> Self {
+        // Stream the configured UTF-8 label through `encode_utf16` twice: once
+        // for its exact unit count and once for HMAC input. No secondary label
+        // buffer or freed allocation can retain a copy.
+        let expected_label_tag = target_label_tag_from_str(&key, requested_label);
+        Self {
+            key,
+            expected_label_tag,
+        }
+    }
+}
+
+impl Drop for TargetBindingSecret {
+    fn drop(&mut self) {
+        self.key.zeroize();
+        self.expected_label_tag.zeroize();
+    }
+}
+
+struct TargetBindingRequest {
+    secret: Arc<TargetBindingSecret>,
+}
+
+impl TargetBindingRequest {
+    fn bind_observed_target_utf16(
+        &self,
+        observed_label_utf16: &[u16],
+        snapshot: &UiSnapshot,
+    ) -> Option<TargetBindingEvidence> {
+        if !target_label_matches(&self.secret, observed_label_utf16) {
+            return None;
+        }
+        Some(TargetBindingEvidence(target_evidence_tag(
+            &self.secret,
+            snapshot,
+        )))
+    }
+}
+
+/// Opaque, request-scoped target evidence. The bytes have no public accessor,
+/// are redacted by `Debug`, and are excluded from snapshot serialization.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TargetBindingEvidence([u8; 32]);
+
+impl fmt::Debug for TargetBindingEvidence {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("TargetBindingEvidence(<redacted>)")
+    }
+}
+
+impl Drop for TargetBindingEvidence {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+pub(crate) struct TargetBindingPermit {
+    secret: Arc<TargetBindingSecret>,
+}
+
+impl TargetBindingPermit {
+    pub(crate) fn verifies_snapshot(&self, snapshot: &UiSnapshot) -> bool {
+        let Some(evidence) = snapshot.target.target_binding.as_ref() else {
+            return false;
+        };
+        target_evidence_mac(&self.secret, snapshot)
+            .verify_slice(&evidence.0)
+            .is_ok()
+    }
+
+    #[allow(dead_code)] // Future native target observer consumes this seam.
+    pub(crate) fn verifies_observed_target_utf16(
+        &self,
+        observed_label_utf16: &[u16],
+        snapshot: &UiSnapshot,
+    ) -> bool {
+        target_label_matches(&self.secret, observed_label_utf16) && self.verifies_snapshot(snapshot)
+    }
+}
+
+impl fmt::Debug for TargetBindingPermit {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("TargetBindingPermit(<redacted>)")
+    }
+}
+
+fn target_label_tag_from_str(key: &[u8; 32], label: &str) -> [u8; 32] {
+    let mut mac = HmacSha256::new_from_slice(key).expect("SHA-256 HMAC accepts a 32-byte key");
+    mac.update(TARGET_LABEL_DOMAIN);
+    mac.update(&u64_len(label.encode_utf16().count()).to_le_bytes());
+    for unit in label.encode_utf16() {
+        mac.update(&unit.to_le_bytes());
+    }
+    mac.finalize().into_bytes().into()
+}
+
+fn target_label_matches(secret: &TargetBindingSecret, label_utf16: &[u16]) -> bool {
+    target_label_mac(&secret.key, label_utf16)
+        .verify_slice(&secret.expected_label_tag)
+        .is_ok()
+}
+
+fn target_label_mac(key: &[u8; 32], label_utf16: &[u16]) -> HmacSha256 {
+    let mut mac = HmacSha256::new_from_slice(key).expect("SHA-256 HMAC accepts a 32-byte key");
+    mac.update(TARGET_LABEL_DOMAIN);
+    mac.update(&u64_len(label_utf16.len()).to_le_bytes());
+    for unit in label_utf16 {
+        mac.update(&unit.to_le_bytes());
+    }
+    mac
+}
+
+fn target_evidence_tag(secret: &TargetBindingSecret, snapshot: &UiSnapshot) -> [u8; 32] {
+    target_evidence_mac(secret, snapshot)
+        .finalize()
+        .into_bytes()
+        .into()
+}
+
+fn target_evidence_mac(secret: &TargetBindingSecret, snapshot: &UiSnapshot) -> HmacSha256 {
+    let mut mac =
+        HmacSha256::new_from_slice(&secret.key).expect("SHA-256 HMAC accepts a 32-byte key");
+    mac.update(TARGET_EVIDENCE_DOMAIN);
+    mac.update(&secret.expected_label_tag);
+    update_snapshot_binding(&mut mac, snapshot);
+    mac
+}
+
+fn update_snapshot_binding(mac: &mut HmacSha256, snapshot: &UiSnapshot) {
+    update_byte(mac, platform_code(snapshot.app.platform));
+    update_bool(mac, snapshot.app.app_running);
+    match snapshot.app.process.as_ref() {
+        Some(process) => {
+            update_byte(mac, 1);
+            mac.update(&process.pid.to_le_bytes());
+            update_str(mac, &process.executable);
+            update_option_u32(mac, process.session_id);
+        }
+        None => update_byte(mac, 0),
+    }
+    update_option_str(mac, snapshot.app.app_version.as_deref());
+    update_bool(mac, snapshot.app.interactive_session_match);
+    update_bool(mac, snapshot.app.integrity_compatible);
+    update_bool(mac, snapshot.app.known_ui_profile);
+    mac.update(&u64_len(snapshot.app.top_level_window_count).to_le_bytes());
+    update_bool(mac, snapshot.app.modal_present);
+
+    update_byte(mac, target_code(snapshot.target.kind));
+    update_bool(mac, snapshot.target.self_chat_verified);
+    update_bool(mac, snapshot.target.exact_match);
+    update_bool(mac, snapshot.target.unique_match);
+    update_option_str(mac, snapshot.target.window.as_deref());
+    update_option_str(mac, snapshot.target.composer.as_deref());
+    mac.update(&snapshot.target.observed_at_unix_ms.to_le_bytes());
+    mac.update(&snapshot.target.expires_at_unix_ms.to_le_bytes());
+
+    update_bool(mac, snapshot.input.present);
+    update_bool(mac, snapshot.input.unique);
+    update_bool(mac, snapshot.input.enabled);
+    update_bool(mac, snapshot.input.writable);
+    update_bool(mac, snapshot.input.draft_empty);
+    update_bool(mac, snapshot.input.focused);
+    update_option_str(mac, snapshot.input.selector_profile_id.as_deref());
+}
+
+fn update_byte(mac: &mut HmacSha256, value: u8) {
+    mac.update(&[value]);
+}
+
+fn update_bool(mac: &mut HmacSha256, value: bool) {
+    update_byte(mac, u8::from(value));
+}
+
+fn update_option_u32(mac: &mut HmacSha256, value: Option<u32>) {
+    match value {
+        Some(value) => {
+            update_byte(mac, 1);
+            mac.update(&value.to_le_bytes());
+        }
+        None => update_byte(mac, 0),
+    }
+}
+
+fn update_option_str(mac: &mut HmacSha256, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            update_byte(mac, 1);
+            update_str(mac, value);
+        }
+        None => update_byte(mac, 0),
+    }
+}
+
+fn update_str(mac: &mut HmacSha256, value: &str) {
+    mac.update(&u64_len(value.len()).to_le_bytes());
+    mac.update(value.as_bytes());
+}
+
+fn u64_len(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+fn platform_code(value: UiPlatform) -> u8 {
+    match value {
+        UiPlatform::Macos => 1,
+        UiPlatform::Windows => 2,
+        UiPlatform::Unsupported => 3,
+    }
+}
+
+fn target_code(value: TargetKind) -> u8 {
+    match value {
+        TargetKind::SelfChat => 1,
+        TargetKind::Other => 2,
+    }
 }
 
 /// A message value that cannot leak through `Debug`, `Display`, or serde.
@@ -232,6 +536,7 @@ impl Drop for TransactionCorrelation {
 pub struct ApprovedSend {
     intent: SendIntent,
     snapshot: UiSnapshot,
+    target_binding: TargetBindingPermit,
     approved_at_unix_ms: u64,
     execution_claimed: AtomicBool,
     transaction_correlation: Mutex<Option<TransactionCorrelation>>,
@@ -242,6 +547,7 @@ impl ApprovedSend {
     pub(crate) fn from_policy(
         intent: SendIntent,
         snapshot: UiSnapshot,
+        target_binding: TargetBindingPermit,
         approved_at_unix_ms: u64,
         transaction_correlation: [u8; 16],
         _token: ApprovalToken,
@@ -249,6 +555,7 @@ impl ApprovedSend {
         Ok(Self {
             intent,
             snapshot,
+            target_binding,
             approved_at_unix_ms,
             execution_claimed: AtomicBool::new(false),
             transaction_correlation: Mutex::new(Some(TransactionCorrelation::from_policy(
@@ -279,6 +586,26 @@ impl ApprovedSend {
 
     pub fn approved_at_unix_ms(&self) -> u64 {
         self.approved_at_unix_ms
+    }
+
+    /// Confirms that the policy-carried permit validates the exact snapshot
+    /// evidence stored in this approval. This is checked again by the guarded
+    /// transaction before any native mutation path can proceed.
+    #[allow(dead_code)] // Consumed by the guarded Windows backend feature.
+    pub(crate) fn target_binding_verified(&self) -> bool {
+        self.target_binding.verifies_snapshot(&self.snapshot)
+    }
+
+    /// Future native target observers use this after an ephemeral UTF-16 read
+    /// and before draft access or mutation. No observed label is retained.
+    #[allow(dead_code)]
+    pub(crate) fn target_binding_matches_observed_utf16(
+        &self,
+        observed_label_utf16: &[u16],
+        snapshot: &UiSnapshot,
+    ) -> bool {
+        self.target_binding
+            .verifies_observed_target_utf16(observed_label_utf16, snapshot)
     }
 
     /// Atomically consumes this approval for its sole mutation attempt.
@@ -327,6 +654,7 @@ impl fmt::Debug for ApprovedSend {
             .field("mode", &self.mode())
             .field("message", &"<redacted>")
             .field("nonce", &"<redacted>")
+            .field("target_binding", &"<redacted>")
             .field("transaction_correlation", &"<redacted>")
             .field("snapshot", &self.snapshot)
             .field("approved_at_unix_ms", &self.approved_at_unix_ms)
@@ -537,6 +865,48 @@ impl ExitCode {
 mod tests {
     use super::*;
 
+    const TARGET_CANARY: &str = "SYNTHETIC_TARGET_CANARY";
+
+    fn target_snapshot() -> UiSnapshot {
+        UiSnapshot {
+            app: AppSnapshot {
+                platform: UiPlatform::Windows,
+                app_running: true,
+                process: Some(ProcessFingerprint {
+                    pid: 7,
+                    executable: "run:11111111111111111111111111111111".to_string(),
+                    session_id: Some(1),
+                }),
+                app_version: Some("synthetic-version".to_string()),
+                interactive_session_match: true,
+                integrity_compatible: true,
+                known_ui_profile: true,
+                top_level_window_count: 1,
+                modal_present: false,
+            },
+            target: ChatTargetSnapshot {
+                kind: TargetKind::SelfChat,
+                self_chat_verified: true,
+                exact_match: true,
+                unique_match: true,
+                window: Some("run:22222222222222222222222222222222".to_string()),
+                composer: Some("run:33333333333333333333333333333333".to_string()),
+                observed_at_unix_ms: 1_000,
+                expires_at_unix_ms: 2_000,
+                target_binding: None,
+            },
+            input: InputSnapshot {
+                present: true,
+                unique: true,
+                enabled: true,
+                writable: true,
+                draft_empty: true,
+                focused: false,
+                selector_profile_id: Some("synthetic-profile".to_string()),
+            },
+        }
+    }
+
     #[test]
     fn secret_message_never_formats_as_plaintext() {
         let secret = SecretMessage::new("OPENKAKAO_CANARY");
@@ -587,5 +957,75 @@ mod tests {
         let json = serde_json::to_string(&report).expect("report should serialize");
         assert!(!json.contains("message"));
         assert!(!json.contains("chat_name"));
+    }
+
+    #[test]
+    fn target_binding_is_exact_redacted_nonserializing_and_state_bound() {
+        let (request, permit) = InspectRequest::bound_self_chat(TARGET_CANARY, [0xab; 32]);
+        assert!(request.requires_target_binding());
+        let request_debug = format!("{request:?}");
+        assert!(!request_debug.contains(TARGET_CANARY));
+        assert!(!request_debug.contains("abababab"));
+        assert!(request_debug.contains("<redacted>"));
+
+        let snapshot = target_snapshot();
+        let wrong_case: Vec<u16> = "synthetic_target_canary".encode_utf16().collect();
+        assert!(request
+            .bind_observed_target_utf16(&wrong_case, &snapshot)
+            .is_none());
+
+        let observed: Vec<u16> = TARGET_CANARY.encode_utf16().collect();
+        let mut bound = snapshot;
+        bound.target.target_binding = request.bind_observed_target_utf16(&observed, &bound);
+        assert!(permit.verifies_snapshot(&bound));
+        assert!(permit.verifies_observed_target_utf16(&observed, &bound));
+
+        let rendered = format!("{bound:?}");
+        let json = serde_json::to_string(&bound).expect("bound snapshot should serialize");
+        for output in [&rendered, &json] {
+            assert!(!output.contains(TARGET_CANARY));
+            assert!(!output.contains("abababab"));
+        }
+        assert!(rendered.contains("TargetBindingEvidence(<redacted>)"));
+        assert!(!json.contains("target_binding"));
+
+        let mut moved = bound.clone();
+        moved.target.composer = Some("run:44444444444444444444444444444444".to_string());
+        assert!(!permit.verifies_snapshot(&moved));
+
+        let (_, different_request_permit) =
+            InspectRequest::bound_self_chat(TARGET_CANARY, [0xcd; 32]);
+        assert!(!different_request_permit.verifies_snapshot(&bound));
+    }
+
+    #[test]
+    fn unbound_inspection_cannot_mint_target_evidence() {
+        let request = InspectRequest::self_chat();
+        let observed: Vec<u16> = TARGET_CANARY.encode_utf16().collect();
+        assert!(!request.requires_target_binding());
+        assert!(request
+            .bind_observed_target_utf16(&observed, &target_snapshot())
+            .is_none());
+    }
+
+    #[test]
+    fn target_binding_never_normalizes_unicode_whitespace_or_surrogates() {
+        const COMPOSED: &str = "SYNTHETIC_CAF\u{00c9}_\u{1f642}";
+        let (request, permit) = InspectRequest::bound_self_chat(COMPOSED, [0x5a; 32]);
+        let mut snapshot = target_snapshot();
+        let exact: Vec<u16> = COMPOSED.encode_utf16().collect();
+        snapshot.target.target_binding = request.bind_observed_target_utf16(&exact, &snapshot);
+        assert!(permit.verifies_snapshot(&snapshot));
+
+        for candidate in [
+            "SYNTHETIC_CAFE\u{0301}_\u{1f642}".encode_utf16().collect(),
+            "SYNTHETIC_CAF\u{00c9}_\u{1f642} ".encode_utf16().collect(),
+            "synthetic_CAF\u{00c9}_\u{1f642}".encode_utf16().collect(),
+            vec![0xd800],
+        ] {
+            assert!(request
+                .bind_observed_target_utf16(&candidate, &target_snapshot())
+                .is_none());
+        }
     }
 }

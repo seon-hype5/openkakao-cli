@@ -273,3 +273,23 @@ release source selects the exact kind/components and signer SPKI. Also require
 the live WinTrust provider state to point back to the exact caller-owned
 data/action/signature-settings objects and report primary verified index zero
 when no secondary signature exists.
+
+## ADR-028: Bind requested and observed targets with ephemeral opaque proof
+
+Do not treat an allowlist match and three target booleans as proof that the
+same target was observed. For every policy inspection, generate a fresh
+32-byte key and derive an exact UTF-16 label tag with domain-separated
+HMAC-SHA-256. Give the probe only an opaque non-cloneable request. It may mint
+evidence only by presenting an exact observed UTF-16 candidate; bind the proof
+to every redacted authorization snapshot field.
+
+Keep the permit policy-owned and carried inside `ApprovedSend`. Evidence has
+no byte accessor, redacts Debug, is omitted by serde, and fails under another
+request key or after any snapshot field changes. Require a separate fresh
+`target_binding_verified` gate before draft access and mutation, so
+self/exact/unique booleans alone never suffice.
+
+This is a synthetic contract, not permission to read a real label. The
+production Windows observer remains unchanged and returns no evidence. Any
+ephemeral native UTF-16 reader, selector measurement, or live observation
+still requires the separately named privacy approval in `ACTIVATION_RFC.md`.

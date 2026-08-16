@@ -474,6 +474,7 @@ fn empty_snapshot(
             composer: None,
             observed_at_unix_ms: observed_at,
             expires_at_unix_ms: expires_at,
+            target_binding: None,
         },
         input: unavailable_input(None),
     }
@@ -560,6 +561,7 @@ fn map_unique_window(
             composer,
             observed_at_unix_ms: observed_at,
             expires_at_unix_ms: expires_at,
+            target_binding: None,
         },
         input,
     }
@@ -819,6 +821,7 @@ mod tests {
         assert!(!snapshot.target.exact_match);
         assert!(!snapshot.target.unique_match);
         assert!(!snapshot.target.self_chat_verified);
+        assert!(snapshot.target.target_binding.is_none());
         assert_eq!(
             snapshot.target.composer.as_deref(),
             Some("run:synthetic-composer")

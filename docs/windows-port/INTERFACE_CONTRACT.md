@@ -9,14 +9,16 @@ The platform facade exports:
 
 - `UiCapabilities`;
 - `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, and `UiSnapshot`;
-- `InspectRequest`, `TargetKind`, and `PlatformProbe`;
+- `InspectRequest`, opaque `TargetBindingEvidence`, `TargetKind`, and
+  `PlatformProbe`;
 - `MessageSender`, `SendIntent`, `SecretMessage`, and `ApprovedSend`;
 - `SendMode`, `SendOutcome`, `UiError`, and `UiErrorKind`; and
 - `ActionReport`, `BackendKind`, `ExitCode`, and exact-match helpers.
 
 Snapshots contain only process/window/composer fingerprints and bounded state.
 Raw room/profile names, draft text, message text, HWNDs, creation FILETIMEs, and
-UIA runtime IDs are excluded.
+UIA runtime IDs are excluded. Target-binding evidence has no byte accessor,
+formats only as redacted, and is skipped by serde, so schema v1 is unchanged.
 
 ## Inspection semantics
 
@@ -29,6 +31,15 @@ room/profile names, or draft text during normal inspection. It may return a
 diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
 states; native/COM failures remain `UiError`. Target identity and draft-empty
 claims stay false in the current production profile.
+
+Policy inspection differs from ordinary doctor inspection only by an opaque,
+request-scoped binding challenge. A probe can mint evidence only by supplying
+an exact observed UTF-16 label to the request. HMAC-SHA-256 binds the match to
+the complete redacted process/window/composer/time/input snapshot; the policy
+retains the key and rejects missing, replayed, mismatched, or moved evidence.
+The configured label is streamed through UTF-16 encoding without a secondary
+buffer. The current Windows probe does not read a label and therefore returns
+no binding evidence.
 
 ## Mutation capability semantics
 
@@ -44,6 +55,11 @@ crate-private atomic one-shot execution claim immediately before its first
 write attempt. Policy then validates the returned outcome against the
 dispatched mode. An incompatible successful result is normalized to
 `SubmissionUncertain`.
+
+An approved operation retains the opaque target-binding permit. The native
+state machine requires independently fresh `target_binding_verified` evidence
+in addition to the prior self/exact/unique flags before draft access or any
+mutation. Current production observation always leaves that evidence false.
 
 The native transaction is compiled only by the default-off
 `windows-ui-write` feature. This feature is not authorization. Runtime also
@@ -103,7 +119,8 @@ a fresh transaction revalidation instead of trusting it as current state.
 `ActionReport` schema version 1 contains action, platform, backend, UI profile,
 target kind, attempted, outcome, evidence, and retry safety. Report fields and
 operation diagnostics are normalized through closed code allowlists. Unknown
-strings become fixed redacted values.
+strings become fixed redacted values. Request keys, label tags, and target
+binding evidence are not serialized.
 
 ## Exit codes
 

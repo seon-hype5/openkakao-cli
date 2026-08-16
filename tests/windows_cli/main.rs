@@ -68,6 +68,7 @@ fn snapshot() -> UiSnapshot {
             composer: Some("synthetic-composer-fingerprint".to_string()),
             observed_at_unix_ms: 1,
             expires_at_unix_ms: 2,
+            target_binding: None,
         },
         input: InputSnapshot {
             present: true,

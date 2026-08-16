@@ -1,12 +1,12 @@
 # Windows port handoff after Wave 2 / I20
 
-Date: 2026-08-16 KST
+Date: 2026-08-17 KST
 
 ## Status
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`f0fe3f2c316166e3abb9c2af9e005f2f4195adc7`. The commit containing this
+`1e11569c69ba2d7fdf5b99f44abc5d33806ae75c`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -92,6 +92,15 @@ mutation path still requires raw enumeration to return exactly one top-level
 window. No live KakaoTalk/UIA call was made while implementing or testing this
 remediation.
 
+The latest offline successor also closes the policy contract gap between a
+configured requested label and independently observed target evidence. Every
+policy inspection now uses a fresh opaque HMAC request; exact UTF-16 evidence
+is bound to the complete redacted snapshot, never serialized, and retained as
+a private approval permit. Fresh transaction state has a fourth independent
+`target_binding_verified` gate. Production has no label observer, emits no
+proof, and remains fail-closed. This is synthetic scaffolding, not target
+profile measurement or live permission.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -113,6 +122,9 @@ remediation.
   `safety.allow_windows_ui_write` flag; macOS `allow_ax_send` cannot authorize
   it.
 - Dry-run is inspection-only by type and reuses one policy snapshot.
+- Policy dry-run/authorization require request-scoped, nonserializing exact
+  observed-target evidence; stale, replayed, normalized, or state-moved proof
+  refuses.
 - Write execution uses a consumed approval lease, a sealed sender, an atomic
   one-shot claim, exact mode/outcome compatibility, and no retry edge.
 - `windows-ui-write` is a real default-off compile boundary. All-feature builds
@@ -137,8 +149,8 @@ write is not reachable:
 2. `allow_windows_ui_write` defaults false;
 3. `WindowsBackend::capabilities()` reports `send_open_chat=false` even in an
    all-feature build;
-4. native `self_chat_verified`, exact-target, and unique-target evidence are
-   always false; and
+4. native `self_chat_verified`, target-binding, exact-target, and unique-target
+   evidence are always false; and
 5. the commit selector is `Unconfigured` and no InvokePattern is acquired.
 
 Thus production stage/commit refuse before stdin or UI inspection in root
@@ -155,11 +167,11 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 165 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 95 passed |
+| `cargo test --locked --lib` | 169 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 96 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
-| `cargo test --locked --test windows_policy` | 23 passed |
+| `cargo test --locked --test windows_policy` | 24 passed |
 | `cargo test --locked --test windows_cli` | 2 passed |
 | `cargo test --locked --all-features --test windows_backend` | 2 passed |
 | closed exact `cli_test` allowlist | 14 passed; 3 live/local-state cases excluded |
@@ -171,7 +183,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 95 passed |
+| release all-feature Windows synthetic tests | 96 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -214,8 +226,10 @@ contracts. It contains no selector values and authorizes no live work.
 the reviewed `windows` 0.62.2 feature/API/ownership inventory for offline
 implementation; it likewise authorizes no probe or production wiring.
 
-- Design and measure a privacy-safe exact self-chat identity selector without
-  exposing room/profile text.
+- The request/proof and fresh transaction gates for privacy-safe target
+  binding are implemented synthetically. Design and measure the exact native
+  self-chat selector, and add an ephemeral UTF-16 observer only if a separately
+  approved RFC amendment permits it; no room/profile text may be exposed.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
 - Review and complete the proposed privacy-safe durable replay ledger. Its
@@ -248,14 +262,16 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-The offline multiple-window remediation, replay-ledger scaffold,
+The offline multiple-window remediation, target-binding scaffold,
+replay-ledger scaffold,
 explicit-synthetic-base native ledger store, trust-ordered lazy production
 ledger factory, pure executable-trust decision seam, disconnected native trust
 API adapter, and native boundary inventory are implemented and must pass the
 full safe regression matrix. The next safe offline work is an independent
 unsafe audit of the native boundaries, plus a provenance design for a
-repository-owned signed fixture and canonical install-root rule. Neither task
-requires or authorizes a real KakaoTalk path/signature probe.
+repository-owned signed fixture and canonical install-root rule. Further
+synthetic target-binding adversarial review is also permitted. None of these
+tasks requires or authorizes a real KakaoTalk path/signature/label probe.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in
