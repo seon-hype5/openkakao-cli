@@ -98,6 +98,8 @@ nor mutex outlives the transaction invisibly.
 - Signing and canonical installation-root verification are absent.
 - Modal evidence remains narrower than a full application-wide model.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.
+  Read-only discovery is process-wide single-flight, so one timed-out worker
+  blocks later probes instead of allowing retained workers to accumulate.
 - Cross-process exclusion exists, but durable cross-process replay history is
   not yet designed.
 

@@ -11,7 +11,10 @@ mod native;
 mod transaction;
 
 use std::fmt;
-use std::sync::mpsc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rand::{rngs::OsRng, RngCore};
@@ -30,6 +33,7 @@ const TOP_LEVEL_CLASS: &str = "EVA_Window_Dblclk";
 const COMPOSER_CLASS: &str = "RICHEDIT50W";
 const COMPOSER_AUTOMATION_ID: &str = "1006";
 const UIA_EDIT_CONTROL_TYPE: i32 = 50_004;
+static READ_ONLY_PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileVersion {
@@ -235,6 +239,32 @@ struct NativeInspection {
     window: WindowDiscovery,
 }
 
+/// Process-wide single-flight guard for the detached read-only worker. A UIA
+/// provider call cannot be safely cancelled after entry, so a timed-out worker
+/// retains this lease until it actually returns. This prevents repeated probes
+/// (including through newly constructed backends) from accumulating workers.
+struct ReadOnlyProbeLease<'flag>(&'flag AtomicBool);
+
+impl<'flag> ReadOnlyProbeLease<'flag> {
+    fn claim(flag: &'flag AtomicBool) -> Result<Self, UiError> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| Self(flag))
+            .map_err(|_| read_only_timeout_error())
+    }
+}
+
+impl Drop for ReadOnlyProbeLease<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn read_only_timeout_error() -> UiError {
+    let mut error = UiError::new(UiErrorKind::Timeout, "windows_read_only_inspect");
+    error.retry_safe = false;
+    error
+}
+
 /// Per-process backend. Its random key makes every published native identity
 /// an execution-scoped fingerprint rather than a reusable machine identifier.
 pub struct WindowsBackend {
@@ -257,27 +287,30 @@ impl fmt::Debug for WindowsBackend {
 
 impl WindowsBackend {
     fn inspect_on_mta(&self) -> Result<NativeInspection, UiError> {
+        let probe_lease = ReadOnlyProbeLease::claim(&READ_ONLY_PROBE_IN_FLIGHT)?;
         let fingerprints = self.fingerprints;
         let (sender, receiver) = mpsc::sync_channel(1);
-        std::thread::Builder::new()
+        let spawn_result = std::thread::Builder::new()
             .name("openkakao-windows-probe".to_string())
             .spawn(move || {
                 let result = native::inspect(fingerprints);
+                drop(probe_lease);
                 let _ = sender.send(result);
-            })
-            .map_err(|_| {
-                UiError::new(
-                    UiErrorKind::UnsupportedCapability,
-                    "windows_probe_thread_start",
-                )
-            })?;
+            });
+        if spawn_result.is_err() {
+            // `spawn` drops the captured lease on failure. Store explicitly as
+            // defense in depth so a thread-creation error can never strand the
+            // process-wide single-flight flag.
+            READ_ONLY_PROBE_IN_FLIGHT.store(false, Ordering::Release);
+            return Err(UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "windows_probe_thread_start",
+            ));
+        }
 
         match receiver.recv_timeout(INSPECTION_TIMEOUT) {
             Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(UiError::new(
-                UiErrorKind::Timeout,
-                "windows_read_only_inspect",
-            )),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(read_only_timeout_error()),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(UiError::new(
                 UiErrorKind::UnsupportedCapability,
                 "windows_probe_thread_failed",
@@ -584,6 +617,25 @@ mod tests {
             })
             .count();
         assert_eq!(exact_count, 2, "duplicate exact selectors are ambiguous");
+    }
+
+    #[test]
+    fn read_only_probe_is_single_flight_and_timeout_is_not_retryable() {
+        let in_flight = AtomicBool::new(false);
+        let first = ReadOnlyProbeLease::claim(&in_flight)
+            .expect("the first synthetic probe lease must be available");
+
+        let error = match ReadOnlyProbeLease::claim(&in_flight) {
+            Ok(_) => panic!("a second synthetic probe lease must fail closed"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind, UiErrorKind::Timeout);
+        assert_eq!(error.operation, "windows_read_only_inspect");
+        assert!(!error.retry_safe);
+
+        drop(first);
+        assert!(ReadOnlyProbeLease::claim(&in_flight).is_ok());
+        assert!(!read_only_timeout_error().retry_safe);
     }
 
     #[test]

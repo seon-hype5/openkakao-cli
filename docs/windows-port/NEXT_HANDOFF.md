@@ -99,6 +99,9 @@ remediation.
 - Read-only discovery examines at most eight exact-class windows and narrows to
   one only under the exact unique-composer rule; writes retain stricter raw
   top-level uniqueness.
+- Read-only UIA work is process-wide single-flight. A timed-out provider keeps
+  the lease until it returns, further probes create no worker, and the timeout
+  is non-retryable.
 - Inspection is metadata-only and redacted. It does not read titles, UIA
   Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
 - Windows CLI provides `doctor --ui` and stdin-only/opened-only `local-send`,
@@ -152,8 +155,8 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 106 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 26 passed |
+| `cargo test --locked --lib` | 107 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 27 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 23 passed |
@@ -168,7 +171,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 26 passed |
+| release all-feature Windows synthetic tests | 27 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -213,7 +216,8 @@ ports, never KakaoTalk or another desktop application.
 - Add executable-signature and canonical-installation-root evidence.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
-  process after entry.
+  process after entry. Single-flight prevents worker accumulation but one hung
+  worker can block further probes until it returns or the process exits.
 - Run the committed workflow on a GitHub Windows runner and obtain reviewed
   macOS/Linux regression signals before upstream release work.
 - No live selector compatibility, target identity, empty-draft proof, stage

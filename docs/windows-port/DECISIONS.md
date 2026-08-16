@@ -120,3 +120,16 @@ This selector uses only non-content metadata and does not establish self-chat
 identity. The mutation path deliberately does not reuse the narrowing rule: it
 continues to require exactly one raw top-level window before any value read or
 write boundary.
+
+## ADR-018: Keep read-only UIA probes process-wide single-flight
+
+An in-process COM provider call cannot be safely cancelled after entry. Hold a
+process-wide atomic lease for the lifetime of each detached read-only worker,
+including after the caller's eight-second receive deadline. While that lease
+is held, every backend instance refuses a new probe without creating a thread.
+Timeouts are non-retryable. The lease is released only when the native call
+returns or unwinds; thread-creation failure also clears it.
+
+This bounds a provider hang to one retained read-only worker per process. It
+does not claim to cancel the provider and does not change the synchronous,
+joined mutation-worker rule.

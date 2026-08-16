@@ -58,6 +58,12 @@ The Windows backend may:
   dedicated windowless MTA thread; and
 - return run-local fingerprints and structured refusal evidence.
 
+Read-only workers are process-wide single-flight. If a third-party UIA
+provider does not return before the caller's eight-second deadline, the worker
+keeps the lease until the native call actually finishes. Later probes refuse
+without spawning another worker, and timeout is never automatically retried.
+The process does not pretend it can cancel an in-flight COM provider call.
+
 The known profile is KakaoTalk `26.7.0.5255`, top-level class
 `EVA_Window_Dblclk`, and composer class `RICHEDIT50W`, AutomationId `1006`,
 with edit-control metadata. Unknown or ambiguous profiles fail closed.
