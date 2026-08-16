@@ -213,6 +213,12 @@ Adding this boundary requires a dependency-feature RFC for the minimum
 around a verifier trait. No live executable-signature observation is
 authorized by this proposal.
 
+The minimum binding feature set, native call order, allocation ownership, and
+offline test boundary are now frozen in
+[`NATIVE_ACTIVATION_BOUNDARIES.md`](NATIVE_ACTIVATION_BOUNDARIES.md). That
+inventory does not wire either production placeholder or authorize a native
+observation.
+
 ## E. Activation order
 
 1. Review and accept this RFC without changing capability.

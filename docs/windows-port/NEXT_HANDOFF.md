@@ -210,6 +210,9 @@ ports, never KakaoTalk or another desktop application.
 [`ACTIVATION_RFC.md`](ACTIVATION_RFC.md) now defines proposed evidence,
 privacy, durability, crash-recovery, executable-trust, and activation-order
 contracts. It contains no selector values and authorizes no live work.
+[`NATIVE_ACTIVATION_BOUNDARIES.md`](NATIVE_ACTIVATION_BOUNDARIES.md) freezes
+the reviewed `windows` 0.62.2 feature/API/ownership inventory for offline
+implementation; it likewise authorizes no probe or production wiring.
 
 - Design and measure a privacy-safe exact self-chat identity selector without
   exposing room/profile text.
@@ -234,10 +237,12 @@ contracts. It contains no selector values and authorizes no live work.
 
 ## Next permissible step
 
-The offline multiple-window remediation, pure replay-ledger scaffold, and pure
-executable-trust decision seam are implemented and must pass the full safe
-regression matrix. The next safe offline work is a reviewed durable store or
-native trust observer RFC/implementation with no real-path/signature probe.
+The offline multiple-window remediation, pure replay-ledger scaffold, pure
+executable-trust decision seam, and native boundary inventory are implemented
+and must pass the full safe regression matrix. The next safe offline work is
+the inventory's synthetic-base-directory durable store, kept disconnected
+from production, or its fake-adapter trust observer with no real-path/signature
+probe.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

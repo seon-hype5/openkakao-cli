@@ -163,3 +163,17 @@ Do not guess signer or root values from the current machine. Until reviewed
 release provenance supplies them and a separately reviewed native observer is
 implemented, production uses `UnavailableExecutableTrust` and refuses before
 ledger or UI observation. The seam adds no Windows API feature or live probe.
+
+## ADR-021: Freeze native activation APIs before adding bindings
+
+Use the exact `windows` 0.62.2 namespace delta and ownership rules in
+`NATIVE_ACTIVATION_BOUNDARIES.md`. The ledger boundary uses current-user,
+UI-forbidden DPAPI, handle-verified protected ACLs, same-directory
+write-through replacement, and a blocking tombstone for exact stage removal.
+The trust boundary uses a handle-bound final path, fixed local volume and
+reparse refusal, offline/no-UI WinVerifyTrust, explicit secondary-signature
+rejection, and a SHA-256 leaf-SPKI pin.
+
+The inventory is not production wiring. Add APIs in reviewable stages, test
+only synthetic storage/fake trust adapters, and keep both unavailable
+placeholders until their independent review and profile evidence exist.
