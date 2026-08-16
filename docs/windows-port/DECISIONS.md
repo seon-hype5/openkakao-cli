@@ -123,16 +123,21 @@ write boundary.
 
 ## ADR-018: Keep read-only UIA probes process-wide single-flight
 
-An in-process COM provider call cannot be safely cancelled after entry. Hold a
-process-wide atomic lease for the lifetime of each detached read-only worker,
-including after the caller's eight-second receive deadline. While that lease
-is held, every backend instance refuses a new probe without creating a thread.
-Timeouts are non-retryable. The lease is released only when the native call
-returns or unwinds; thread-creation failure also clears it.
+At adoption, the probe had no cancellation handshake for an in-process COM
+provider call. Hold a process-wide atomic lease for the lifetime of each
+detached read-only worker, including after the caller's eight-second receive
+deadline. While that lease is held, every backend instance refuses a new probe
+without creating a thread. Timeouts are non-retryable. The lease is released
+only when the native call returns or unwinds; thread-creation failure also
+clears it.
 
 This bounds a provider hang to one retained read-only worker per process. It
 does not claim to cancel the provider and does not change the synchronous,
 joined mutation-worker rule.
+
+ADR-037 later adds one bounded client-side cancellation request while
+preserving this single-flight lease and non-retry rule for unsupported or
+still-running providers.
 
 ## ADR-019: Compile a pure replay state machine but fail closed without storage
 
@@ -473,3 +478,36 @@ generic owner-chain rule cannot recognize unowned custom dialogs or overlays
 drawn inside the selected window, so those remain future negative measurement
 requirements. The decision adds no selector, write capability, live
 authorization, or KakaoTalk observation.
+
+## ADR-037: Request cancellation for timed-out read-only COM calls
+
+Enable COM call cancellation on the fresh read-only MTA worker before any
+inspection call, then publish that worker's OS thread ID to the caller. Treat
+thread creation, cancellation readiness, and inspection as one eight-second
+budget. The caller grants one inspection permit only after receiving readiness
+within that budget, and the worker rechecks the budget before native entry.
+Closing the permit on an earlier timeout prevents a racing readiness event
+from starting late work. If the deadline expires after readiness, keep the
+worker blocked on a release channel while the caller makes exactly one
+`CoCancelCall(thread_id, 0)` request. Release and detach only after that
+request. This ordering prevents thread-ID reuse from directing cancellation at
+an unrelated COM call. Catch a post-readiness Rust unwind as a fixed worker
+failure so it follows the same pinned lifetime.
+
+Pair every successful `CoEnableCallCancellation` with one
+`CoDisableCallCancellation` attempt while the worker apartment is live;
+`CoUninitialize` resets the fresh thread even if disable reports failure. A
+normal completion releases and joins the worker before returning. Continue to
+return the same non-retryable timeout after a cancellation request and ignore
+late results.
+
+This is a client-side containment request, not proof that provider work
+stopped. Standard-marshaled synchronous calls may unblock, while a custom
+marshaler may provide no cancel object and a server may continue processing.
+The process-wide lease therefore remains owned by the worker until it actually
+returns. Restrict cancellation to metadata-only inspection; the synchronous,
+joined mutation worker is never cancellation-enabled. Pure tests cover the
+total budget, pre-readiness permit closure, terminal HRESULT classification,
+and thread-release ordering without calling COM or a desktop API. This
+decision adds no dependency feature, selector, capability, live permission,
+or KakaoTalk observation.

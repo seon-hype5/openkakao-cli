@@ -17,10 +17,10 @@ use std::time::Instant;
 
 #[cfg(feature = "windows-ui-write")]
 use windows::core::BSTR;
-use windows::core::{w, Error as WindowsError, BOOL, PCWSTR, PWSTR};
+use windows::core::{w, Error as WindowsError, BOOL, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, SetLastError, ERROR_SUCCESS, E_ACCESSDENIED, FILETIME, HANDLE, HWND,
-    LPARAM,
+    LPARAM, RPC_E_CALL_CANCELED, RPC_E_CALL_COMPLETE, RPC_E_CHANGED_MODE,
 };
 #[cfg(feature = "windows-ui-write")]
 use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
@@ -32,14 +32,16 @@ use windows::Win32::Storage::FileSystem::{
     GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+    CoCancelCall, CoCreateInstance, CoDisableCallCancellation, CoEnableCallCancellation,
+    CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
 };
 use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
 #[cfg(feature = "windows-ui-write")]
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, GetProcessTimes, OpenProcess, OpenProcessToken,
-    QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, GetProcessTimes, OpenProcess,
+    OpenProcessToken, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
@@ -83,26 +85,127 @@ const PROCESS_PATH_BUFFER_UNITS: usize = 32_768;
 const FIXED_FILE_INFO_SIGNATURE: u32 = 0xFEEF_04BD;
 const MAX_READ_ONLY_WINDOW_CANDIDATES: usize = 8;
 
-pub(super) fn inspect(fingerprints: FingerprintKey) -> Result<NativeInspection, UiError> {
+pub(super) fn inspect(
+    fingerprints: FingerprintKey,
+    await_inspection_permit: impl FnOnce(u32) -> Result<(), UiError>,
+) -> Result<NativeInspection, UiError> {
     // The caller creates a fresh, windowless worker thread for every probe.
     // Every successful S_OK/S_FALSE initialization is balanced by this guard,
     // and no COM interface leaves the scope guarded by `_apartment`.
     let _apartment = ComApartment::initialize_mta()?;
-    let windows = enumerate_top_level_windows()?;
+    let cancellation = ComCallCancellation::enable()?;
+    // SAFETY: GetCurrentThreadId has no failure result and returns the ID of
+    // this still-live worker. The caller pins this thread until completion or
+    // its single cancellation request, preventing ID reuse during CoCancelCall.
+    let thread_id = unsafe { GetCurrentThreadId() };
+    if thread_id == 0 {
+        return Err(UiError::new(
+            UiErrorKind::UnsupportedCapability,
+            "windows_probe_thread_failed",
+        ));
+    }
+    await_inspection_permit(thread_id)?;
 
-    let window = match windows.len() {
-        0 => WindowDiscovery::Absent,
-        count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => WindowDiscovery::Ambiguous(count),
-        _ => {
-            let mut inspected = Vec::with_capacity(windows.len());
-            for hwnd in windows {
-                inspected.push(inspect_unique_window(hwnd, fingerprints)?);
+    let inspection = (|| {
+        let windows = enumerate_top_level_windows()?;
+
+        let window = match windows.len() {
+            0 => WindowDiscovery::Absent,
+            count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => WindowDiscovery::Ambiguous(count),
+            _ => {
+                let mut inspected = Vec::with_capacity(windows.len());
+                for hwnd in windows {
+                    inspected.push(inspect_unique_window(hwnd, fingerprints)?);
+                }
+                select_read_only_window(inspected)
             }
-            select_read_only_window(inspected)
-        }
+        };
+
+        Ok(NativeInspection { window })
+    })();
+
+    // Disable while the apartment is still initialized. A disable failure
+    // overrides apparent inspection success; CoUninitialize still resets the
+    // fresh worker thread during scope exit.
+    cancellation.disable()?;
+    inspection
+}
+
+pub(super) fn cancel_read_only_call(thread_id: u32) -> bool {
+    if thread_id == 0 {
+        return false;
+    }
+
+    // SAFETY: the reserved pointer is null. Temporarily initialize an
+    // uninitialized caller thread as MTA because CoCancelCall is itself a COM
+    // API. RPC_E_CHANGED_MODE proves that the caller already has another valid
+    // apartment, which is also sufficient for this call.
+    let initialization = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let _owned_apartment = if initialization.is_ok() {
+        Some(ComApartment)
+    } else if initialization == RPC_E_CHANGED_MODE {
+        None
+    } else {
+        return false;
     };
 
-    Ok(NativeInspection { window })
+    // SAFETY: `thread_id` was reported by a cancellation-enabled worker and
+    // remains pinned by the caller's release channel. A zero-second timeout
+    // requests cancellation without waiting for provider-side completion.
+    match unsafe { CoCancelCall(thread_id, 0) } {
+        Ok(()) => true,
+        Err(error) => cancellation_error_is_terminal(error.code()),
+    }
+}
+
+fn cancellation_error_is_terminal(code: HRESULT) -> bool {
+    code == RPC_E_CALL_COMPLETE || code == RPC_E_CALL_CANCELED
+}
+
+struct ComCallCancellation {
+    active: bool,
+}
+
+impl ComCallCancellation {
+    fn enable() -> Result<Self, UiError> {
+        // SAFETY: the reserved pointer is null as required, and the worker's
+        // COM apartment is already initialized. A successful enable is paired
+        // with one disable or the Drop fallback on unwind.
+        unsafe { CoEnableCallCancellation(None) }
+            .map(|()| Self { active: true })
+            .map_err(|_| {
+                UiError::new(
+                    UiErrorKind::UnsupportedCapability,
+                    "windows_com_call_cancellation_enable",
+                )
+            })
+    }
+
+    fn disable(mut self) -> Result<(), UiError> {
+        // Consume the one allowed disable attempt before entering native code;
+        // CoUninitialize resets cancellation when this fresh worker exits even
+        // if the call itself reports failure.
+        self.active = false;
+        // SAFETY: the reserved pointer is null, this is the enabling thread,
+        // and the COM apartment remains initialized until after this returns.
+        unsafe { CoDisableCallCancellation(None) }.map_err(|_| {
+            UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "windows_com_call_cancellation_disable",
+            )
+        })
+    }
+}
+
+impl Drop for ComCallCancellation {
+    fn drop(&mut self) {
+        if self.active {
+            self.active = false;
+            // SAFETY: Drop runs on the same fresh worker before its apartment
+            // guard. This fallback is used only during early return or unwind.
+            let _ = unsafe { CoDisableCallCancellation(None) };
+        }
+    }
 }
 
 struct ComApartment;
@@ -1882,6 +1985,14 @@ fn map_windows_error(error: WindowsError, operation: &'static str) -> UiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancellation_classifier_accepts_only_completed_or_already_cancelled_calls() {
+        assert!(cancellation_error_is_terminal(RPC_E_CALL_COMPLETE));
+        assert!(cancellation_error_is_terminal(RPC_E_CALL_CANCELED));
+        assert!(!cancellation_error_is_terminal(E_ACCESSDENIED));
+        assert!(!cancellation_error_is_terminal(HRESULT(0)));
+    }
 
     #[test]
     fn file_version_profile_is_exact() {

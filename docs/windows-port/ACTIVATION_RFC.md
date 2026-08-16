@@ -115,6 +115,29 @@ Negative live measurement for those shapes remains part of future selector
 qualification. This completed offline boundary supplies no Kakao selector,
 does not authorize another L10 attempt, and changes no send capability.
 
+### A.3 Read-only provider timeout containment
+
+Offline contract status: implemented without live observation or activation.
+The fresh MTA inspection worker enables COM call cancellation before native
+inspection and publishes its OS thread ID through an internal readiness event.
+Worker startup and inspection share one eight-second budget. After readiness,
+the caller grants one inspection permit and the worker rechecks the budget
+before native entry; closing that permit prevents a boundary-racing readiness
+event from starting late work. Later expiry causes exactly one zero-wait
+cancellation request while a release channel keeps that thread alive,
+preventing thread-ID reuse from targeting an unrelated call. The caller still
+returns a non-retryable timeout and ignores late results.
+
+This mechanism does not prove provider-side termination. Standard marshaling
+may unblock the client, but custom marshaling may expose no cancel object and a
+server may continue processing. The worker therefore retains the process-wide
+single-flight lease until the native call actually returns; unsupported hangs
+still block later probes rather than accumulating threads. Cancellation is
+restricted to metadata-only inspection and is never enabled for the joined
+mutation worker. Pure duration, HRESULT, and channel-order tests invoke no COM
+or desktop API. This containment adds no selector, target evidence, send
+capability, or live authorization.
+
 ## B. Exact submit selector
 
 A submit profile may be proposed only after target binding is accepted. Its
@@ -357,6 +380,10 @@ No step inherits authorization from an earlier step.
 
 ## Official Windows references
 
+- [CoEnableCallCancellation](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coenablecallcancellation)
+- [CoDisableCallCancellation](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-codisablecallcancellation)
+- [CoCancelCall](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-cocancelcall)
+- [Canceling Method Calls](https://learn.microsoft.com/en-us/windows/win32/com/canceling-method-calls)
 - [WinVerifyTrust](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust)
 - [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data)
 - [WINTRUST_FILE_INFO](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_file_info)

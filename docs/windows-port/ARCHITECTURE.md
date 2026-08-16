@@ -63,10 +63,20 @@ The Windows backend may:
 - return run-local fingerprints and structured refusal evidence.
 
 Read-only workers are process-wide single-flight. If a third-party UIA
-provider does not return before the caller's eight-second deadline, the worker
-keeps the lease until the native call actually finishes. Later probes refuse
-without spawning another worker, and timeout is never automatically retried.
-The process does not pretend it can cancel an in-flight COM provider call.
+provider does not return within the single eight-second startup-and-inspection
+budget, the caller makes one zero-wait `CoCancelCall` request only after the
+worker has enabled COM call cancellation and published its pinned OS thread
+ID. Readiness grants an inspection permit only while the total budget remains,
+and the worker rechecks it before native entry. The caller keeps that thread
+alive through the request so ID reuse cannot target an unrelated call, then
+returns the same non-retryable timeout without consuming a late result.
+
+Standard-marshaled synchronous calls may unblock the client worker, but the
+server may continue and custom marshaling may expose no cancel object. The
+worker therefore keeps the single-flight lease until its native call actually
+returns; later probes refuse without spawning another worker. Cancellation is
+enabled only for this bounded read-only worker. The synchronous mutation
+worker remains joined and does not use this cancellation path.
 
 The known profile is KakaoTalk `26.7.0.5255`, top-level class
 `EVA_Window_Dblclk`, and composer class `RICHEDIT50W`, AutomationId `1006`,

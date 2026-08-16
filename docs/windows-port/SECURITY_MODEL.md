@@ -173,9 +173,15 @@ or write authority.
 - Generic owner-chain evidence does not detect an unowned custom dialog or an
   overlay drawn inside the selected window. Activation needs negative live
   measurements and a reviewed version-specific rule if either shape exists.
-- A blocked third-party UIA provider cannot be safely cancelled in-process.
-  Read-only discovery is process-wide single-flight, so one timed-out worker
-  blocks later probes instead of allowing retained workers to accumulate.
+- A blocked third-party UIA provider receives one zero-wait COM cancellation
+  request after the read-only worker's single eight-second budget expires.
+  Standard marshaling may unblock the client, but custom marshaling may expose
+  no cancel object and a server may continue after cancellation. Read-only
+  discovery therefore remains process-wide single-flight: the lease clears
+  only when the worker really returns, and one unsupported hung call blocks
+  later probes instead of allowing retained workers to accumulate. The worker
+  thread ID stays pinned through the request so it cannot identify a recycled
+  unrelated thread.
 - Cross-process exclusion, the pure replay transition protocol, and a
   policy-owned one-use redacted correlation token exist. A current-user
   DPAPI/protected-ACL/write-through store is synthetically tested only under an

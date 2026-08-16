@@ -32,6 +32,16 @@ diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
 states; native/COM failures remain `UiError`. Target identity and draft-empty
 claims stay false in the current production profile.
 
+Worker startup and native inspection share one eight-second budget. After the
+worker has enabled cancellation and published its pinned thread ID, expiry
+causes exactly one zero-wait COM cancellation request. The public result is
+still `Timeout` with `retry_safe=false`; no completion arriving after the
+deadline is consumed. A provider without a usable cancel object retains the
+process-wide single-flight lease until its call actually returns, so another
+backend instance cannot accumulate a second worker. Expiry before readiness
+cannot target a thread and instead makes the worker stop before inspection
+when it reaches the closed inspection-permit channel.
+
 After exact executable-name verification, `AppSnapshot.modal_present` is true
 for a disabled selected window or a visible, owned, same-process top-level
 popup in the selected window's root-owner group. The scan uses only

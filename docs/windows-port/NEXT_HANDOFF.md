@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`e94801fa9f181e95fc44505ba374b80be3e5ace2`. The commit containing this
+`d4532399d00438eb7489fdb20f06ed95c768c7b3`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -49,11 +49,13 @@ concurrency limit.
 - Shell result ownership before HRESULT interpretation:
   `3b06ecc785acde8fb0b01073ee535c142b8eb0b5`;
 - approval-owned native target verification through fresh/final preflight:
-  `7dfbf0d3b55a9d6b16d690092beac48ebc9993ad`; and
+  `7dfbf0d3b55a9d6b16d690092beac48ebc9993ad`;
 - closed native target-observation state:
-  `36cc84723f9aa6ba4c8e806b5aef57b405a9e494`; and
+  `36cc84723f9aa6ba4c8e806b5aef57b405a9e494`;
 - approval-owned process-local monotonic lifetime enforcement:
-  `e94801fa9f181e95fc44505ba374b80be3e5ace2`.
+  `e94801fa9f181e95fc44505ba374b80be3e5ace2`; and
+- same-process owner-group modal evidence with repeated mutation-boundary
+  checks: `d4532399d00438eb7489fdb20f06ed95c768c7b3`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -196,6 +198,24 @@ classification and mapping tests call no desktop API. Generic owner chains
 still cannot identify an unowned custom dialog or an in-window overlay, so
 future negative live measurement remains required.
 
+The current offline successor also contains timed-out read-only COM calls.
+The fresh MTA worker enables call cancellation and publishes its OS thread ID
+before inspection. Startup and inspection share one eight-second budget; on
+readiness the caller grants one inspection permit and the worker rechecks the
+budget before native entry. Expiry after readiness pins that worker through
+exactly one zero-wait `CoCancelCall` request and still returns the same
+non-retryable timeout. Normal completion disables cancellation and joins. A
+caught post-readiness unwind follows the same pinned lifetime, preventing
+thread-ID reuse from targeting an unrelated COM call.
+
+This request is not proof that provider work stopped. Standard marshaling may
+unblock the client, while custom marshaling may expose no cancel object and a
+server may continue. The worker therefore retains the process-wide
+single-flight lease until its native call actually returns. Cancellation is
+restricted to metadata-only inspection; mutation workers remain synchronous,
+joined, and cancellation-disabled. Pure tests call no native COM or desktop
+API, and no live provider compatibility was measured.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -203,9 +223,11 @@ future negative live measurement remains required.
 - Read-only discovery examines at most eight exact-class windows and narrows to
   one only under the exact unique-composer rule; writes retain stricter raw
   top-level uniqueness.
-- Read-only UIA work is process-wide single-flight. A timed-out provider keeps
-  the lease until it returns, further probes create no worker, and the timeout
-  is non-retryable.
+- Read-only UIA work is process-wide single-flight. Startup and inspection
+  share one eight-second budget. Expiry after cancellation readiness pins the
+  worker through one zero-wait COM cancellation request and returns a
+  non-retryable timeout. Unsupported or still-running providers keep the lease
+  until they return, so further probes create no worker.
 - Inspection is metadata-only and redacted. It does not read titles, UIA
   Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
 - Modal evidence covers a disabled selected window plus visible same-process
@@ -286,8 +308,8 @@ All recorded final-matrix Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 183 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 107 passed |
+| `cargo test --locked --lib` | 187 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 111 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -302,9 +324,9 @@ All recorded final-matrix Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 107 passed |
+| release all-feature Windows synthetic tests | 111 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 44 files, 51 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 45 files, 53 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -331,6 +353,7 @@ its first GitHub-hosted run remains an external integration check.
 - executable-trust known-folder resolutions: 0;
 - KakaoTalk files/databases read: 0;
 - credential/token reads: 0;
+- native COM cancellation calls during implementation/tests: 0;
 - screenshots/UI dumps/process-memory reads/injection/hooks: 0;
 - automatic retries: 0;
 - pushes: 0; and
@@ -385,9 +408,13 @@ implementation; it likewise authorizes no probe or production wiring.
   dialog or an overlay drawn inside the selected window. Future activation
   needs negative live measurements and a reviewed version-specific rule if
   either shape exists.
-- A third-party UIA provider can hang; COM calls cannot be safely cancelled in
-  process after entry. Single-flight prevents worker accumulation but one hung
-  worker can block further probes until it returns or the process exits.
+- A third-party UIA provider can hang. The read-only path now makes one pinned,
+  zero-wait COM cancellation request, but custom marshaling may not expose a
+  cancel object and provider-side work may continue. Single-flight still
+  prevents worker accumulation, while one unsupported hung worker can block
+  later probes until it returns or the process exits. Native cancellation
+  compatibility and performance have not been measured against a live UIA
+  provider.
 - Run the committed workflow on a GitHub Windows runner and obtain reviewed
   macOS/Linux regression signals before upstream release work.
 - No live selector compatibility, target identity, empty-draft proof, stage
@@ -404,12 +431,14 @@ VERIFY/CLOSE tests, guarded root derivation, and exact Shell allocation-lifetime
 tests, approval-owned native target-permit plumbing, a closed native
 target-observation state, and an approval-owned monotonic deadline are
 implemented. Conventional same-process owner-group popup evidence and repeated
-mutation-boundary modal checks are now implemented as well, and all pass the
-full safe regression matrix. The next safe work is a second independent unsafe
-review and a clean pinned-Windows CI reproduction, followed separately by
-reviewed production signer/root provenance. None of these tasks requires or
-authorizes a real KakaoTalk path or signature, a live label probe, or a
-trust-store change.
+mutation-boundary modal checks are now implemented as well. Read-only COM
+cancellation now uses a pinned worker-thread handshake while preserving
+single-flight fallback for unsupported providers. All pass the full safe
+regression matrix. The next safe work is a second independent unsafe review
+and a clean pinned-Windows CI reproduction, followed separately by reviewed
+production signer/root provenance. None of these tasks requires or authorizes
+a real KakaoTalk path or signature, a live label probe, or a trust-store
+change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

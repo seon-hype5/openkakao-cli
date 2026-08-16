@@ -78,6 +78,11 @@ performs no UI mutation, and cannot read user or application state.
 - Modal tests pass only synthetic HWND/PID/visibility/owner-group numbers to a
   pure classifier and map a synthetic native snapshot. They never call
   `EnumWindows`, `GetWindow`, `GetAncestor`, UIA, or another desktop API.
+- Read-only cancellation tests use only saturated `Duration` arithmetic,
+  documented HRESULT constants, and coordinated Rust channels. They prove the
+  pre-readiness inspection permit closes and the synthetic worker is still
+  pinned when cancellation is requested, but never call
+  `CoEnableCallCancellation`, `CoCancelCall`, UIA, or a desktop API.
 - There is no service container, desktop session preparation, application
   installation, account setup, network login, or secret injection.
 - `RUST_BACKTRACE=0` prevents failure backtraces from becoming accidental

@@ -517,6 +517,18 @@ fn error_operation_is_closed_and_unknown_values_are_redacted() {
     );
     assert!(modal.stdout.contains("windows_mutation_modal"));
     assert!(modal.stderr.contains("windows_mutation_modal"));
+
+    for operation in [
+        "windows_com_call_cancellation_enable",
+        "windows_com_call_cancellation_disable",
+    ] {
+        let cancellation = render_error(
+            &UiError::new(UiErrorKind::UnsupportedCapability, operation),
+            OutputMode::Json,
+        );
+        assert!(cancellation.stdout.contains(operation));
+        assert!(cancellation.stderr.contains(operation));
+    }
 }
 
 #[test]

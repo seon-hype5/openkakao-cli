@@ -21,11 +21,12 @@ mod native;
 mod transaction;
 
 use std::fmt;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
@@ -250,10 +251,16 @@ struct NativeInspection {
     window: WindowDiscovery,
 }
 
-/// Process-wide single-flight guard for the detached read-only worker. A UIA
-/// provider call cannot be safely cancelled after entry, so a timed-out worker
-/// retains this lease until it actually returns. This prevents repeated probes
-/// (including through newly constructed backends) from accumulating workers.
+enum ReadOnlyProbeEvent {
+    CancellationReady(u32),
+    Complete(Result<NativeInspection, UiError>),
+}
+
+/// Process-wide single-flight guard for the detached read-only worker. A
+/// cancellation request may be unsupported or may not stop provider-side
+/// work, so a timed-out worker retains this lease until it actually returns.
+/// This prevents repeated probes (including through newly constructed
+/// backends) from accumulating workers.
 struct ReadOnlyProbeLease<'flag>(&'flag AtomicBool);
 
 impl<'flag> ReadOnlyProbeLease<'flag> {
@@ -274,6 +281,102 @@ fn read_only_timeout_error() -> UiError {
     let mut error = UiError::new(UiErrorKind::Timeout, "windows_read_only_inspect");
     error.retry_safe = false;
     error
+}
+
+fn read_only_worker_failed_error() -> UiError {
+    UiError::new(
+        UiErrorKind::UnsupportedCapability,
+        "windows_probe_thread_failed",
+    )
+}
+
+fn remaining_inspection_timeout(budget: Duration, elapsed: Duration) -> Duration {
+    budget.saturating_sub(elapsed)
+}
+
+fn finish_read_only_probe(
+    worker: std::thread::JoinHandle<()>,
+    release_sender: mpsc::Sender<()>,
+    result: Result<NativeInspection, UiError>,
+) -> Result<NativeInspection, UiError> {
+    // The worker waits only to keep its thread ID alive until the caller has
+    // either consumed the result or attempted cancellation. Dropping the last
+    // sender releases that wait before the join.
+    drop(release_sender);
+    worker.join().map_err(|_| read_only_worker_failed_error())?;
+    result
+}
+
+fn await_read_only_probe(
+    started: Instant,
+    timeout: Duration,
+    worker: std::thread::JoinHandle<()>,
+    release_sender: mpsc::Sender<()>,
+    inspection_sender: mpsc::Sender<()>,
+    event_receiver: mpsc::Receiver<ReadOnlyProbeEvent>,
+    cancel: impl FnOnce(u32),
+) -> Result<NativeInspection, UiError> {
+    let first =
+        event_receiver.recv_timeout(remaining_inspection_timeout(timeout, started.elapsed()));
+    let thread_id = match first {
+        Ok(ReadOnlyProbeEvent::Complete(result)) => {
+            return finish_read_only_probe(worker, release_sender, result);
+        }
+        Ok(ReadOnlyProbeEvent::CancellationReady(thread_id)) => thread_id,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // Close the inspection permit before releasing the worker. A
+            // readiness event racing this timeout can then never authorize
+            // native inspection after the caller has returned.
+            drop(inspection_sender);
+            drop(release_sender);
+            drop(worker);
+            return Err(read_only_timeout_error());
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return finish_read_only_probe(
+                worker,
+                release_sender,
+                Err(read_only_worker_failed_error()),
+            );
+        }
+    };
+
+    if inspection_sender.send(()).is_err() {
+        return finish_read_only_probe(
+            worker,
+            release_sender,
+            Err(read_only_worker_failed_error()),
+        );
+    }
+    drop(inspection_sender);
+
+    match event_receiver.recv_timeout(remaining_inspection_timeout(timeout, started.elapsed())) {
+        Ok(ReadOnlyProbeEvent::Complete(result)) => {
+            finish_read_only_probe(worker, release_sender, result)
+        }
+        Ok(ReadOnlyProbeEvent::CancellationReady(_)) => {
+            // Production emits readiness exactly once. Preserve the first
+            // thread ID, request cancellation while that worker is pinned,
+            // and refuse this inconsistent event stream.
+            cancel(thread_id);
+            drop(release_sender);
+            drop(worker);
+            Err(read_only_worker_failed_error())
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // The release sender deliberately stays alive through this call
+            // so the target thread ID cannot be recycled underneath
+            // CoCancelCall. Failure or unsupported custom marshaling keeps
+            // the existing single-flight lease until the worker returns.
+            cancel(thread_id);
+            drop(release_sender);
+            drop(worker);
+            Err(read_only_timeout_error())
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            finish_read_only_probe(worker, release_sender, Err(read_only_worker_failed_error()))
+        }
+    }
 }
 
 #[cfg(any(feature = "windows-ui-write", test))]
@@ -308,33 +411,64 @@ impl WindowsBackend {
     fn inspect_on_mta(&self) -> Result<NativeInspection, UiError> {
         let probe_lease = ReadOnlyProbeLease::claim(&READ_ONLY_PROBE_IN_FLIGHT)?;
         let fingerprints = self.fingerprints;
-        let (sender, receiver) = mpsc::sync_channel(1);
+        let started = Instant::now();
+        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::channel::<()>();
+        let (inspection_sender, inspection_receiver) = mpsc::channel::<()>();
         let spawn_result = std::thread::Builder::new()
             .name("openkakao-windows-probe".to_string())
             .spawn(move || {
-                let result = native::inspect(fingerprints);
-                drop(probe_lease);
-                let _ = sender.send(result);
-            });
-        if spawn_result.is_err() {
-            // `spawn` drops the captured lease on failure. Store explicitly as
-            // defense in depth so a thread-creation error can never strand the
-            // process-wide single-flight flag.
-            READ_ONLY_PROBE_IN_FLIGHT.store(false, Ordering::Release);
-            return Err(UiError::new(
-                UiErrorKind::UnsupportedCapability,
-                "windows_probe_thread_start",
-            ));
-        }
+                // Keep a post-readiness panic from letting the OS recycle this
+                // thread ID before the caller has made its cancellation
+                // decision. Native RAII guards still unwind before the fixed
+                // error is published.
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    native::inspect(fingerprints, |thread_id| {
+                        event_sender
+                            .send(ReadOnlyProbeEvent::CancellationReady(thread_id))
+                            .map_err(|_| read_only_worker_failed_error())?;
+                        inspection_receiver
+                            .recv()
+                            .map_err(|_| read_only_worker_failed_error())?;
+                        if started.elapsed() >= INSPECTION_TIMEOUT {
+                            return Err(read_only_timeout_error());
+                        }
+                        Ok(())
+                    })
+                }))
+                .unwrap_or_else(|_| Err(read_only_worker_failed_error()));
+                let _ = event_sender.send(ReadOnlyProbeEvent::Complete(result));
 
-        match receiver.recv_timeout(INSPECTION_TIMEOUT) {
-            Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(read_only_timeout_error()),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(UiError::new(
-                UiErrorKind::UnsupportedCapability,
-                "windows_probe_thread_failed",
-            )),
-        }
+                // Keep this OS thread alive until the caller has either
+                // consumed completion or issued its one cancellation request.
+                // This prevents thread-ID reuse from targeting an unrelated
+                // COM call during the timeout race.
+                let _ = release_receiver.recv();
+                drop(probe_lease);
+            });
+        let worker = match spawn_result {
+            Ok(worker) => worker,
+            Err(_) => {
+                // `spawn` owns and drops its closure on failure, so the
+                // captured lease clears the flag without a racy manual store.
+                return Err(UiError::new(
+                    UiErrorKind::UnsupportedCapability,
+                    "windows_probe_thread_start",
+                ));
+            }
+        };
+
+        await_read_only_probe(
+            started,
+            INSPECTION_TIMEOUT,
+            worker,
+            release_sender,
+            inspection_sender,
+            event_receiver,
+            |thread_id| {
+                let _ = native::cancel_read_only_call(thread_id);
+            },
+        )
     }
 
     #[cfg(feature = "windows-ui-write")]
@@ -586,6 +720,7 @@ fn unavailable_input(profile_id: Option<&str>) -> InputSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn process(version: Option<FileVersion>) -> NativeProcess {
         NativeProcess {
@@ -658,6 +793,123 @@ mod tests {
         drop(first);
         assert!(ReadOnlyProbeLease::claim(&in_flight).is_ok());
         assert!(!read_only_timeout_error().retry_safe);
+    }
+
+    #[test]
+    fn read_only_probe_startup_and_inspection_share_one_timeout_budget() {
+        assert_eq!(
+            remaining_inspection_timeout(INSPECTION_TIMEOUT, Duration::ZERO),
+            INSPECTION_TIMEOUT
+        );
+        assert_eq!(
+            remaining_inspection_timeout(
+                INSPECTION_TIMEOUT,
+                INSPECTION_TIMEOUT - Duration::from_millis(1)
+            ),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            remaining_inspection_timeout(INSPECTION_TIMEOUT, INSPECTION_TIMEOUT),
+            Duration::ZERO
+        );
+        assert_eq!(
+            remaining_inspection_timeout(
+                INSPECTION_TIMEOUT,
+                INSPECTION_TIMEOUT + Duration::from_secs(1)
+            ),
+            Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn read_only_timeout_cancels_before_releasing_the_worker_thread() {
+        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (inspection_sender, inspection_receiver) = mpsc::channel();
+        let (published_sender, published_receiver) = mpsc::sync_channel(0);
+        let (done_sender, done_receiver) = mpsc::sync_channel(0);
+        let released = Arc::new(AtomicBool::new(false));
+        let released_by_worker = Arc::clone(&released);
+
+        let worker = std::thread::spawn(move || {
+            event_sender
+                .send(ReadOnlyProbeEvent::CancellationReady(42))
+                .expect("the synthetic readiness receiver must remain live");
+            published_sender
+                .send(())
+                .expect("the synthetic publication receiver must remain live");
+            inspection_receiver
+                .recv()
+                .expect("the synthetic inspection permit must be published");
+            let _ = release_receiver.recv();
+            released_by_worker.store(true, Ordering::Release);
+            let _ = done_sender.send(());
+        });
+        published_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the synthetic worker must publish readiness");
+
+        let cancellation_called = Arc::new(AtomicBool::new(false));
+        let cancellation_observation = Arc::clone(&cancellation_called);
+        let released_during_cancellation = Arc::clone(&released);
+        let started = Instant::now();
+        let error = match await_read_only_probe(
+            started,
+            Duration::ZERO,
+            worker,
+            release_sender,
+            inspection_sender,
+            event_receiver,
+            move |thread_id| {
+                assert_eq!(thread_id, 42);
+                assert!(!released_during_cancellation.load(Ordering::Acquire));
+                assert!(!cancellation_observation.swap(true, Ordering::AcqRel));
+            },
+        ) {
+            Ok(_) => panic!("an expired synthetic probe must time out"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, UiErrorKind::Timeout);
+        assert!(!error.retry_safe);
+        assert!(cancellation_called.load(Ordering::Acquire));
+        done_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("the synthetic worker must be released after cancellation");
+        assert!(released.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn read_only_timeout_before_readiness_closes_the_inspection_permit() {
+        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::channel();
+        let (inspection_sender, inspection_receiver) = mpsc::channel();
+        let (done_sender, done_receiver) = mpsc::sync_channel(0);
+
+        let worker = std::thread::spawn(move || {
+            let _event_sender = event_sender;
+            assert!(inspection_receiver.recv().is_err());
+            assert!(release_receiver.recv().is_err());
+            let _ = done_sender.send(());
+        });
+        let error = match await_read_only_probe(
+            Instant::now(),
+            Duration::ZERO,
+            worker,
+            release_sender,
+            inspection_sender,
+            event_receiver,
+            |_| panic!("a worker without readiness must not be cancelled"),
+        ) {
+            Ok(_) => panic!("an unready synthetic probe must time out"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind, UiErrorKind::Timeout);
+        assert!(!error.retry_safe);
+        done_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("both synthetic worker gates must close after timeout");
     }
 
     #[test]

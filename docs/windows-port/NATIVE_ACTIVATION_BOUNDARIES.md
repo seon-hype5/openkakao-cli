@@ -10,8 +10,9 @@ the default read-only build.
 ## Purpose and non-authorization
 
 This document freezes the minimum Windows namespaces, native call ordering,
-ownership rules, and synthetic-test seams for four activation boundaries:
+ownership rules, and synthetic-test seams for five activation boundaries:
 
+- read-only COM call cancellation;
 - process owner-group modal evidence;
 - the approval-owned native target-binding permit;
 - the trust-ordered lazy production ledger; and
@@ -53,6 +54,10 @@ The modal boundary uses `EnumWindows`, `GetWindowThreadProcessId`,
 `IsWindowVisible`, `GetWindow(GW_OWNER)`, and
 `GetAncestor(GA_ROOTOWNER)` from the already enabled
 `Win32_UI_WindowsAndMessaging` feature, so it adds no dependency feature.
+The read-only cancellation boundary uses `CoEnableCallCancellation`,
+`CoDisableCallCancellation`, and `CoCancelCall` from the already enabled
+`Win32_System_Com` feature plus `GetCurrentThreadId` from the already enabled
+`Win32_System_Threading` feature. It likewise adds no dependency feature.
 
 ## Approval lifetime boundary
 
@@ -74,6 +79,45 @@ This boundary closes the previously recorded clock-rollback lifetime risk. It
 does not make approvals durable across restart, because approvals are already
 nonserializing in-process capabilities. It adds no Windows dependency,
 selector, label observer, trust value, send capability, or live authorization.
+
+## Read-only COM cancellation boundary
+
+Offline status: implemented without a live UI call. A fresh windowless MTA
+worker calls `CoEnableCallCancellation(NULL)` before inspection and reports
+its nonzero `GetCurrentThreadId` value only after enable succeeds. Startup,
+readiness, and inspection consume one eight-second budget. The caller issues
+one inspection permit only after receiving readiness in time, and the worker
+rechecks the deadline before native entry. A timeout closes that permit, so a
+readiness event racing the boundary cannot start late work. A normal result
+disables cancellation while the apartment is initialized, releases the worker,
+and joins it before returning.
+
+On expiry after readiness, the caller retains the only release sender while it
+initializes or reuses its own COM apartment and calls
+`CoCancelCall(worker_thread_id, 0)` exactly once. Holding the release sender
+pins the OS thread ID through that native call. A post-readiness Rust unwind is
+caught, converted to a fixed error, and held under the same protocol. The
+caller then releases and detaches the worker and returns the existing
+non-retryable timeout; it never consumes a late result. Expiry before readiness
+drops the readiness receiver and inspection permit, causing the worker to
+refuse before inspection even if readiness races the timeout.
+
+Only `S_OK`, `RPC_E_CALL_COMPLETE`, and `RPC_E_CALL_CANCELED` are terminal
+request outcomes. Absence of a cancel object, disabled cancellation, or any
+other failure does not release the single-flight lease: the worker owns that
+lease until its native call really returns or unwinds. COM may unblock a
+standard-marshaled client without stopping server work, and custom marshaling
+may not support cancellation. This is acceptable only because inspection is
+metadata-only. The joined mutation worker never enables cancellation and its
+outcome rules do not change.
+
+Enabling cancellation can degrade synchronous marshaled-call performance, so
+its lifetime is restricted to one bounded read-only probe and balanced with
+one disable attempt. `CoUninitialize` resets the fresh thread's cancellation
+state if disable itself fails. Unit tests exercise only saturated duration
+arithmetic, pre-readiness permit closure, HRESULT classification, and a
+channel-coordinated synthetic thread release; they invoke no COM, UIA, window
+enumeration, or application process.
 
 ## Process owner-group modal boundary
 
@@ -440,6 +484,8 @@ SPKI digest and root-relation digest exist, production continues to use
 
 | Resource | Owner | Required release/lifetime rule |
 |---|---|---|
+| Read-only COM apartment/cancellation state | probe worker | every successful `CoInitializeEx` is balanced by `CoUninitialize`; every successful cancellation enable receives one disable attempt while the apartment is live |
+| Published probe thread ID | probe worker plus caller release channel | worker remains alive through the caller's single cancellation request; never persist or expose the ID |
 | Known-folder `PWSTR` | Shell allocator | `CoTaskMemFree` exactly once |
 | DPAPI output/description | Local allocator | zero sensitive span, then `LocalFree` exactly once |
 | `GetSecurityInfo` descriptor | Local allocator | `LocalFree`; owner/DACL/ACE pointers borrow it |
@@ -492,11 +538,15 @@ open the installed KakaoTalk binary.
   sibling-prefix/volume/ADS/device/non-ASCII/depth refusal, and equality with
   the source-static reviewed relation digest without observed-value promotion;
 - synthetic Shell allocation success/failure/path-refusal/NULL ownership with
-  exact matching-release counts and no known-folder call; and
+  exact matching-release counts and no known-folder call;
 - canaries absent from `Debug`, stdout, stderr, JSON, test names, and failure
-  messages; and
+  messages;
 - pure modal owner-group classification plus snapshot suppression, with no
-  `EnumWindows`, owner query, UIA call, or desktop enumeration in tests.
+  `EnumWindows`, owner query, UIA call, or desktop enumeration in tests;
+- saturated read-only timeout arithmetic, pre-readiness permit closure,
+  cancellation HRESULT classification, and channel-coordinated proof that the
+  synthetic worker is still pinned when cancellation is requested, with no
+  native COM call.
 
 Automated tests must not run the product binary, enumerate desktop windows,
 call the production native observer, or access KakaoTalk files. Live L10 and
@@ -532,6 +582,10 @@ all later gates still require a fresh, explicitly named approval.
 
 ## Primary references
 
+- [CoEnableCallCancellation](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-coenablecallcancellation)
+- [CoDisableCallCancellation](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-codisablecallcancellation)
+- [CoCancelCall](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-cocancelcall)
+- [Canceling Method Calls](https://learn.microsoft.com/en-us/windows/win32/com/canceling-method-calls)
 - [EnumWindows](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumwindows)
 - [GetWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindow)
 - [GetAncestor](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor)

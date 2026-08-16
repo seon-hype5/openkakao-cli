@@ -46,6 +46,8 @@ const OPERATION_CODES: &[&str] = &[
     "windows_commit_not_in_wave_1",
     "windows_commit_after_set_value_uncertain",
     "windows_commit_invoke_uncertain",
+    "windows_com_call_cancellation_disable",
+    "windows_com_call_cancellation_enable",
     "windows_com_initialize",
     "windows_config_load",
     "windows_doctor_ui_loco_conflict",

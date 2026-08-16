@@ -63,3 +63,6 @@ enforcement points, and why system-clock rollback can no longer extend TTL.
 [`root-process-modal-evidence.md`](root-process-modal-evidence.md) records the
 same-process owner-group popup scan, composer-evidence suppression, repeated
 mutation-boundary checks, and the residual unowned/custom-overlay limitation.
+[`root-read-only-com-cancellation.md`](root-read-only-com-cancellation.md)
+records the pinned worker-thread cancellation handshake, unchanged
+single-flight fallback, and residual custom-marshaler/provider limitations.
