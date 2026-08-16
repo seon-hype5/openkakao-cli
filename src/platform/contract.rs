@@ -1,4 +1,5 @@
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use zeroize::Zeroize;
@@ -192,6 +193,7 @@ pub struct ApprovedSend {
     intent: SendIntent,
     snapshot: UiSnapshot,
     approved_at_unix_ms: u64,
+    execution_claimed: AtomicBool,
 }
 
 impl ApprovedSend {
@@ -206,6 +208,7 @@ impl ApprovedSend {
             intent,
             snapshot,
             approved_at_unix_ms,
+            execution_claimed: AtomicBool::new(false),
         }
     }
 
@@ -231,6 +234,20 @@ impl ApprovedSend {
 
     pub fn approved_at_unix_ms(&self) -> u64 {
         self.approved_at_unix_ms
+    }
+
+    /// Atomically consumes this approval for its sole mutation attempt.
+    ///
+    /// Guarded platform backends call this only after all pre-mutation checks
+    /// pass and immediately before the first mutation call. A failed attempt
+    /// remains consumed so callers cannot retry an uncertain operation with
+    /// the same capability.
+    #[allow(dead_code)] // Consumed by the guarded Windows backend in Wave 2.
+    pub(crate) fn try_claim_execution(&self) -> Result<(), UiError> {
+        self.execution_claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|_| UiError::new(UiErrorKind::InvalidInput, "approved_send_already_claimed"))
     }
 
     #[allow(dead_code)] // Consumed by the guarded backend beginning in Wave 2.
