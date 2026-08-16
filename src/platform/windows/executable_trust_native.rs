@@ -711,11 +711,32 @@ fn resolve_known_folder_path(kind: InstallRootKind) -> Result<PathBuf, NativeTru
             ptr::from_mut(&mut raw_path),
         )
     };
-    let owned_path = if raw_path.0.is_null() {
-        None
-    } else {
-        Some(OwnedTrustKnownFolderPath(raw_path))
-    };
+    // SAFETY: every non-null pointer is the exact Shell allocation from the
+    // call above and CoTaskMemFree is its matching release. On success, Shell
+    // guarantees a NUL-terminated UTF-16 path.
+    unsafe { resolve_known_folder_result(status, raw_path, release_known_folder_path) }
+}
+
+type KnownFolderPathRelease = unsafe fn(*const c_void);
+
+/// Owns and decodes one raw known-folder result.
+///
+/// # Safety
+///
+/// Every non-null `raw_path` must be owned by `release`. When `status` is
+/// successful, it must also point to a readable NUL-terminated UTF-16 string
+/// within `MAX_NATIVE_PATH_UNITS` units.
+unsafe fn resolve_known_folder_result(
+    status: HRESULT,
+    raw_path: PWSTR,
+    release: KnownFolderPathRelease,
+) -> Result<PathBuf, NativeTrustFailure> {
+    // Take ownership before interpreting HRESULT. Shell is permitted to
+    // return a non-null allocation on failure and that allocation must not be
+    // lost through an early return.
+    // SAFETY: the caller upholds the allocation, release, and successful-string
+    // invariants documented above.
+    let owned_path = unsafe { OwnedTrustKnownFolderPath::new(raw_path, release) };
     if status.is_err() {
         return Err(NativeTrustFailure::PathObservation);
     }
@@ -727,18 +748,40 @@ fn resolve_known_folder_path(kind: InstallRootKind) -> Result<PathBuf, NativeTru
     Ok(path)
 }
 
-struct OwnedTrustKnownFolderPath(PWSTR);
+unsafe fn release_known_folder_path(raw_path: *const c_void) {
+    // SAFETY: callers supply only the exact non-null allocation returned by
+    // SHGetKnownFolderPath; OwnedTrustKnownFolderPath invokes this once.
+    debug_assert!(!raw_path.is_null());
+    unsafe { CoTaskMemFree(Some(raw_path)) };
+}
+
+struct OwnedTrustKnownFolderPath {
+    raw_path: PWSTR,
+    release: KnownFolderPathRelease,
+}
 
 impl OwnedTrustKnownFolderPath {
+    /// # Safety
+    ///
+    /// A non-null `raw_path` must satisfy the allocation, matching-release,
+    /// and successful-string invariants of `resolve_known_folder_result`.
+    unsafe fn new(raw_path: PWSTR, release: KnownFolderPathRelease) -> Option<Self> {
+        if raw_path.0.is_null() {
+            None
+        } else {
+            Some(Self { raw_path, release })
+        }
+    }
+
     fn to_path_buf(&self) -> Result<PathBuf, NativeTrustFailure> {
-        if self.0 .0.is_null() {
+        if self.raw_path.0.is_null() {
             return Err(NativeTrustFailure::PathObservation);
         }
         let mut length = 0_usize;
         // SAFETY: SHGetKnownFolderPath returns a caller-owned NUL-terminated
         // UTF-16 allocation. The explicit cap bounds the terminator scan.
         unsafe {
-            while length < MAX_NATIVE_PATH_UNITS && *self.0 .0.add(length) != 0 {
+            while length < MAX_NATIVE_PATH_UNITS && *self.raw_path.0.add(length) != 0 {
                 length += 1;
             }
         }
@@ -746,18 +789,22 @@ impl OwnedTrustKnownFolderPath {
             return Err(NativeTrustFailure::PathObservation);
         }
         // SAFETY: the bounded scan established this initialized live span.
-        let units = unsafe { std::slice::from_raw_parts(self.0 .0, length) };
+        let units = unsafe { std::slice::from_raw_parts(self.raw_path.0, length) };
         Ok(PathBuf::from(OsString::from_wide(units)))
     }
 }
 
 impl Drop for OwnedTrustKnownFolderPath {
     fn drop(&mut self) {
-        if !self.0 .0.is_null() {
-            // SAFETY: this is the exact Shell allocation returned by
-            // SHGetKnownFolderPath and is released exactly once.
-            unsafe { CoTaskMemFree(Some(self.0 .0.cast_const().cast::<c_void>())) };
-            self.0 = PWSTR::null();
+        if !self.raw_path.0.is_null() {
+            // This is the exact Shell allocation returned by
+            // SHGetKnownFolderPath. Clear ownership before the private release
+            // function performs the matching deallocation exactly once.
+            let raw_path = self.raw_path.0.cast_const().cast::<c_void>();
+            self.raw_path = PWSTR::null();
+            // SAFETY: construction requires this exact non-null allocation and
+            // matching release pair, and ownership was just consumed.
+            unsafe { (self.release)(raw_path) };
         }
     }
 }
@@ -1589,6 +1636,11 @@ fn query_file_version(path: &Path) -> Option<FileVersion> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use windows::Win32::Foundation::E_FAIL;
+    use windows::Win32::System::Com::CoTaskMemAlloc;
+
     use super::*;
 
     const SIGNED_FIXTURE: &[u8] = include_bytes!(concat!(
@@ -1634,6 +1686,45 @@ mod tests {
         0xe6, 0xb5, 0x7e, 0xba, 0xd6, 0x31, 0xcd, 0x39, 0xc3, 0x16, 0x94, 0x6f, 0x60, 0x79, 0x90,
         0xb1, 0x90,
     ];
+    static SYNTHETIC_KNOWN_FOLDER_RELEASES: AtomicUsize = AtomicUsize::new(0);
+
+    fn allocate_synthetic_known_folder_path(path: &Path) -> PWSTR {
+        let wide = wide_path(path).unwrap();
+        let allocation_bytes = wide
+            .len()
+            .checked_mul(size_of::<u16>())
+            .expect("synthetic allocation length must fit");
+        // SAFETY: the exact nonzero allocation length is checked above and a
+        // null result is rejected before the initialized UTF-16 copy.
+        let allocation = unsafe { CoTaskMemAlloc(allocation_bytes) };
+        assert!(!allocation.is_null());
+        // SAFETY: the destination has exactly allocation_bytes writable bytes
+        // and the source contains wide.len() initialized u16 values.
+        unsafe {
+            ptr::copy_nonoverlapping(wide.as_ptr(), allocation.cast::<u16>(), wide.len());
+        }
+        PWSTR(allocation.cast::<u16>())
+    }
+
+    unsafe fn release_synthetic_known_folder_path(raw_path: *const c_void) {
+        assert!(!raw_path.is_null());
+        SYNTHETIC_KNOWN_FOLDER_RELEASES.fetch_add(1, Ordering::SeqCst);
+        // SAFETY: tests pass only allocations returned by CoTaskMemAlloc and
+        // ownership moves into exactly one OwnedTrustKnownFolderPath.
+        unsafe { CoTaskMemFree(Some(raw_path)) };
+    }
+
+    fn resolve_synthetic_known_folder_result(
+        status: HRESULT,
+        raw_path: PWSTR,
+    ) -> Result<PathBuf, NativeTrustFailure> {
+        // SAFETY: every non-null pointer is returned by the synthetic
+        // CoTaskMem allocator above, is NUL terminated, and uses its matching
+        // counting CoTaskMem release. NULL has no allocation invariant.
+        unsafe {
+            resolve_known_folder_result(status, raw_path, release_synthetic_known_folder_path)
+        }
+    }
 
     fn fixture_u16(offset: usize) -> u16 {
         let bytes: [u8; 2] = fixture_slice(offset, 2).try_into().unwrap();
@@ -2405,6 +2496,53 @@ mod tests {
         assert_eq!(
             *known_folder_id(InstallRootKind::CurrentUserLocalAppData),
             FOLDERID_LocalAppData
+        );
+    }
+
+    #[test]
+    fn shell_known_folder_allocation_is_released_on_every_result_path() {
+        let releases_before = SYNTHETIC_KNOWN_FOLDER_RELEASES.load(Ordering::SeqCst);
+        let expected = PathBuf::from(r"C:\synthetic\known-folder");
+
+        let success_path = allocate_synthetic_known_folder_path(&expected);
+        assert_eq!(
+            resolve_synthetic_known_folder_result(HRESULT(0), success_path).unwrap(),
+            expected
+        );
+        assert_eq!(
+            SYNTHETIC_KNOWN_FOLDER_RELEASES.load(Ordering::SeqCst),
+            releases_before + 1
+        );
+
+        let failure_path = allocate_synthetic_known_folder_path(&expected);
+        assert_eq!(
+            resolve_synthetic_known_folder_result(E_FAIL, failure_path),
+            Err(NativeTrustFailure::PathObservation)
+        );
+        assert_eq!(
+            SYNTHETIC_KNOWN_FOLDER_RELEASES.load(Ordering::SeqCst),
+            releases_before + 2
+        );
+
+        let relative_path = allocate_synthetic_known_folder_path(Path::new(r"relative\folder"));
+        assert_eq!(
+            resolve_synthetic_known_folder_result(HRESULT(0), relative_path),
+            Err(NativeTrustFailure::PathObservation)
+        );
+        assert_eq!(
+            SYNTHETIC_KNOWN_FOLDER_RELEASES.load(Ordering::SeqCst),
+            releases_before + 3
+        );
+
+        for status in [HRESULT(0), E_FAIL] {
+            assert_eq!(
+                resolve_synthetic_known_folder_result(status, PWSTR::null()),
+                Err(NativeTrustFailure::PathObservation)
+            );
+        }
+        assert_eq!(
+            SYNTHETIC_KNOWN_FOLDER_RELEASES.load(Ordering::SeqCst),
+            releases_before + 3
         );
     }
 

@@ -314,6 +314,13 @@ without following reparse points. The canonical root handle and all ancestors
 remain read-share-only through VERIFY, CLOSE, root revalidation, and executable
 reopen.
 
+The raw Shell result is moved into an owner before HRESULT interpretation.
+A synthetic `CoTaskMemAlloc` test injects a counting matching release function
+and proves one release for success, failure HRESULT, and later path refusal,
+with no release for NULL. Raw decoder/construction/release calls retain explicit
+`unsafe` allocation/string contracts. The test never calls
+`SHGetKnownFolderPath`.
+
 Both root and executable must be normalized volume-GUID paths on the same fixed
 local volume. Their handle-derived prefix is compared with ASCII-only case
 folding and exact non-ASCII units; the executable must be a strict descendant
@@ -396,6 +403,8 @@ open the installed KakaoTalk binary.
 - exact known-folder GUID routing, same-volume strict-descendant derivation,
   sibling-prefix/volume/ADS/device/non-ASCII/depth refusal, and equality with
   the source-static reviewed relation digest without observed-value promotion;
+- synthetic Shell allocation success/failure/path-refusal/NULL ownership with
+  exact matching-release counts and no known-folder call; and
 - canaries absent from `Debug`, stdout, stderr, JSON, test names, and failure
   messages.
 

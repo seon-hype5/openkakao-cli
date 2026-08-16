@@ -364,3 +364,20 @@ reviewed root type. This supersedes the deliberately absent-root portion of
 ADRs 025 and 029, but supplies no production kind, components, signer, adapter
 caller, selector, or capability activation. No test or production path resolves
 a real executable-trust known folder in this change.
+
+## ADR-032: Prove Shell path ownership before HRESULT interpretation
+
+Keep the raw `SHGetKnownFolderPath` declaration because the generated wrapper
+cannot preserve a non-null output pointer on failure. Move the returned HRESULT,
+pointer, and private matching release function immediately into one result
+decoder. It must construct the RAII owner before inspecting HRESULT and release
+every non-null pointer exactly once on success, failure, or later path
+validation refusal; NULL is never passed to a release callback. Keep the raw
+decoder, constructor, and release callback typed `unsafe` with documented
+matching-allocation and successful-string preconditions at each caller.
+
+Exercise this lifetime with synthetic `CoTaskMemAlloc` buffers and a counting
+release wrapper. Cover success, `E_FAIL`, relative-path refusal, successful
+NULL, and failed NULL without invoking `SHGetKnownFolderPath`. The production
+release remains `CoTaskMemFree`, the full adapter remains disconnected, and
+this decision supplies no Kakao value, native observation, or activation.

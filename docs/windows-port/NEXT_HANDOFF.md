@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`74dff3ef5c6d957f275f3c21d7af375b0c2f04c5`. The commit containing this
+`efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -35,15 +35,17 @@ concurrency limit.
 - P40 child source: `47452d8327d4ce52929de17523a6fc4f971d4293`,
   integrated at `280a35e`;
 - root guarded orchestration and contract chain: `ebc9368`, `5550384`,
-  `8a89431`, `658b541`, `a61b3d7`, `f60876c`, and `60adc01`; and
+  `8a89431`, `658b541`, `a61b3d7`, `f60876c`, and `60adc01`;
+- final root adversarial reconciliation, CI, tests, and documentation:
+  `272c8cb70c716066e22b9d5a6cf8e2d8da3a3d43`;
 - request-scoped target binding and exhaustive snapshot invalidation:
   `aaac7beb2681a9258197531063ebd8fcad32e68c`;
 - canonical trust-path share-guard audit and remediation:
   `27f50c8d0a272eb0b9af35d99568c431001157b5`;
 - repository-owned signed fixture and offline WinTrust lifetime qualification:
   `74dff3ef5c6d957f275f3c21d7af375b0c2f04c5`; and
-- final root adversarial reconciliation, CI, tests, and documentation:
-  `272c8cb70c716066e22b9d5a6cf8e2d8da3a3d43`.
+- guarded native installation-root relation derivation:
+  `efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -133,7 +135,7 @@ native invariant now preserves exact input bits, permits only those output
 bits, and rejects every unknown bit. No production value or reference was
 added.
 
-The newest offline successor completes generic runtime installation-root
+The root-derivation successor completes generic runtime installation-root
 derivation without adding a Kakao value or caller. A reviewed profile exposes
 only one root kind; the disconnected adapter maps it to the exact Windows
 known-folder ID, owns/frees the Shell allocation, retains no-follow
@@ -141,6 +143,12 @@ read-share-only canonical root/ancestor handles through VERIFY/CLOSE and final
 revalidation, and hashes only a bounded strict-descendant relative relation.
 Expected components never enter the observer, observed paths/components cannot
 construct the reviewed type, and all production references remain absent.
+
+The newest offline successor makes the Shell allocation lifetime directly
+testable without changing that production flow. A single private decoder takes
+ownership before HRESULT interpretation. Synthetic `CoTaskMemAlloc` buffers
+and a counting matching release prove one free on success, `E_FAIL`, and later
+path refusal, and zero frees for NULL. No test calls `SHGetKnownFolderPath`.
 
 ## Delivered release-candidate behavior
 
@@ -182,6 +190,8 @@ construct the reviewed type, and all production references remain absent.
 - Generic native root derivation binds the source-static root kind to an exact
   known-folder ID and same-volume handle-derived relative digest while keeping
   all absolute/component text out of evidence and reviewed profile types.
+- Synthetic Shell result tests prove every non-null known-folder output is
+  owned before HRESULT interpretation and released once on every exit path.
 - Same-process foreground popups count as user activity. Mutex contention,
   abandonment, wait failure, and every error/panic after SetValue entry are
   `SubmissionUncertain`, exit 21, and never retry-safe.
@@ -217,8 +227,8 @@ All recorded final-matrix Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 176 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 102 passed |
+| `cargo test --locked --lib` | 177 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 103 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -233,9 +243,9 @@ All recorded final-matrix Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 102 passed |
+| release all-feature Windows synthetic tests | 103 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Markdown local links and pinned-action policy | 40 files, 43 local links, 0 broken; 3 action refs pinned |
+| Markdown local links and pinned-action policy | 41 files, 45 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -305,6 +315,8 @@ implementation; it likewise authorizes no probe or production wiring.
   audit closed the permissive-sharing ABA gap. The signed synthetic fixture,
   structural/SPKI checks, and a real offline VERIFY/CLOSE lifetime test now
   exist; that test also corrected the signature-settings in/out-flag invariant.
+  Synthetic CoTaskMem success/failure/refusal/NULL paths now prove matching
+  Shell-output release counts without resolving a known folder.
   Reviewed Kakao signer/root values, a second independent fixture/root unsafe
   review, and production wiring remain absent and fail closed.
 - Expand modal evidence beyond the current conservative window state.
@@ -323,12 +335,13 @@ replay-ledger scaffold, explicit-synthetic-base native ledger store,
 trust-ordered lazy production ledger factory, pure executable-trust decision
 seam, disconnected native trust API adapter, focused source/API audit, and
 repository-owned signed fixture with bounded structural/SPKI and offline
-VERIFY/CLOSE tests are implemented and must pass the full safe regression
-matrix. The next safe work is a second independent unsafe review and a clean
-pinned-Windows CI reproduction, followed separately by reviewed production
-signer/root provenance. Further synthetic target-binding adversarial review is
-also permitted. None of these tasks requires or authorizes a real KakaoTalk
-path/signature/label probe or a trust-store change.
+VERIFY/CLOSE tests, guarded root derivation, and exact Shell allocation-lifetime
+tests are implemented and must pass the full safe regression matrix. The next
+safe work is a second independent unsafe review and a clean pinned-Windows CI
+reproduction, followed separately by reviewed production signer/root
+provenance. Further synthetic target-binding adversarial review is also
+permitted. None of these tasks requires or authorizes a real KakaoTalk path or
+signature, a live label probe, or a trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

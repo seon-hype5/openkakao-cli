@@ -125,10 +125,11 @@ or write authority.
   full adapter. Generic runtime root derivation now receives only the
   source-static root kind, retains the exact known-folder and ancestor handles,
   and emits only an evidence digest from bounded relative components; observed
-  paths/components cannot construct a reviewed profile. A focused source/API
-  audit added retained
-  read-share-only canonical file and parent guards around the path-only version
-  query, VERIFY/CLOSE, and final reopen. A repository-owned self-signed fixture
+  paths/components cannot construct a reviewed profile. Synthetic CoTaskMem
+  success/failure/refusal/NULL cases prove Shell output ownership before HRESULT
+  handling without resolving a known folder. A focused source/API audit added
+  retained read-share-only canonical file and parent guards around the path-only
+  version query, VERIFY/CLOSE, and final reopen. A repository-owned self-signed fixture
   now binds its build/source/artifact/certificate/SPKI hashes, checks one
   bounded embedded signature without execution, and exercises the real
   cache-only/noninteractive VERIFY/CLOSE lifetime. That call exposed and fixed

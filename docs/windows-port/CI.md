@@ -60,8 +60,10 @@ performs no UI mutation, and cannot read user or application state.
   guards and calls WinTrust with `WTD_CACHE_ONLY_URL_RETRIEVAL`, `WTD_UI_NONE`,
   and the noninteractive HWND. It accepts trust or refusal, closes state once,
   performs no trust-store change, and has no network/UI fallback.
-- Installation-root tests use only synthetic volume-GUID `PathBuf` values and
-  exact GUID constants. They never construct the process-bound adapter or call
+- Installation-root tests use only synthetic volume-GUID `PathBuf` values,
+  exact GUID constants, and synthetic `CoTaskMemAlloc` buffers. Success,
+  failure-HRESULT, parse-refusal, and NULL result paths prove exact release
+  counts without constructing the process-bound adapter or calling
   `SHGetKnownFolderPath`.
 - Stage and commit are exercised only as policy/fake states with mutation
   counters fixed at zero, plus a synthetic in-memory transaction port. The

@@ -87,8 +87,10 @@ codec returns an evidence-only digest; no absolute path or observed component
 can construct the reviewed profile type.
 
 No production kind, component list, signer, or caller is configured. Automated
-tests cover only synthetic volume-GUID paths and never call the full
-process-bound adapter or resolve a real known folder for executable trust.
+tests cover only synthetic volume-GUID paths and synthetic CoTaskMem buffers.
+The latter prove exact success/failure/path-refusal/NULL allocation ownership;
+tests never call the full process-bound adapter or resolve a real known folder
+for executable trust.
 
 ## Repository-owned signed fixture
 

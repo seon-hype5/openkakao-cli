@@ -48,3 +48,6 @@ production provenance.
 source-static known-folder-kind routing, retained canonical root guards,
 evidence-only relative digest, and the still-missing independent review and
 production values/wiring.
+[`root-native-root-allocation-lifetime.md`](root-native-root-allocation-lifetime.md)
+records the synthetic success/failure/refusal/NULL proof that every non-null
+Shell output is owned before HRESULT interpretation and released exactly once.
