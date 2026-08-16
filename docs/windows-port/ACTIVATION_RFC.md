@@ -36,14 +36,16 @@ surrogate, replay, and state-movement negatives are covered without live UI.
 The native mutation port now carries that same approval into fresh observation
 and final preflight. Its exact UTF-16 verifier always uses the approval's own
 private snapshot, accepts no caller-selected snapshot, and retains no observed
-label.
+label. Native selection is a closed state rather than an optional label plus
+caller-chosen booleans; only an exact-unique state can invoke the verifier.
 
 The production Windows observer remains deliberately disconnected: it reads
 no title/Name/label, passes no candidate to the verifier, produces no proof,
 leaves target binding false, and cannot read draft Value. Synthetic absent,
-mismatch, inexact, and non-unique cases cover the permit seam. This scaffold
-satisfies no measurement requirement below and grants no live or write
-authority.
+mismatch, unique-inexact, ambiguous-inexact, and ambiguous-exact cases cover
+the permit seam and prove that non-exact/non-unique states never call the
+verifier. This scaffold satisfies no measurement requirement below and grants
+no live or write authority.
 
 The current policy checks that a requested label occurs exactly once in the
 configured allowlist, while the native snapshot independently leaves

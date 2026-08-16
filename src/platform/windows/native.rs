@@ -1303,6 +1303,16 @@ struct TargetEvidence {
 }
 
 #[cfg(any(feature = "windows-ui-write", test))]
+#[cfg_attr(not(test), allow(dead_code))] // Only Absent is reachable before selector review.
+enum ObservedTargetSelection<'label> {
+    Absent,
+    UniqueInexact,
+    AmbiguousInexact,
+    AmbiguousExact,
+    ExactUnique(&'label [u16]),
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
 impl TargetEvidence {
     fn authorizes_target_access(&self) -> bool {
         self.self_chat_verified && self.target_binding_verified && self.exact && self.unique
@@ -1310,13 +1320,19 @@ impl TargetEvidence {
 }
 
 #[cfg(any(feature = "windows-ui-write", test))]
-fn target_evidence_from_observed_label(
-    observed_label_utf16: Option<&[u16]>,
-    exact: bool,
-    unique: bool,
+fn target_evidence_from_observation(
+    selection: ObservedTargetSelection<'_>,
     verify_binding: impl FnOnce(&[u16]) -> bool,
 ) -> TargetEvidence {
-    let target_binding_verified = observed_label_utf16.is_some_and(verify_binding);
+    let (target_binding_verified, exact, unique) = match selection {
+        ObservedTargetSelection::Absent => (false, false, false),
+        ObservedTargetSelection::UniqueInexact => (false, false, true),
+        ObservedTargetSelection::AmbiguousInexact => (false, false, false),
+        ObservedTargetSelection::AmbiguousExact => (false, true, false),
+        ObservedTargetSelection::ExactUnique(observed_label_utf16) => {
+            (verify_binding(observed_label_utf16), true, true)
+        }
+    };
     TargetEvidence {
         self_chat_verified: target_binding_verified,
         target_binding_verified,
@@ -1332,10 +1348,8 @@ fn observe_self_target(_hwnd: HWND, approved: &ApprovedSend) -> Result<TargetEvi
     // inspecting Name/title text or substituting process identity. A future
     // selector must keep the label ephemeral and use the approval's own bound
     // snapshot through this callback.
-    Ok(target_evidence_from_observed_label(
-        None,
-        false,
-        false,
+    Ok(target_evidence_from_observation(
+        ObservedTargetSelection::Absent,
         |observed_label_utf16| approved.target_binding_matches_observed_utf16(observed_label_utf16),
     ))
 }
@@ -1630,18 +1644,19 @@ mod tests {
     fn target_evidence_requires_ephemeral_binding_and_exact_unique_selection() {
         let expected: Vec<u16> = "SYNTHETIC_SELF_TARGET".encode_utf16().collect();
 
-        let absent = target_evidence_from_observed_label(None, true, true, |_| {
-            panic!("binding verifier must not run without an observed label")
+        let absent = target_evidence_from_observation(ObservedTargetSelection::Absent, |_| {
+            panic!("binding verifier must not run without an exact unique observation")
         });
         assert!(!absent.self_chat_verified);
         assert!(!absent.target_binding_verified);
-        assert!(absent.exact);
-        assert!(absent.unique);
+        assert!(!absent.exact);
+        assert!(!absent.unique);
         assert!(!absent.authorizes_target_access());
 
-        let exact = target_evidence_from_observed_label(Some(&expected), true, true, |candidate| {
-            candidate == expected
-        });
+        let exact = target_evidence_from_observation(
+            ObservedTargetSelection::ExactUnique(&expected),
+            |candidate| candidate == expected,
+        );
         assert!(exact.self_chat_verified);
         assert!(exact.target_binding_verified);
         assert!(exact.exact);
@@ -1649,33 +1664,43 @@ mod tests {
         assert!(exact.authorizes_target_access());
 
         let inexact =
-            target_evidence_from_observed_label(Some(&expected), false, true, |candidate| {
-                candidate == expected
+            target_evidence_from_observation(ObservedTargetSelection::UniqueInexact, |_| {
+                panic!("binding verifier must not run for an inexact observation")
             });
-        assert!(inexact.self_chat_verified);
-        assert!(inexact.target_binding_verified);
+        assert!(!inexact.self_chat_verified);
+        assert!(!inexact.target_binding_verified);
         assert!(!inexact.exact);
         assert!(inexact.unique);
         assert!(!inexact.authorizes_target_access());
 
         let wrong: Vec<u16> = "SYNTHETIC_OTHER_TARGET".encode_utf16().collect();
-        let mismatched =
-            target_evidence_from_observed_label(Some(&wrong), true, true, |candidate| {
-                candidate == expected
-            });
+        let mismatched = target_evidence_from_observation(
+            ObservedTargetSelection::ExactUnique(&wrong),
+            |candidate| candidate == expected,
+        );
         assert!(!mismatched.self_chat_verified);
         assert!(!mismatched.target_binding_verified);
         assert!(!mismatched.authorizes_target_access());
 
         let ambiguous =
-            target_evidence_from_observed_label(Some(&expected), true, false, |candidate| {
-                candidate == expected
+            target_evidence_from_observation(ObservedTargetSelection::AmbiguousExact, |_| {
+                panic!("binding verifier must not run for an ambiguous observation")
             });
-        assert!(ambiguous.self_chat_verified);
-        assert!(ambiguous.target_binding_verified);
+        assert!(!ambiguous.self_chat_verified);
+        assert!(!ambiguous.target_binding_verified);
         assert!(ambiguous.exact);
         assert!(!ambiguous.unique);
         assert!(!ambiguous.authorizes_target_access());
+
+        let ambiguous_inexact =
+            target_evidence_from_observation(ObservedTargetSelection::AmbiguousInexact, |_| {
+                panic!("binding verifier must not run for an ambiguous inexact observation")
+            });
+        assert!(!ambiguous_inexact.self_chat_verified);
+        assert!(!ambiguous_inexact.target_binding_verified);
+        assert!(!ambiguous_inexact.exact);
+        assert!(!ambiguous_inexact.unique);
+        assert!(!ambiguous_inexact.authorizes_target_access());
     }
 
     #[test]

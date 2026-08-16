@@ -54,3 +54,6 @@ Shell output is owned before HRESULT interpretation and released exactly once.
 [`root-native-target-permit-plumbing.md`](root-native-target-permit-plumbing.md)
 records the approval-owned native label-binding verifier, its fresh/final
 preflight wiring, and the still-absent production selector and label observer.
+[`root-native-target-observation-state.md`](root-native-target-observation-state.md)
+records the closed absent/inexact/ambiguous/exact-unique selection model and
+why only an exact-unique state may invoke the approval-owned label verifier.

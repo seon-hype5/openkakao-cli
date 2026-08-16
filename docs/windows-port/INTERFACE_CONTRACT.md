@@ -63,7 +63,9 @@ accepts no caller-selected snapshot. The state machine requires independently
 fresh `target_binding_verified` evidence in addition to separate exact and
 unique claims before draft access or any mutation, and repeats the same
 approval-owned check in final native preflight. Current production observation
-passes no label and always leaves that evidence false.
+constructs only a closed absent-selection state and always leaves that evidence
+false. Only a future exact-unique state may carry a label to the verifier;
+inexact and ambiguous states cannot call it or supply contradictory booleans.
 
 The native transaction is compiled only by the default-off
 `windows-ui-write` feature. This feature is not authorization. Runtime also

@@ -56,19 +56,21 @@ comparison through that approval. The comparison is fixed to the private
 policy-bound snapshot stored in the approval; native callers cannot substitute
 another snapshot.
 
-An observer may pass an ephemeral label slice only to the comparison callback.
-The callback result is reduced immediately to target booleans, while exactness
-and uniqueness remain separate required claims. Neither `TargetEvidence` nor
-`NativeMutationPort` retains the label. The same conjunction gates draft Value
-access and the final preflight before `SetValue` or `Invoke`.
+An observer must classify selection through a closed state: absent, unique but
+inexact, ambiguous inexact, ambiguous exact, or exact unique. Only the exact-
+unique state can carry an ephemeral label slice to the comparison callback;
+all target booleans are derived from the state, so contradictory caller-chosen
+combinations cannot be represented. Neither `TargetEvidence` nor
+`NativeMutationPort` retains the label. The same four-way conjunction gates
+draft Value access and the final preflight before `SetValue` or `Invoke`.
 
-The current profile has no measured privacy-safe selector. Its observer passes
-no label and false exact/unique claims, performs no title/UIA Name/room text
-read, and therefore refuses deterministically. Pure synthetic tests prove that
-an absent label does not invoke the binding callback and that mismatched,
-inexact, or non-unique evidence cannot satisfy the full target gate. This
-plumbing authorizes no selector measurement, native label read, L10 retry, or
-mutation.
+The current profile has no measured privacy-safe selector. Its observer
+constructs only the absent state, performs no title/UIA Name/room text read,
+and therefore derives false exact/unique claims and refuses deterministically.
+Pure synthetic tests exercise every closed state and prove that only exact-
+unique selection invokes the binding callback; a mismatched exact-unique label
+still fails. This plumbing authorizes no selector measurement, native label
+read, L10 retry, or mutation.
 
 ## Durable ledger boundary
 

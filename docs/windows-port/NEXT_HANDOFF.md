@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`3b06ecc785acde8fb0b01073ee535c142b8eb0b5`. The commit containing this
+`7dfbf0d3b55a9d6b16d690092beac48ebc9993ad`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -45,9 +45,11 @@ concurrency limit.
 - repository-owned signed fixture and offline WinTrust lifetime qualification:
   `74dff3ef5c6d957f275f3c21d7af375b0c2f04c5`;
 - guarded native installation-root relation derivation:
-  `efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`; and
+  `efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`;
 - Shell result ownership before HRESULT interpretation:
-  `3b06ecc785acde8fb0b01073ee535c142b8eb0b5`.
+  `3b06ecc785acde8fb0b01073ee535c142b8eb0b5`; and
+- approval-owned native target verification through fresh/final preflight:
+  `7dfbf0d3b55a9d6b16d690092beac48ebc9993ad`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -161,6 +163,14 @@ retains the label. Synthetic absent, exact, mismatch, inexact, and non-unique
 cases cover the seam. Production still supplies no label or selector evidence
 and performs no new UI read.
 
+The newest successor removes contradictory native target observations from the
+type surface. Instead of accepting an optional label with independent exact
+and unique booleans, the helper now accepts one closed absent, inexact,
+ambiguous, or exact-unique state. Only exact-unique can carry a borrowed label
+or invoke the approval-owned verifier; all flags are derived from the state.
+Synthetic tests cover every state and a mismatched exact-unique label, while
+production constructs only absent and still performs no label read.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -188,6 +198,9 @@ and performs no new UI read.
 - The native mutation port carries that same approval through fresh and final
   target checks; its label verifier is fixed to the approval-owned snapshot and
   stores no observed label.
+- Native target selection is a closed state; only exact-unique may invoke the
+  label verifier, so absent/inexact/ambiguous states cannot fabricate a
+  contradictory target-evidence tuple.
 - Write execution uses a consumed approval lease, a sealed sender, an atomic
   one-shot claim, exact mode/outcome compatibility, and no retry edge.
 - `windows-ui-write` is a real default-off compile boundary. All-feature builds
@@ -259,7 +272,7 @@ All recorded final-matrix Rust commands used the ignored
 | release build, default and all features | passed |
 | release all-feature Windows synthetic tests | 104 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 41 files, 45 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 42 files, 47 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -305,9 +318,10 @@ implementation; it likewise authorizes no probe or production wiring.
 
 - The request/proof and fresh transaction gates for privacy-safe target
   binding are implemented synthetically, and the native port now keeps the
-  approval-owned permit through fresh observation and final preflight. Design
-  and measure the exact native self-chat selector, and add an ephemeral UTF-16
-  observer only if a separately approved RFC amendment permits it; no
+  approval-owned permit through fresh observation and final preflight. A
+  closed state now ensures only exact-unique selection can invoke that permit.
+  Design and measure the exact native self-chat selector, and add an ephemeral
+  UTF-16 observer only if a separately approved RFC amendment permits it; no
   room/profile text may be exposed or retained.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
@@ -352,12 +366,12 @@ trust-ordered lazy production ledger factory, pure executable-trust decision
 seam, disconnected native trust API adapter, focused source/API audit, and
 repository-owned signed fixture with bounded structural/SPKI and offline
 VERIFY/CLOSE tests, guarded root derivation, and exact Shell allocation-lifetime
-tests, plus approval-owned native target-permit plumbing, are implemented and
-pass the full safe regression matrix. The next safe work is a second
-independent unsafe review and a clean pinned-Windows CI reproduction, followed
-separately by reviewed production signer/root provenance. None of these tasks
-requires or authorizes a real KakaoTalk path or signature, a live label probe,
-or a trust-store change.
+tests, approval-owned native target-permit plumbing, and a closed native
+target-observation state are implemented and pass the full safe regression
+matrix. The next safe work is a second independent unsafe review and a clean
+pinned-Windows CI reproduction, followed separately by reviewed production
+signer/root provenance. None of these tasks requires or authorizes a real
+KakaoTalk path or signature, a live label probe, or a trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

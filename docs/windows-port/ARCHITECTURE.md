@@ -140,8 +140,10 @@ synchronous transaction. Any future ephemeral target label is compared only
 through that approval, whose verifier is permanently tied to its private
 policy snapshot; a native caller cannot supply a different snapshot. The
 observer immediately reduces the result to booleans and retains no label.
-The current profile supplies no label and therefore keeps the fresh and final
-target gates closed.
+Selection uses a closed internal state, and only its exact-unique variant may
+carry a label or invoke the verifier; exactness and uniqueness are not supplied
+as independent caller booleans. The current profile constructs only the absent
+state and therefore keeps the fresh and final target gates closed.
 
 Stage-only is designed as:
 

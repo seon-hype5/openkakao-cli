@@ -402,3 +402,23 @@ reading title, UIA Name, or any room/profile text. Synthetic tests cover absent,
 exact, mismatched, inexact, and non-unique observations. This decision adds
 permit plumbing only; it supplies no selector, label reader, live permission,
 or write activation.
+
+## ADR-034: Make contradictory target observations unrepresentable
+
+Do not accept an optional observed label plus independently supplied exact and
+unique booleans. That tuple permits impossible combinations and could invoke
+the approval-owned label verifier for an inexact or ambiguous selection.
+
+Represent native target selection with a closed internal state:
+`Absent`, `UniqueInexact`, `AmbiguousInexact`, `AmbiguousExact`, or
+`ExactUnique(label)`. Derive every `TargetEvidence` boolean from that state.
+Only `ExactUnique` may carry an ephemeral UTF-16 label or invoke the binding
+callback; every other state produces no binding or self-chat proof. Keep the
+four-way authorization conjunction even though the closed state narrows valid
+combinations, so downstream checks remain fail-closed under future changes.
+
+The current production observer constructs only `Absent`. Synthetic tests
+cover every state plus an exact-unique label mismatch and prove by panic
+canaries that no non-exact/non-unique state calls the verifier. This supersedes
+only ADR-033's tuple representation; it adds no selector, label read, Kakao
+value, live permission, or capability.

@@ -46,6 +46,9 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
   final preflight. An observed UTF-16 label can be checked only against that
   approval's private policy-bound snapshot; callers cannot substitute a
   different snapshot, and no observed label is retained.
+- Target selection is a closed native state. Only exact-unique selection may
+  carry a label to the permit verifier; absent, inexact, and ambiguous states
+  cannot invoke it or construct contradictory evidence flags.
 - PID alone is insufficient. A run-local digest includes executable identity
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;

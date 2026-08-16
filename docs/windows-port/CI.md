@@ -69,9 +69,9 @@ performs no UI mutation, and cannot read user or application state.
   counters fixed at zero, plus a synthetic in-memory transaction port. The
   production backend contract test never calls either mutation method.
 - Native target-evidence tests call only a pure helper with synthetic UTF-16
-  values. They prove no callback on absence and preserve false required gates
-  for mismatch, inexact, and non-unique cases; they never call the production
-  observer or read a UI label.
+  values. They cover every closed selection state, prove that only exact-unique
+  selection invokes the callback, and preserve false required gates for a
+  mismatched label; they never call the production observer or read a UI label.
 - There is no service container, desktop session preparation, application
   installation, account setup, network login, or secret injection.
 - `RUST_BACKTRACE=0` prevents failure backtraces from becoming accidental
