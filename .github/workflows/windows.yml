@@ -95,11 +95,31 @@ jobs:
         run: cargo test --locked --test windows_backend --test windows_policy --test windows_cli
 
       - name: Run safe CLI compatibility selection
-        run: >-
-          cargo test --locked --test cli_test --
-          --skip doctor_json_outputs_valid_json
-          --skip auth_status_json_outputs_valid_json
-          --skip cache_stats_json_outputs_valid_json
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $safeTests = @(
+            "help_exits_zero",
+            "help_lists_expected_subcommands",
+            "version_prints_correct_version",
+            "invalid_subcommand_exits_nonzero",
+            "send_without_args_fails",
+            "read_without_chat_id_fails",
+            "json_flag_is_global",
+            "no_color_flag_is_global",
+            "watch_accepts_capture_flag",
+            "probe_accepts_capture_pushes_flag",
+            "delete_help_works",
+            "delete_without_args_fails",
+            "mark_read_help_works",
+            "mark_read_without_args_fails"
+          )
+          foreach ($testName in $safeTests) {
+            & cargo test --locked --test cli_test $testName -- --exact
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
 
       - name: Build Windows debug binary
         run: cargo build --locked

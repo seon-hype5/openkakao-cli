@@ -31,20 +31,22 @@ The job runs in this order and stops on the first failure:
 | Library | `cargo test --locked --lib` | Unit tests use synthetic values and pure mappings |
 | Binary unit | `cargo test --locked --bin openkakao-cli` | Parser and unit coverage; no command dispatch against a live app |
 | Windows contracts | `cargo test --locked --test windows_backend --test windows_policy --test windows_cli` | Capability, fake, policy, redaction, and zero-mutation coverage |
-| CLI compatibility | `cargo test --locked --test cli_test` with the three documented skips | Help/version/usage parsing only |
+| CLI compatibility | Fourteen individually named `cli_test` cases, each run with `--exact` | Closed allowlist of help/version/usage parsing only |
 | Build | `cargo build --locked` | Debug build using the committed lockfile |
 
-The CLI compatibility step skips these cases because they can enter legacy
-local-state or credential diagnostic paths:
+The CLI compatibility step is a closed allowlist. It deliberately excludes
+these cases because they can enter legacy local-state or credential diagnostic
+paths:
 
 - `doctor_json_outputs_valid_json`
 - `auth_status_json_outputs_valid_json`
 - `cache_stats_json_outputs_valid_json`
 
-Do not replace the explicit selection with an unreviewed full binary
-integration command. A new Windows test target may enter this workflow only
-after confirming that it uses synthetic/fake inputs, performs no UI mutation,
-and cannot read user or application state.
+Do not replace the exact-name allowlist with a skip-based denylist or an
+unreviewed full binary integration command: a future test must not become
+executable merely by being added to `cli_test.rs`. A new Windows test may enter
+the allowlist only after confirming that it uses synthetic/fake inputs,
+performs no UI mutation, and cannot read user or application state.
 
 ## Why the workflow is non-live
 
