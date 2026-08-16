@@ -17,7 +17,8 @@ Root integration/offline-scaffold handoffs follow the same privacy rules; see
 [`root-ledger-scaffold.md`](root-ledger-scaffold.md) for the current durable
 replay state-machine boundary and remaining production-store blockers.
 The successor [`root-executable-trust-scaffold.md`](root-executable-trust-scaffold.md)
-records the content-free trust decision seam and its missing native observer.
+records the content-free trust decision seam and its then-missing native
+observer.
 [`root-native-ledger-store.md`](root-native-ledger-store.md) records the later
 explicit-synthetic-base DPAPI/ACL store and why production remains unavailable.
 [`root-native-trust-orchestration.md`](root-native-trust-orchestration.md)
@@ -26,3 +27,6 @@ missing native adapter/profile.
 [`root-native-ledger-location.md`](root-native-ledger-location.md) records the
 disconnected LocalAppData/fixed-volume/parent-chain constructor and why it is
 still absent from production wiring.
+[`root-native-trust-adapter.md`](root-native-trust-adapter.md) records the
+disconnected process/file/WinTrust/SPKI adapter and its deliberately missing
+root provenance and production reference.

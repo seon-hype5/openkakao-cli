@@ -218,3 +218,21 @@ not reference it from `NativeMutationPort`. Existing directories are accepted
 only after the same exact type, owner, protected-DACL, and entry checks used by
 the synthetic boundary. Production remains on `UnavailableLedger` until an
 independent unsafe review and a separate wiring decision.
+
+## ADR-025: Compile the real trust API adapter without trusting this installation
+
+Implement the process-bound file and WinTrust calls behind the existing
+crate-private orchestration seam, but leave the constructor disconnected from
+`NativeMutationPort`. Duplicate the already selected process handle, recheck
+HWND/PID/creation time, hold no-follow process-image and verification handles,
+require a normalized fixed volume-GUID path and reparse-free ancestor chains,
+and bind every file identity to process creation time.
+
+Keep WinTrust action, file info, signature settings, and data in stable owned
+allocations through exactly one CLOSE attempt. Accept only zero trust status,
+one provider signer, no secondary signature, and a bounded DER encoding of the
+leaf SPKI. Do not derive an installation-root pin from the current machine:
+the native adapter emits no root digest, has no production reference, and
+therefore cannot satisfy the pure verifier. A reviewed signed fixture,
+signer/root provenance, independent unsafe audit, and a separate wiring
+decision remain mandatory.

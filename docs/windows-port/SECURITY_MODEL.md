@@ -101,11 +101,12 @@ or write authority.
   requested self-chat.
 - No live-measured exact unique send-button selector/InvokePattern is
   configured.
-- A pure signing/canonical-root decision seam and fakeable VERIFY/extract/CLOSE
-  plus post-CLOSE identity-reopen orchestration exist. The latter fixes
-  no-UI/cache-only flags and state-close behavior but has no Windows API
-  adapter. Reviewed signer/root digests and native path/WinVerifyTrust
-  observations remain absent. Production refuses at
+- A pure signing/canonical-root decision seam, fakeable VERIFY/extract/CLOSE
+  orchestration, and a disconnected native process/file/WinTrust/SPKI adapter
+  exist. No production path constructs the adapter, tests never call it, and
+  it deliberately emits no installation-root digest. Reviewed signer/root
+  provenance, signed-fixture evidence, independent unsafe review, and real
+  native observations remain absent. Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
 - Modal evidence remains narrower than a full application-wide model.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.

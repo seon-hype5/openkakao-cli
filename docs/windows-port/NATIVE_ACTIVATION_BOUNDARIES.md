@@ -171,15 +171,20 @@ work. Successful removal still reloads and proves absence.
 
 ## Executable-trust observer boundary
 
-Offline orchestration status: a crate-private fake adapter now fixes the exact
-call policy below and guarantees VERIFY/extract/CLOSE/post-CLOSE-reopen
-ordering across ordinary errors and panics after state ownership reaches the
-orchestrator. It makes no native call and has no production adapter, so all
-path, handle, provider-pointer, SPKI, and profile work in this section remains
-an activation blocker. The native adapter must use a local RAII state guard
-between `WinVerifyTrust` returning and handing state to the orchestrator. It
-must also avoid dynamic panic payloads because `catch_unwind` does not suppress
-the process-wide panic hook.
+Offline adapter status: the crate-private orchestrator fixes the exact call
+policy and guarantees VERIFY/extract/CLOSE/post-CLOSE-reopen ordering across
+ordinary errors and panics. A disconnected native adapter now implements the
+process/HWND/creation binding, no-follow file and ancestor checks, normalized
+volume-GUID path, fixed-volume classification, content-free file identity,
+WinTrust provider extraction, bounded SPKI DER hashing, and an exactly-once
+RAII CLOSE fallback. It is compiled but has no production constructor call,
+and automated tests never invoke WinTrust or open an installed executable.
+The adapter intentionally emits no installation-root digest, so even direct
+construction cannot satisfy the pure trust verifier. Reviewed signer and root
+profile material, fixture-backed API integration evidence, independent unsafe
+review, and production wiring remain activation blockers. Native code avoids
+dynamic panic payloads because `catch_unwind` does not suppress the
+process-wide panic hook.
 
 ### Handle and process binding
 
@@ -327,10 +332,12 @@ all later gates still require a fresh, explicitly named approval.
    as a separate disconnected change. Both are complete; independent unsafe
    review and the decision to replace the placeholder remain outstanding.
 4. Implement the trust observer behind a fakeable native adapter without a
-   real KakaoTalk probe; keep production wiring unavailable. The call-policy
-   and state-lifetime orchestration part is complete; the native API adapter is
-   not.
-5. Obtain signed release provenance and review signer/root profile material.
+   real KakaoTalk probe; keep production wiring unavailable. The call-policy,
+   state-lifetime orchestration, and disconnected native API adapter are
+   complete; no real executable was opened or verified.
+5. Obtain signed release provenance, add a repository-owned reviewed fixture,
+   independently audit the unsafe adapter, and review signer/root profile
+   material. The current adapter deliberately returns no root digest.
 6. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 

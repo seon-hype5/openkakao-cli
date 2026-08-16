@@ -103,6 +103,11 @@ Before that placeholder can be replaced, a separate reviewed adapter must:
 
 No live executable-signature observation is authorized by this seam.
 
+Historical note: the successor
+[`root-native-trust-adapter.md`](root-native-trust-adapter.md) adds the real
+disconnected Windows API adapter while preserving zero production references
+and the fail-closed root-provenance gap described here.
+
 ## Verification
 
 All commands use `.target/wave2-root`.

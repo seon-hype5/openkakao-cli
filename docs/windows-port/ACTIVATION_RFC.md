@@ -196,9 +196,12 @@ status, reparse refusal, process-creation binding, three-way file-identity
 agreement, exact version, no-UI/cache-only Authenticode behavior, catalog
 ambiguity, exact signer cardinality/digest, and exact install-root digest.
 Synthetic adversarial tests cover each refusal independently and redact every
-opaque identity. No real signer/root digest or native trust call is present.
-Production uses `UnavailableExecutableTrust` before ledger or UI observation,
-so this is an additional activation barrier rather than a trust claim.
+opaque identity. A disconnected native adapter now contains the reviewed
+process/file/WinTrust API sequence, but no automated test or production path
+calls it, no real executable has been observed, and no real signer/root digest
+is present. Production uses `UnavailableExecutableTrust` before ledger or UI
+observation, so this remains an additional activation barrier rather than a
+trust claim.
 
 The current basename/version check is insufficient for activation. A future
 profile must open the executable itself, obtain its final normalized path from
@@ -226,14 +229,16 @@ offline test boundary are now frozen in
 inventory does not wire either production placeholder or authorize a native
 observation.
 
-A crate-private fakeable orchestration seam now also fixes the offline/no-UI
-WinTrust policy, attempts one CLOSE after every returned VERIFY state, maps
-provider errors/panics to closed refusal codes, and rejects catalog/secondary
-signature ambiguity before the existing pure verifier can succeed. A retained
-opaque path state forces the third file-identity observation to occur after
-CLOSE. It has no
-Windows API adapter and performs no executable observation; production remains
-`UnavailableExecutableTrust`.
+A crate-private fakeable orchestration seam fixes the offline/no-UI WinTrust
+policy, attempts one CLOSE after every returned VERIFY state, maps provider
+errors/panics to closed refusal codes, and rejects catalog/secondary signature
+ambiguity before the existing pure verifier can succeed. Its disconnected
+Windows adapter retains stable boxed WinTrust state, binds three file identity
+observations to process creation time, validates no-follow fixed-volume paths,
+and hashes bounded DER-encoded leaf SPKI. It deliberately supplies no
+installation-root digest, performs no call unless explicitly constructed by a
+future production change, and has zero production references. Production
+therefore remains `UnavailableExecutableTrust`.
 
 ## E. Activation order
 
@@ -242,9 +247,10 @@ Windows API adapter and performs no executable observation; production remains
    files, fake trust results, and default-off/all-feature CI. The pure ledger
    state machine, policy correlation handoff, pure executable-trust decision
    seam, and a disconnected synthetic-base Windows DPAPI/ACL store are
-   implemented. The disconnected LocalAppData/volume constructor is also
-   implemented, while production ledger wiring and the native executable API
-   observer remain incomplete.
+   implemented. The disconnected LocalAppData/volume constructor and native
+   executable API adapter are also implemented, while independent unsafe
+   review, signed-fixture evidence, signer/root provenance, and both production
+   wiring decisions remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

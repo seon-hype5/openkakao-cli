@@ -225,9 +225,12 @@ implementation; it likewise authorizes no probe or production wiring.
   compiled and retains its canonical base handle, but native-port wiring
   remains absent and fail closed.
 - Complete executable-signature and canonical-installation-root evidence. The
-  content-free decision seam plus fakeable offline WinTrust policy and
-  VERIFY/extract/CLOSE orchestration exist; reviewed signer/root digests and
-  the real native handle/WinVerifyTrust adapter remain absent and fail closed.
+  content-free decision seam, fakeable offline WinTrust policy, and a
+  disconnected native handle/WinVerifyTrust/provider/SPKI adapter now exist.
+  The adapter has zero production references, deliberately returns no
+  install-root digest, and has never been called against KakaoTalk. Reviewed
+  signer/root provenance, signed-fixture evidence, independent unsafe review,
+  and production wiring remain absent and fail closed.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
@@ -241,11 +244,12 @@ implementation; it likewise authorizes no probe or production wiring.
 
 The offline multiple-window remediation, replay-ledger scaffold,
 explicit-synthetic-base native ledger store, pure executable-trust decision
-seam, disconnected ledger location constructor, and native boundary inventory
-are implemented and must pass the full safe regression matrix. The next safe
-offline work is the trust boundary's native API adapter compiled/tested
-without a real KakaoTalk path/signature probe, or an independent unsafe audit
-of the disconnected locator/store before any wiring decision.
+seam, disconnected ledger location constructor, disconnected native trust API
+adapter, and native boundary inventory are implemented and must pass the full
+safe regression matrix. The next safe offline work is an independent unsafe
+audit of both disconnected native boundaries, plus a provenance design for a
+repository-owned signed fixture and canonical install-root rule. Neither task
+requires or authorizes a real KakaoTalk path/signature probe.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in
