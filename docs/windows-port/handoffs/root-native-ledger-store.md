@@ -1,5 +1,9 @@
 # Root handoff: synthetic-base Windows ledger store
 
+Successor note: [`root-native-ledger-location.md`](root-native-ledger-location.md)
+adds the separately reviewed, disconnected LocalAppData/fixed-volume location
+constructor. Production wiring remains unavailable.
+
 ## Outcome
 
 This change implements the Windows-native half of the durable replay store for

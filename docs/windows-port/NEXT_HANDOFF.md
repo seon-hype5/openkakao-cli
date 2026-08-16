@@ -155,8 +155,8 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 107 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 27 passed |
+| `cargo test --locked --lib` | 155 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 82 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 23 passed |
@@ -171,7 +171,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 27 passed |
+| release all-feature Windows synthetic tests | 82 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -221,8 +221,9 @@ implementation; it likewise authorizes no probe or production wiring.
 - Review and complete the proposed privacy-safe durable replay ledger. Its
   fixed codec/controller/ordering/correlation and an explicit-temporary-base
   Windows DPAPI/protected-ACL/write-through store are synthetically tested.
-  The production LocalAppData/volume constructor and native-port wiring remain
-  absent and fail closed.
+  A disconnected LocalAppData/fixed-volume/parent-chain constructor is now
+  compiled and retains its canonical base handle, but native-port wiring
+  remains absent and fail closed.
 - Complete executable-signature and canonical-installation-root evidence. The
   content-free decision seam plus fakeable offline WinTrust policy and
   VERIFY/extract/CLOSE orchestration exist; reviewed signer/root digests and
@@ -240,11 +241,11 @@ implementation; it likewise authorizes no probe or production wiring.
 
 The offline multiple-window remediation, replay-ledger scaffold,
 explicit-synthetic-base native ledger store, pure executable-trust decision
-seam, and native boundary inventory are implemented and must pass the full
-safe regression matrix. The next safe offline work is the ledger's
-LocalAppData/volume adapter kept disconnected from production, or the trust
-boundary's native API adapter compiled/tested without a real KakaoTalk
-path/signature probe.
+seam, disconnected ledger location constructor, and native boundary inventory
+are implemented and must pass the full safe regression matrix. The next safe
+offline work is the trust boundary's native API adapter compiled/tested
+without a real KakaoTalk path/signature probe, or an independent unsafe audit
+of the disconnected locator/store before any wiring decision.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

@@ -48,6 +48,12 @@ This list was checked against the locally resolved generated source for
 
 ## Durable ledger boundary
 
+Offline location status: a disconnected constructor now implements the fixed
+current-user known-folder, source and canonical parent-chain no-reparse,
+volume-GUID/fixed-local, retained-base-handle, and fixed child-directory
+protocol below. No production path references it, and tests never call
+`SHGetKnownFolderPath` or write real LocalAppData.
+
 ### Fixed location and bounds
 
 1. Resolve the current user's `FOLDERID_LocalAppData` with
@@ -317,9 +323,9 @@ all later gates still require a fresh, explicitly named approval.
 2. Implement the DPAPI/ACL store behind an internal constructor that accepts
    an explicit synthetic base directory for tests; keep production wiring on
    `UnavailableLedger`.
-3. Complete fault injection and independent unsafe review, then separately
-   decide whether the fixed LocalAppData constructor may replace the
-   placeholder.
+3. Complete fault injection and implement the fixed LocalAppData constructor
+   as a separate disconnected change. Both are complete; independent unsafe
+   review and the decision to replace the placeholder remain outstanding.
 4. Implement the trust observer behind a fakeable native adapter without a
    real KakaoTalk probe; keep production wiring unavailable. The call-policy
    and state-lifetime orchestration part is complete; the native API adapter is

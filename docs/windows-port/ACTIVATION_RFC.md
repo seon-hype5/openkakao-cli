@@ -82,7 +82,12 @@ the internal record form. An explicit-synthetic-base Windows store now
 implements current-user DPAPI, protected exact-user ACLs, handle/reparse
 checks, bounded exclusive I/O, write-through replacement/tombstones, reload
 verification, and test-only fault injection. It has no production
-`LocalAppData` constructor and is not wired to the native mutation port.
+`LocalAppData` wiring to the native mutation port. A separately compiled,
+disconnected constructor now resolves the current-user known folder, proves
+both source/canonical parent chains reparse-free, requires an exact fixed
+volume-GUID path, retains the canonical base handle, and accepts only the
+fixed protected application directory. Automated tests never call that
+production locator.
 Production therefore still deliberately uses `UnavailableLedger` and refuses
 before UI observation, final native write preflight, claim, or `SetValue`.
 This is an additional activation barrier, not live-write authorization.
@@ -237,8 +242,9 @@ Windows API adapter and performs no executable observation; production remains
    files, fake trust results, and default-off/all-feature CI. The pure ledger
    state machine, policy correlation handoff, pure executable-trust decision
    seam, and a disconnected synthetic-base Windows DPAPI/ACL store are
-   implemented; the production LocalAppData/volume constructor, production
-   ledger wiring, and native executable observer remain incomplete.
+   implemented. The disconnected LocalAppData/volume constructor is also
+   implemented, while production ledger wiring and the native executable API
+   observer remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

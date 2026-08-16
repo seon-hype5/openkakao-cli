@@ -1,9 +1,10 @@
 //! Windows DPAPI/ACL storage implementation for the durable mutation ledger.
 //!
-//! Production deliberately has no constructor for this store yet. Tests may
-//! create it only below an explicit synthetic temporary parent. This keeps the
-//! native ownership and durability boundary compiled without touching a user
-//! application, `LocalAppData`, or the production mutation path.
+//! A disconnected constructor can now consume the separately validated
+//! current-user LocalAppData location. Production deliberately never calls it;
+//! tests create the same store shape only below an explicit synthetic parent.
+//! This keeps native ownership and durability compiled without touching a user
+//! application, the real LocalAppData directory, or the mutation path.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -16,9 +17,9 @@ use std::ptr;
 use rand::{rngs::OsRng, RngCore};
 use windows::core::{BOOL, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_INSUFFICIENT_BUFFER,
-    ERROR_NO_MORE_FILES, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GENERIC_READ, GENERIC_WRITE, HANDLE,
-    HLOCAL,
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_FILES, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS,
+    GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL,
 };
 use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
 use windows::Win32::Security::Cryptography::{
@@ -53,6 +54,7 @@ use super::ledger::{
     decode_record, encode_record, DurableLedgerStore, LedgerRecord, LedgerStoreError,
     ENCODED_RECORD_LEN,
 };
+use super::ledger_location::{resolve_production_ledger_location, ValidatedLedgerLocation};
 
 const LEDGER_FILE_NAME: &str = "mutation-ledger.v1";
 const SYNTHETIC_DIRECTORY_NAME: &str = "openkakao-ledger-synthetic";
@@ -80,11 +82,38 @@ enum FaultPoint {
 pub(super) struct WindowsLedgerStore {
     directory: PathBuf,
     owner: OwnedSid,
+    location: Option<ValidatedLedgerLocation>,
     #[cfg(test)]
     fault: Option<FaultPoint>,
 }
 
 impl WindowsLedgerStore {
+    /// Deliberately disconnected from `NativeMutationPort`. Merely compiling
+    /// this constructor does not resolve or create the real LocalAppData path.
+    #[allow(dead_code)]
+    fn open_disconnected_production() -> Result<Self, LedgerStoreError> {
+        Self::open_validated(resolve_production_ledger_location()?)
+    }
+
+    fn open_validated(location: ValidatedLedgerLocation) -> Result<Self, LedgerStoreError> {
+        location.revalidate()?;
+        let directory = location.directory().to_path_buf();
+        validate_absolute_path(&directory)?;
+        let owner = OwnedSid::current_user()?;
+        create_secure_directory_if_absent(&directory, &owner)?;
+        location.revalidate()?;
+        let store = Self {
+            directory,
+            owner,
+            location: Some(location),
+            #[cfg(test)]
+            fault: None,
+        };
+        store.verify_directory()?;
+        store.ensure_known_directory_entries()?;
+        Ok(store)
+    }
+
     #[cfg(test)]
     fn create_synthetic(parent: &Path) -> Result<Self, LedgerStoreError> {
         let directory = parent.join(SYNTHETIC_DIRECTORY_NAME);
@@ -94,6 +123,7 @@ impl WindowsLedgerStore {
         let store = Self {
             directory,
             owner,
+            location: None,
             #[cfg(test)]
             fault: None,
         };
@@ -112,6 +142,7 @@ impl WindowsLedgerStore {
         let store = Self {
             directory,
             owner,
+            location: None,
             fault: None,
         };
         store.verify_directory()?;
@@ -138,8 +169,15 @@ impl WindowsLedgerStore {
     }
 
     fn verify_directory(&self) -> Result<(), LedgerStoreError> {
+        if let Some(location) = &self.location {
+            location.revalidate()?;
+        }
         let handle = open_existing(&self.directory, true, directory_access(), share_all())?;
-        verify_handle(&handle, true, &self.owner, directory_ace_flags())
+        verify_handle(&handle, true, &self.owner, directory_ace_flags())?;
+        if let Some(location) = &self.location {
+            location.revalidate()?;
+        }
+        Ok(())
     }
 
     fn ensure_known_directory_entries(&self) -> Result<bool, LedgerStoreError> {
@@ -385,6 +423,25 @@ fn create_secure_directory(path: &Path, owner: &OwnedSid) -> Result<(), LedgerSt
     // call; the synthetic parent is unique, so an existing child is refusal.
     unsafe { CreateDirectoryW(PCWSTR(path_wide.as_ptr()), Some(ptr::from_ref(&attributes))) }
         .map_err(|_| LedgerStoreError::IoUncertain)
+}
+
+fn create_secure_directory_if_absent(
+    path: &Path,
+    owner: &OwnedSid,
+) -> Result<(), LedgerStoreError> {
+    let mut descriptor = OwnedSecurityDescriptor::new(owner, directory_ace_flags())?;
+    let attributes = descriptor.attributes();
+    let path_wide = wide_path(path)?;
+    // SAFETY: path and descriptor pointers remain valid for the synchronous
+    // call. An already-existing entry is accepted only provisionally; the
+    // caller immediately reopens it without following reparse points and
+    // proves its type, owner, and exact protected DACL.
+    match unsafe { CreateDirectoryW(PCWSTR(path_wide.as_ptr()), Some(ptr::from_ref(&attributes))) }
+    {
+        Ok(()) => Ok(()),
+        Err(_) if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS => Ok(()),
+        Err(_) => Err(LedgerStoreError::IoUncertain),
+    }
 }
 
 fn open_existing(
@@ -1092,6 +1149,28 @@ mod tests {
         let stage = controller.begin_stage().unwrap();
         controller.resolve_restored_stage(stage).unwrap();
         controller.ensure_clear().unwrap();
+    }
+
+    #[test]
+    fn validated_location_creates_and_reopens_only_the_fixed_secure_directory() {
+        let parent = tempfile::tempdir().unwrap();
+        let location = ValidatedLedgerLocation::for_synthetic_parent(parent.path()).unwrap();
+        let directory = location.directory_for_test().to_path_buf();
+        let mut store = WindowsLedgerStore::open_validated(location).unwrap();
+        assert_eq!(store.load().unwrap(), None);
+        drop(store);
+
+        let location = ValidatedLedgerLocation::for_synthetic_parent(parent.path()).unwrap();
+        let mut reopened = WindowsLedgerStore::open_validated(location).unwrap();
+        assert_eq!(reopened.load().unwrap(), None);
+        drop(reopened);
+
+        std::fs::write(directory.join("unexpected.production"), b"x").unwrap();
+        let location = ValidatedLedgerLocation::for_synthetic_parent(parent.path()).unwrap();
+        match WindowsLedgerStore::open_validated(location) {
+            Err(error) => assert_eq!(error, LedgerStoreError::IoUncertain),
+            Ok(_) => panic!("unexpected directory entry must refuse"),
+        }
     }
 
     #[test]

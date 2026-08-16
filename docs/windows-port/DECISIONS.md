@@ -204,3 +204,17 @@ Reject catalog choice, secondary signatures, nonzero trust status, and
 non-exact primary signer cardinality without fallback. Keep production on
 `UnavailableExecutableTrust` until a separate native adapter and independently
 reviewed signer/root profile exist.
+
+## ADR-024: Retain the canonical LocalAppData base handle before ledger wiring
+
+Resolve current-user LocalAppData without environment variables, inspect both
+the original Shell path and handle-derived volume-GUID path component by
+component without following reparse points, require a fixed local volume, and
+retain the canonical base handle through the ledger store lifetime. Revalidate
+that handle before and after opening the protected child directory.
+
+Compile the complete constructor separately from the synthetic store, but do
+not reference it from `NativeMutationPort`. Existing directories are accepted
+only after the same exact type, owner, protected-DACL, and entry checks used by
+the synthetic boundary. Production remains on `UnavailableLedger` until an
+independent unsafe review and a separate wiring decision.

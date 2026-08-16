@@ -114,8 +114,9 @@ or write authority.
 - Cross-process exclusion, the pure replay transition protocol, and a
   policy-owned one-use redacted correlation token exist. A current-user
   DPAPI/protected-ACL/write-through store is synthetically tested only under an
-  explicit temporary base. Its production LocalAppData/volume constructor and
-  native-port wiring remain absent, so all-feature production still refuses at
+  explicit temporary base. A disconnected LocalAppData/volume-GUID/parent-chain
+  locator also exists but is never called by tests or production. Native-port
+  wiring remains absent, so all-feature production still refuses at
   `windows_ledger_unavailable` before a UI mutation claim.
 
 These are blockers to enabling production write capability, not reasons to
