@@ -46,10 +46,14 @@ do not cross that public snapshot boundary.
 
 The Windows backend may:
 
-- enumerate exact `KakaoTalk.exe` top-level windows;
+- enumerate exact-class top-level windows and inspect no more than eight in a
+  single read-only probe;
 - verify PID, executable path, file version, process creation time, session,
   integrity compatibility, and visible/enabled state;
-- classify zero, one, or multiple candidate windows;
+- when several exact-class windows exist, narrow them only if exactly one has
+  one exact composer and every other inspected window has no exact composer;
+- classify zero, one, duplicate, internally ambiguous, or over-limit
+  candidates without guessing;
 - perform a server-side exact UI Automation search for composer metadata on a
   dedicated windowless MTA thread; and
 - return run-local fingerprints and structured refusal evidence.
@@ -63,6 +67,12 @@ properties, room/profile labels, or draft text. It consequently leaves
 `exact_match`, `unique_match`, `self_chat_verified`, and `draft_empty` false.
 `doctor --ui` can return this redacted diagnostic state; production
 `local-send` cannot turn it into an approval.
+
+Read-only narrowing does not apply to the native transaction path. Fresh
+write observation and final mutation preflight still require raw top-level
+enumeration itself to contain exactly one window. This asymmetry lets doctor
+distinguish a normal non-composer application window from a composer-bearing
+window without weakening any future mutation gate.
 
 ## Authorization boundary
 

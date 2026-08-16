@@ -43,6 +43,11 @@ At a separately approved session, root performs these steps:
 1. Establish an in-memory before-state containing only booleans or redacted
    fingerprints for foreground stability, Z-order stability, clipboard
    sequence stability, and composer-value length stability.
+   Raw exact-class window multiplicity is not by itself a selector failure:
+   apply the reviewed read-only rule of at most eight candidates, exactly one
+   window with exactly one known-profile composer, and no duplicate or
+   internally ambiguous composer. Keep counts and native identifiers in memory
+   and never print or persist them.
 2. Run only `doctor --ui`; never run legacy `doctor` on Windows.
 3. Review the console report without persisting it. Confirm fixed schema,
    allowlisted evidence, and absence of private material.
@@ -61,6 +66,9 @@ At a separately approved session, root performs these steps:
 - Dry-run produces either an intended plan from a separately approved safe
   fake or a stable production refusal; it never stages or commits.
 - Inspect count is bounded by the reviewed path and mutation counts are zero.
+- The before-state, doctor report, and after-state agree on one narrowed
+  composer-bearing diagnostic window; this remains only composer evidence,
+  not proof of self-chat identity.
 - Foreground, focus, Z-order, clipboard sequence, and composer value length are
   unchanged.
 - No persistent artifact is created by default.

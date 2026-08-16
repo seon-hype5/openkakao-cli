@@ -107,3 +107,16 @@ not guess a send button. Until privacy-safe target evidence and an exact unique
 Invoke selector are measured and reviewed, advertise `send_open_chat=false`
 even in a feature-enabled build. A durable privacy-safe replay ledger is also
 required before automatic commit activation.
+
+## ADR-017: Narrow shared-class windows only in read-only discovery
+
+KakaoTalk may expose several top-level windows with the same exact class. For
+read-only doctor discovery, inspect at most eight candidates and select one
+only when exactly one candidate contains one exact known-profile composer and
+all others contain none. A duplicate composer, an internally ambiguous
+composer, an inspection error, or an over-limit candidate set fails closed.
+
+This selector uses only non-content metadata and does not establish self-chat
+identity. The mutation path deliberately does not reuse the narrowing rule: it
+continues to require exactly one raw top-level window before any value read or
+write boundary.

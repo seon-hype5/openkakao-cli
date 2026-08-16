@@ -52,6 +52,9 @@ pub struct AppSnapshot {
     pub interactive_session_match: bool,
     pub integrity_compatible: bool,
     pub known_ui_profile: bool,
+    /// Exact top-level candidates remaining after platform-specific,
+    /// non-content selector narrowing: zero is absent, one is unique, and
+    /// more than one is ambiguous.
     pub top_level_window_count: usize,
     pub modal_present: bool,
 }

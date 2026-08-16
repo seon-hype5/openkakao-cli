@@ -60,8 +60,9 @@ use zeroize::Zeroize;
 use zeroize::Zeroizing;
 
 use super::{
-    profile_for, ComposerDiscovery, FileVersion, FingerprintKey, NativeComposer, NativeInspection,
-    NativeProcess, NativeWindow, UiProfile, WindowDiscovery, TOP_LEVEL_CLASS,
+    profile_for, select_read_only_window, ComposerDiscovery, FileVersion, FingerprintKey,
+    NativeComposer, NativeInspection, NativeProcess, NativeWindow, UiProfile, WindowDiscovery,
+    TOP_LEVEL_CLASS,
 };
 #[cfg(feature = "windows-ui-write")]
 use super::{
@@ -75,6 +76,7 @@ use crate::platform::{UiError, UiErrorKind};
 const CLASS_BUFFER_UNITS: usize = 256;
 const PROCESS_PATH_BUFFER_UNITS: usize = 32_768;
 const FIXED_FILE_INFO_SIGNATURE: u32 = 0xFEEF_04BD;
+const MAX_READ_ONLY_WINDOW_CANDIDATES: usize = 8;
 
 pub(super) fn inspect(fingerprints: FingerprintKey) -> Result<NativeInspection, UiError> {
     // The caller creates a fresh, windowless worker thread for every probe.
@@ -85,8 +87,14 @@ pub(super) fn inspect(fingerprints: FingerprintKey) -> Result<NativeInspection, 
 
     let window = match windows.len() {
         0 => WindowDiscovery::Absent,
-        1 => WindowDiscovery::Unique(inspect_unique_window(windows[0], fingerprints)?),
-        count => WindowDiscovery::Ambiguous(count),
+        count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => WindowDiscovery::Ambiguous(count),
+        _ => {
+            let mut inspected = Vec::with_capacity(windows.len());
+            for hwnd in windows {
+                inspected.push(inspect_unique_window(hwnd, fingerprints)?);
+            }
+            select_read_only_window(inspected)
+        }
     };
 
     Ok(NativeInspection { window })

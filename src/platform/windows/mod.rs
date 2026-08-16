@@ -196,6 +196,40 @@ enum WindowDiscovery {
     Ambiguous(usize),
 }
 
+/// Narrows read-only discovery without treating a shared KakaoTalk window
+/// class as target identity. With multiple exact-class windows, selection is
+/// allowed only when one window has one exact composer and every other window
+/// has no exact composer. Any duplicate composer evidence remains ambiguous.
+///
+/// This helper is deliberately not used by the mutation path, which retains
+/// its stricter requirement that native enumeration itself return one window.
+fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery {
+    match candidates.len() {
+        0 => WindowDiscovery::Absent,
+        1 => WindowDiscovery::Unique(candidates.remove(0)),
+        candidate_count => {
+            let mut selected_index = None;
+            for (index, candidate) in candidates.iter().enumerate() {
+                match &candidate.composer {
+                    ComposerDiscovery::Unique(_) if selected_index.is_none() => {
+                        selected_index = Some(index);
+                    }
+                    ComposerDiscovery::Unique(_)
+                    | ComposerDiscovery::Ambiguous(_)
+                    | ComposerDiscovery::NotInspected => {
+                        return WindowDiscovery::Ambiguous(candidate_count);
+                    }
+                    ComposerDiscovery::Absent => {}
+                }
+            }
+
+            selected_index.map_or(WindowDiscovery::Ambiguous(candidate_count), |index| {
+                WindowDiscovery::Unique(candidates.swap_remove(index))
+            })
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 struct NativeInspection {
     window: WindowDiscovery,
@@ -514,8 +548,16 @@ mod tests {
     }
 
     fn window(version: Option<FileVersion>, composer: ComposerDiscovery) -> NativeWindow {
+        window_with_fingerprint("run:synthetic-window", version, composer)
+    }
+
+    fn window_with_fingerprint(
+        fingerprint: &str,
+        version: Option<FileVersion>,
+        composer: ComposerDiscovery,
+    ) -> NativeWindow {
         NativeWindow {
-            fingerprint: "run:synthetic-window".to_string(),
+            fingerprint: fingerprint.to_string(),
             visible: true,
             enabled: true,
             process: process(version),
@@ -567,6 +609,88 @@ mod tests {
         assert!(!ambiguous.app.app_running);
         assert_eq!(ambiguous.app.top_level_window_count, 2);
         assert!(ambiguous.target.window.is_none());
+    }
+
+    #[test]
+    fn read_only_discovery_narrows_multiple_windows_by_exact_unique_composer() {
+        let selected = select_read_only_window(vec![
+            window_with_fingerprint(
+                "run:non-composer-window",
+                Some(FileVersion::KNOWN),
+                ComposerDiscovery::Absent,
+            ),
+            window_with_fingerprint(
+                "run:exact-composer-window",
+                Some(FileVersion::KNOWN),
+                ComposerDiscovery::Unique(NativeComposer {
+                    fingerprint: "run:exact-composer".to_string(),
+                    enabled: true,
+                    value_pattern_present: true,
+                    writable: true,
+                    focused: false,
+                }),
+            ),
+            window_with_fingerprint(
+                "run:second-non-composer-window",
+                Some(FileVersion::KNOWN),
+                ComposerDiscovery::Absent,
+            ),
+        ]);
+
+        let WindowDiscovery::Unique(window) = selected else {
+            panic!("one exact unique composer must select one diagnostic window");
+        };
+        assert_eq!(window.fingerprint, "run:exact-composer-window");
+
+        let snapshot = map_native(
+            TargetKind::SelfChat,
+            NativeInspection {
+                window: WindowDiscovery::Unique(window),
+            },
+            25,
+        );
+        assert_eq!(snapshot.app.top_level_window_count, 1);
+        assert!(snapshot.input.unique);
+        assert!(!snapshot.target.self_chat_verified);
+        assert!(!snapshot.target.exact_match);
+        assert!(!snapshot.target.unique_match);
+    }
+
+    #[test]
+    fn read_only_discovery_keeps_duplicate_or_uncertain_composers_ambiguous() {
+        let exact_composer = || {
+            ComposerDiscovery::Unique(NativeComposer {
+                fingerprint: "run:synthetic-composer".to_string(),
+                enabled: true,
+                value_pattern_present: true,
+                writable: true,
+                focused: false,
+            })
+        };
+
+        for candidates in [
+            vec![
+                window(Some(FileVersion::KNOWN), exact_composer()),
+                window(Some(FileVersion::KNOWN), exact_composer()),
+            ],
+            vec![
+                window(Some(FileVersion::KNOWN), exact_composer()),
+                window(Some(FileVersion::KNOWN), ComposerDiscovery::Ambiguous(2)),
+            ],
+            vec![
+                window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                window(None, ComposerDiscovery::NotInspected),
+            ],
+            vec![
+                window(Some(FileVersion::KNOWN), exact_composer()),
+                window(None, ComposerDiscovery::NotInspected),
+            ],
+        ] {
+            assert!(matches!(
+                select_read_only_window(candidates),
+                WindowDiscovery::Ambiguous(2)
+            ));
+        }
     }
 
     #[test]

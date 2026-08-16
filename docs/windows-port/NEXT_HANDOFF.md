@@ -69,10 +69,36 @@ No retry, weaker selector, alternate live probe, stage, or commit followed the
 failure. The troubleshooting runbook permits only offline source/synthetic
 work now. L20 is blocked.
 
+## Offline remediation after the failed L10
+
+The failed session retained only fixed booleans, so it did not preserve a raw
+window count and does not prove a root cause. Offline source review identified
+a conservative failure class: the read-only backend previously returned
+ambiguous as soon as more than one exact `EVA_Window_Dblclk` window existed,
+before determining whether only one contained the exact known-profile
+composer.
+
+The successor to this handoff adds bounded diagnostic narrowing. A probe now
+inspects at most eight exact-class candidates and selects one only if exactly
+one candidate has exactly one `RICHEDIT50W` / `1006` / Edit composer and every
+other candidate has none. Duplicate composers, an internally ambiguous
+composer, too many windows, or any native/UIA inspection error still fail
+closed. Synthetic tests cover the unique, duplicate, internally ambiguous,
+unsupported, and absent-composer shapes.
+
+This is not a self-chat selector and does not authorize a live retry. All
+target-identity booleans remain false, `send_open_chat` remains false, and the
+mutation path still requires raw enumeration to return exactly one top-level
+window. No live KakaoTalk/UIA call was made while implementing or testing this
+remediation.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
   composer metadata discovery runs on a dedicated windowless MTA thread.
+- Read-only discovery examines at most eight exact-class windows and narrows to
+  one only under the exact unique-composer rule; writes retain stricter raw
+  top-level uniqueness.
 - Inspection is metadata-only and redacted. It does not read titles, UIA
   Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
 - Windows CLI provides `doctor --ui` and stdin-only/opened-only `local-send`,
@@ -126,8 +152,8 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 104 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 24 passed |
+| `cargo test --locked --lib` | 106 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 26 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 23 passed |
@@ -142,6 +168,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
+| release all-feature Windows synthetic tests | 26 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -194,9 +221,9 @@ ports, never KakaoTalk or another desktop application.
 
 ## Next permissible step
 
-The next work is offline diagnosis using only fixed codes, reviewed selector
-constants, and synthetic fakes. The failed L10 result does not authorize
-another live observation.
+The offline multiple-window remediation is implemented and must first pass the
+full safe regression matrix. The failed L10 result does not authorize another
+live observation.
 
 A future retry of DAG node L10, documented in
 [`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),
