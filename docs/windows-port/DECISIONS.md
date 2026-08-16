@@ -190,3 +190,17 @@ Do not add a production LocalAppData constructor or replace
 `UnavailableLedger` in the same change. Parent-chain/local-volume review,
 independent unsafe audit, real process-termination testing, and human recovery
 remain separate activation decisions.
+
+## ADR-023: Close every WinTrust state before accepting copied evidence
+
+Freeze a single embedded-file, noninteractive, no-UI, cache-only WinTrust call
+policy behind a crate-private adapter. After VERIFY creates state, attempt
+exactly one CLOSE whether extraction succeeds, fails, or unwinds. A CLOSE
+failure or panic overrides apparent success. Only copied content-free evidence
+may reach the pure verifier after CLOSE. Retain an opaque original-path state
+through CLOSE and observe the third file identity only afterward.
+
+Reject catalog choice, secondary signatures, nonzero trust status, and
+non-exact primary signer cardinality without fallback. Keep production on
+`UnavailableExecutableTrust` until a separate native adapter and independently
+reviewed signer/root profile exist.

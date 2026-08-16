@@ -165,6 +165,16 @@ work. Successful removal still reloads and proves absence.
 
 ## Executable-trust observer boundary
 
+Offline orchestration status: a crate-private fake adapter now fixes the exact
+call policy below and guarantees VERIFY/extract/CLOSE/post-CLOSE-reopen
+ordering across ordinary errors and panics after state ownership reaches the
+orchestrator. It makes no native call and has no production adapter, so all
+path, handle, provider-pointer, SPKI, and profile work in this section remains
+an activation blocker. The native adapter must use a local RAII state guard
+between `WinVerifyTrust` returning and handing state to the orchestrator. It
+must also avoid dynamic panic payloads because `catch_unwind` does not suppress
+the process-wide panic hook.
+
 ### Handle and process binding
 
 The observer runs on the same joined mutation MTA worker and under the same
@@ -311,7 +321,9 @@ all later gates still require a fresh, explicitly named approval.
    decide whether the fixed LocalAppData constructor may replace the
    placeholder.
 4. Implement the trust observer behind a fakeable native adapter without a
-   real KakaoTalk probe; keep production wiring unavailable.
+   real KakaoTalk probe; keep production wiring unavailable. The call-policy
+   and state-lifetime orchestration part is complete; the native API adapter is
+   not.
 5. Obtain signed release provenance and review signer/root profile material.
 6. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.

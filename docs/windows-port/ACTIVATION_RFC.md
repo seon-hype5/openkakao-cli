@@ -221,6 +221,15 @@ offline test boundary are now frozen in
 inventory does not wire either production placeholder or authorize a native
 observation.
 
+A crate-private fakeable orchestration seam now also fixes the offline/no-UI
+WinTrust policy, attempts one CLOSE after every returned VERIFY state, maps
+provider errors/panics to closed refusal codes, and rejects catalog/secondary
+signature ambiguity before the existing pure verifier can succeed. A retained
+opaque path state forces the third file-identity observation to occur after
+CLOSE. It has no
+Windows API adapter and performs no executable observation; production remains
+`UnavailableExecutableTrust`.
+
 ## E. Activation order
 
 1. Review and accept this RFC without changing capability.

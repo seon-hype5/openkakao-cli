@@ -224,9 +224,9 @@ implementation; it likewise authorizes no probe or production wiring.
   The production LocalAppData/volume constructor and native-port wiring remain
   absent and fail closed.
 - Complete executable-signature and canonical-installation-root evidence. The
-  content-free decision seam and adversarial fakes exist; reviewed signer/root
-  digests and the native handle/WinVerifyTrust observer remain absent and fail
-  closed.
+  content-free decision seam plus fakeable offline WinTrust policy and
+  VERIFY/extract/CLOSE orchestration exist; reviewed signer/root digests and
+  the real native handle/WinVerifyTrust adapter remain absent and fail closed.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
@@ -243,7 +243,8 @@ explicit-synthetic-base native ledger store, pure executable-trust decision
 seam, and native boundary inventory are implemented and must pass the full
 safe regression matrix. The next safe offline work is the ledger's
 LocalAppData/volume adapter kept disconnected from production, or the trust
-boundary's fake native adapter with no real-path/signature probe.
+boundary's native API adapter compiled/tested without a real KakaoTalk
+path/signature probe.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

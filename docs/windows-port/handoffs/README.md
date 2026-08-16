@@ -20,3 +20,6 @@ The successor [`root-executable-trust-scaffold.md`](root-executable-trust-scaffo
 records the content-free trust decision seam and its missing native observer.
 [`root-native-ledger-store.md`](root-native-ledger-store.md) records the later
 explicit-synthetic-base DPAPI/ACL store and why production remains unavailable.
+[`root-native-trust-orchestration.md`](root-native-trust-orchestration.md)
+records the fakeable offline WinTrust policy/state-lifetime seam and its
+missing native adapter/profile.
