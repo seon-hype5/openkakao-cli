@@ -293,3 +293,20 @@ This is a synthetic contract, not permission to read a real label. The
 production Windows observer remains unchanged and returns no evidence. Any
 ephemeral native UTF-16 reader, selector measurement, or live observation
 still requires the separately named privacy approval in `ACTIVATION_RFC.md`.
+
+## ADR-029: Hold canonical read-share guards across native trust verification
+
+Do not rely on before/after file identity equality around
+`GetFileVersionInfoW`: that API ignores its legacy handle parameter and reads
+by filename, so replace/read/restore is otherwise indistinguishable. Keep the
+initial process-image discovery handle broadly shared, then open the canonical
+verification file and each canonical parent directory with
+`FILE_SHARE_READ` only. A conflicting existing writer/deleter fails closed;
+future write, delete, and rename opens remain excluded until VERIFY, provider
+extraction, CLOSE, and final reopen finish.
+
+Retain all guards in the opaque path state, preserve no-follow/fixed-volume/
+process-creation/three-identity checks, and keep the adapter disconnected with
+no installation-root digest. Freeze fixture and production evidence acceptance
+in `TRUST_PROVENANCE.md`; this decision supplies no Kakao signer, path, root,
+selector, or capability activation.

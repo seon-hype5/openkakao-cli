@@ -252,7 +252,9 @@ errors/panics to closed refusal codes, and rejects catalog/secondary signature
 ambiguity before the existing pure verifier can succeed. Its disconnected
 Windows adapter retains stable boxed WinTrust state, binds three file identity
 observations to process creation time, validates no-follow fixed-volume paths,
-and hashes bounded DER-encoded leaf SPKI. Post-VERIFY extraction now exact-
+retains the canonical file and parent directories under read-only sharing to
+exclude version/path write-delete ABA races, and hashes bounded DER-encoded
+leaf SPKI. Post-VERIFY extraction now exact-
 checks every caller-owned policy/pointer field, the provider's data/action/
 signature-settings links, and primary verified-signature index zero.
 
@@ -270,6 +272,10 @@ signer value is configured, the native
 adapter deliberately supplies no observed installation-root digest, and it
 has zero production references. Production therefore remains
 `UnavailableExecutableTrust`.
+
+[`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md) now freezes the evidence bundle,
+synthetic signed-fixture, and canonical-root derivation plan. It supplies no
+fixture, signer pin, root relation, or live authorization.
 
 ## E. Activation order
 

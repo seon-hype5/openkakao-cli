@@ -423,6 +423,11 @@ impl Drop for OwnedNativeHandle {
 struct WindowsPathState {
     process_image_file: OwnedNativeHandle,
     verification_file: OwnedNativeHandle,
+    /// Keeps every canonical parent directory open without write/delete
+    /// sharing until VERIFY, CLOSE, and the final identity reopen complete.
+    /// This closes path-component rename/reparse ABA races around the
+    /// path-only version API.
+    _canonical_parent_guards: Vec<OwnedNativeHandle>,
     canonical_path: Zeroizing<Vec<u16>>,
     identity: FileIdentity,
 }
@@ -488,20 +493,23 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         self.validate_process_binding()?;
         let source_path = query_process_image_path(self.process.raw())?;
         validate_absolute_path(&source_path)?;
-        if !path_parent_chain_is_reparse_free(&source_path)? {
-            return Err(NativeTrustFailure::PathObservation);
-        }
+        // The source-path guards remain live until the canonical handle and
+        // its independently guarded parent chain have both been established.
+        let _source_parent_guards = open_reparse_free_parent_chain(&source_path)?;
 
         let process_image_file = open_regular_file_no_follow(&source_path)?;
         validate_regular_file_handle(&process_image_file)?;
         let canonical_path = canonical_file_path(&process_image_file)?;
-        if !is_fixed_local_volume(&canonical_path)?
-            || !path_parent_chain_is_reparse_free(&canonical_path)?
-        {
+        if !is_fixed_local_volume(&canonical_path)? {
             return Err(NativeTrustFailure::PathObservation);
         }
+        let canonical_parent_guards = open_reparse_free_parent_chain(&canonical_path)?;
 
-        let verification_file = open_regular_file_no_follow(&canonical_path)?;
+        // Unlike the initial discovery handle, this handle deliberately omits
+        // FILE_SHARE_WRITE and FILE_SHARE_DELETE. It either excludes writers
+        // and renames for the full verification lifetime or fails closed when
+        // an incompatible handle already exists.
+        let verification_file = open_guarded_regular_file_no_follow(&canonical_path)?;
         validate_regular_file_handle(&verification_file)?;
         if canonical_file_path(&verification_file)? != canonical_path {
             return Err(NativeTrustFailure::PathObservation);
@@ -532,6 +540,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         let state = WindowsPathState {
             process_image_file,
             verification_file,
+            _canonical_parent_guards: canonical_parent_guards,
             canonical_path: Zeroizing::new(canonical_path),
             identity: verified_identity,
         };
@@ -1062,12 +1071,33 @@ fn share_all() -> FILE_SHARE_MODE {
     FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
 }
 
+fn verification_share() -> FILE_SHARE_MODE {
+    // Read sharing is needed by WinTrust/version providers. Omitting write and
+    // delete sharing prevents in-place writes, replacement, and rename for as
+    // long as the verification and ancestor guard handles remain open.
+    FILE_SHARE_MODE(FILE_SHARE_READ.0)
+}
+
 fn open_regular_file_no_follow(path: &Path) -> Result<OwnedNativeHandle, NativeTrustFailure> {
     let wide = wide_path(path)?;
     open_regular_file_no_follow_wide(&wide)
 }
 
 fn open_regular_file_no_follow_wide(wide: &[u16]) -> Result<OwnedNativeHandle, NativeTrustFailure> {
+    open_regular_file_no_follow_with_share(wide, share_all())
+}
+
+fn open_guarded_regular_file_no_follow(
+    path: &Path,
+) -> Result<OwnedNativeHandle, NativeTrustFailure> {
+    let wide = wide_path(path)?;
+    open_regular_file_no_follow_with_share(&wide, verification_share())
+}
+
+fn open_regular_file_no_follow_with_share(
+    wide: &[u16],
+    share: FILE_SHARE_MODE,
+) -> Result<OwnedNativeHandle, NativeTrustFailure> {
     if wide.len() < 2 || wide.len() > MAX_NATIVE_PATH_UNITS || wide.last() != Some(&0) {
         return Err(NativeTrustFailure::PathObservation);
     }
@@ -1078,7 +1108,7 @@ fn open_regular_file_no_follow_wide(wide: &[u16]) -> Result<OwnedNativeHandle, N
         CreateFileW(
             PCWSTR(wide.as_ptr()),
             GENERIC_READ.0 | FILE_READ_ATTRIBUTES.0,
-            share_all(),
+            share,
             None,
             OPEN_EXISTING,
             FILE_FLAG_OPEN_REPARSE_POINT,
@@ -1098,7 +1128,7 @@ fn open_directory_no_follow(path: &Path) -> Result<OwnedNativeHandle, NativeTrus
         CreateFileW(
             PCWSTR(wide.as_ptr()),
             FILE_READ_ATTRIBUTES.0,
-            share_all(),
+            verification_share(),
             None,
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
@@ -1150,7 +1180,9 @@ fn validate_directory_handle(handle: &OwnedNativeHandle) -> Result<(), NativeTru
     Ok(())
 }
 
-fn path_parent_chain_is_reparse_free(path: &Path) -> Result<bool, NativeTrustFailure> {
+fn open_reparse_free_parent_chain(
+    path: &Path,
+) -> Result<Vec<OwnedNativeHandle>, NativeTrustFailure> {
     let parent = path.parent().ok_or(NativeTrustFailure::PathObservation)?;
     let ancestors: Vec<&Path> = parent
         .ancestors()
@@ -1159,13 +1191,13 @@ fn path_parent_chain_is_reparse_free(path: &Path) -> Result<bool, NativeTrustFai
     if ancestors.is_empty() || ancestors.len() > MAX_PATH_ANCESTORS {
         return Err(NativeTrustFailure::PathObservation);
     }
+    let mut guards = Vec::with_capacity(ancestors.len());
     for ancestor in ancestors.into_iter().rev() {
         let handle = open_directory_no_follow(ancestor)?;
-        if validate_directory_handle(&handle).is_err() {
-            return Ok(false);
-        }
+        validate_directory_handle(&handle)?;
+        guards.push(handle);
     }
-    Ok(true)
+    Ok(guards)
 }
 
 fn canonical_file_path(handle: &OwnedNativeHandle) -> Result<PathBuf, NativeTrustFailure> {
@@ -1814,6 +1846,17 @@ mod tests {
             extract_windows_authenticode(&state),
             Err(NativeTrustFailure::ProviderExtraction)
         ));
+    }
+
+    #[test]
+    fn verification_share_mode_excludes_write_delete_and_rename() {
+        assert_eq!(verification_share().0, FILE_SHARE_READ.0);
+        assert_eq!(
+            share_all().0,
+            FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0
+        );
+        assert_eq!(verification_share().0 & FILE_SHARE_WRITE.0, 0);
+        assert_eq!(verification_share().0 & FILE_SHARE_DELETE.0, 0);
     }
 
     #[test]

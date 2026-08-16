@@ -1008,6 +1008,81 @@ mod tests {
             .is_none());
     }
 
+    fn assert_binding_rejects_mutation(
+        permit: &TargetBindingPermit,
+        snapshot: &UiSnapshot,
+        mutate: impl FnOnce(&mut UiSnapshot),
+    ) {
+        let mut changed = snapshot.clone();
+        mutate(&mut changed);
+        assert!(!permit.verifies_snapshot(&changed));
+    }
+
+    #[test]
+    fn target_binding_commits_every_current_snapshot_field() {
+        let (request, permit) = InspectRequest::bound_self_chat(TARGET_CANARY, [0x6b; 32]);
+        let mut bound = target_snapshot();
+        let observed: Vec<u16> = TARGET_CANARY.encode_utf16().collect();
+        bound.target.target_binding = request.bind_observed_target_utf16(&observed, &bound);
+        assert!(permit.verifies_snapshot(&bound));
+
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.platform = UiPlatform::Unsupported
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.app.app_running = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.app.process = None);
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.process.as_mut().unwrap().pid += 1
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.process.as_mut().unwrap().executable.push('x')
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.process.as_mut().unwrap().session_id = None
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.app.app_version = None);
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.interactive_session_match = false
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.integrity_compatible = false
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.known_ui_profile = false
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.top_level_window_count += 1
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.app.modal_present = true);
+
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.target.kind = TargetKind::Other
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.target.self_chat_verified = false
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.target.exact_match = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.target.unique_match = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.target.window = None);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.target.composer = None);
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.target.observed_at_unix_ms += 1
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.target.expires_at_unix_ms += 1
+        });
+
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.input.present = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.input.unique = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.input.enabled = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.input.writable = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.input.draft_empty = false);
+        assert_binding_rejects_mutation(&permit, &bound, |value| value.input.focused = true);
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.input.selector_profile_id = None
+        });
+    }
+
     #[test]
     fn target_binding_never_normalizes_unicode_whitespace_or_surrogates() {
         const COMPOSED: &str = "SYNTHETIC_CAF\u{00c9}_\u{1f642}";

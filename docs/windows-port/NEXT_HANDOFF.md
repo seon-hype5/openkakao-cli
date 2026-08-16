@@ -100,6 +100,19 @@ a private approval permit. Fresh transaction state has a fourth independent
 `target_binding_verified` gate. Production has no label observer, emits no
 proof, and remains fail-closed. This is synthetic scaffolding, not target
 profile measurement or live permission.
+An exhaustive synthetic mutation test now changes every current app, process,
+target, time, and input snapshot field independently and proves that each
+invalidates the request-scoped permit.
+
+A focused native trust/API audit then found an ABA gap around the path-only
+version API: permissively shared handles plus before/after file identities did
+not exclude replace/read/restore. The disconnected adapter now retains the
+canonical verification file and all canonical parent directories with read
+sharing only through WinTrust CLOSE and final reopen. Conflicting existing
+writers/deleters fail closed, and later writes, deletes, and renames cannot
+enter while the guards live. This path still has no production reference or
+root digest. [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md) freezes the synthetic
+fixture and production evidence plan without adding a fixture or Kakao value.
 
 ## Delivered release-candidate behavior
 
@@ -132,6 +145,9 @@ profile measurement or live permission.
 - The guarded transaction binds PID/HWND/path/process creation/session/UIA
   evidence, half-open TTL, a named cross-process mutex, final native preflight,
   exact stage readback, owned-value-only restore, and at most one Invoke.
+- The disconnected executable-trust adapter retains read-share-only canonical
+  file and parent guards across its path-only version query, VERIFY/CLOSE, and
+  final identity reopen; write/delete/rename conflicts refuse.
 - Same-process foreground popups count as user activity. Mutex contention,
   abandonment, wait failure, and every error/panic after SetValue entry are
   `SubmissionUncertain`, exit 21, and never retry-safe.
@@ -167,8 +183,8 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 169 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 96 passed |
+| `cargo test --locked --lib` | 171 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 97 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -183,7 +199,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 96 passed |
+| release all-feature Windows synthetic tests | 97 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -248,9 +264,10 @@ implementation; it likewise authorizes no probe or production wiring.
   kinds and bounded portable relative components, so an observed absolute path
   cannot become a pin. The adapter has zero production references,
   deliberately returns no install-root digest, and has never been called
-  against KakaoTalk. Reviewed signer/root provenance, signed-fixture evidence,
-  independent unsafe review, and production wiring remain absent and fail
-  closed.
+  against KakaoTalk. A focused source/API audit closed the permissive-sharing
+  ABA gap and froze the fixture/provenance plan. Reviewed signer/root values,
+  the signed fixture, a second independent fixture-backed unsafe review, and
+  production wiring remain absent and fail closed.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
@@ -263,15 +280,15 @@ implementation; it likewise authorizes no probe or production wiring.
 ## Next permissible step
 
 The offline multiple-window remediation, target-binding scaffold,
-replay-ledger scaffold,
-explicit-synthetic-base native ledger store, trust-ordered lazy production
-ledger factory, pure executable-trust decision seam, disconnected native trust
-API adapter, and native boundary inventory are implemented and must pass the
-full safe regression matrix. The next safe offline work is an independent
-unsafe audit of the native boundaries, plus a provenance design for a
-repository-owned signed fixture and canonical install-root rule. Further
-synthetic target-binding adversarial review is also permitted. None of these
-tasks requires or authorizes a real KakaoTalk path/signature/label probe.
+replay-ledger scaffold, explicit-synthetic-base native ledger store,
+trust-ordered lazy production ledger factory, pure executable-trust decision
+seam, disconnected native trust API adapter, focused source/API audit, and
+fixture/root-provenance plan are implemented and must pass the full safe
+regression matrix. The next safe offline work is a repository-owned synthetic
+signed fixture plus its content-free native lifetime tests, followed by a
+second independent unsafe review. Further synthetic target-binding adversarial
+review is also permitted. None of these tasks requires or authorizes a real
+KakaoTalk path/signature/label probe or a trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

@@ -122,9 +122,11 @@ or write authority.
   provider extraction exact-checks the owned
   WinTrust state/pointer links and verified primary index. No production path
   constructs the adapter, tests never call it, and it deliberately emits no
-  installation-root digest. Reviewed signer/root provenance, signed-fixture
-  evidence, independent unsafe review, and real native observations remain
-  absent. Production refuses at
+  installation-root digest. A focused source/API audit added retained
+  read-share-only canonical file and parent guards around the path-only version
+  query, VERIFY/CLOSE, and final reopen. Reviewed signer/root provenance,
+  signed-fixture evidence, a second independent unsafe review, and real native
+  observations remain absent. Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
 - Modal evidence remains narrower than a full application-wide model.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.

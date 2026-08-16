@@ -37,3 +37,6 @@ strict WinTrust state-link checks and typed installation-root relation codec.
 [`root-target-binding-scaffold.md`](root-target-binding-scaffold.md) records
 the request-scoped nonserializing target proof, fresh transaction gate, and
 why production still cannot observe or authorize a self target.
+[`root-native-trust-unsafe-audit.md`](root-native-trust-unsafe-audit.md)
+records the focused native trust/API audit, retained write/delete exclusion
+guards, and the still-missing signed-fixture and independent-review evidence.

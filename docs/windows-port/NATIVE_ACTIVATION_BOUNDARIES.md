@@ -194,6 +194,13 @@ review, and production wiring remain activation blockers. Native code avoids
 dynamic panic payloads because `catch_unwind` does not suppress the
 process-wide panic hook.
 
+A focused successor audit found that identity comparisons alone did not close
+an ABA race around the path-only Windows version API. Discovery remains
+non-disruptive, but the canonical verification file and every canonical parent
+directory are now retained with read sharing only through VERIFY, CLOSE, and
+the final identity reopen. Any pre-existing writer/deleter conflict refuses;
+later write, delete, and rename opens remain excluded while the guards live.
+
 ### Handle and process binding
 
 The observer runs on the same joined mutation MTA worker and under the same
@@ -202,9 +209,11 @@ process creation time, and process handle. It must not perform a separate
 best-effort scan.
 
 1. Requery HWND ownership and process creation time.
-2. Obtain the process image path through the opened process handle, then open
-   that file with read/data and attribute access plus read/write/delete sharing
-   so the running application is not disturbed.
+2. Obtain the process image path through the opened process handle. Use a
+   read/write/delete-shared no-follow handle only for initial discovery. After
+   canonicalization, open the verification file with read access and
+   `FILE_SHARE_READ` only; failure caused by an existing writer or deleter is a
+   closed refusal.
 3. Obtain the normalized final path from the file handle with
    `GetFinalPathNameByHandleW(FILE_NAME_NORMALIZED | VOLUME_NAME_GUID)` using a
    bounded two-call buffer protocol.
@@ -213,12 +222,16 @@ best-effort scan.
    CD-ROM, or unmounted results refuse.
 5. Open and inspect every existing path component with
    `FILE_FLAG_OPEN_REPARSE_POINT`; any reparse tag or inspection uncertainty
-   refuses. Never follow an alternate path after such a refusal.
+   refuses. Retain canonical parent handles with `FILE_SHARE_READ` only through
+   verification and final reopen so a component cannot be renamed or replaced.
+   Never follow an alternate path after such a refusal.
 6. Derive a content-free `FileIdentity` from volume serial/file ID plus the
    already required process-creation binding. Compare the process-bound,
    verification-handle, and immediately reopened identities exactly.
-7. Query the existing fixed file version from the same verified handle/path
-   boundary and require `FileVersion::KNOWN`.
+7. Query the fixed file version while the canonical file and parent share
+   guards remain live, immediately reopen and rebind the file identity, and
+   require `FileVersion::KNOWN`. `GetFileVersionInfoW` is path-only; without
+   those guards, before/after identities alone do not exclude replace/restore.
 
 Raw paths, file IDs, PIDs, HWNDs, volume identifiers, or creation times never
 enter `UiError`, output, fixtures, or `Debug`.
@@ -306,7 +319,7 @@ SPKI digest and root-relation digest exist, production continues to use
 | Known-folder `PWSTR` | Shell allocator | `CoTaskMemFree` exactly once |
 | DPAPI output/description | Local allocator | zero sensitive span, then `LocalFree` exactly once |
 | `GetSecurityInfo` descriptor | Local allocator | `LocalFree`; owner/DACL/ACE pointers borrow it |
-| Process/file/directory handles | caller | existing RAII `CloseHandle` wrapper, exactly once |
+| Process/file/directory handles | caller | existing RAII `CloseHandle` wrapper, exactly once; canonical file/parent read-share guards outlive VERIFY, CLOSE, and final reopen |
 | Token-information bytes | Rust allocation | pointer/range validation; drop after copied SID use |
 | ACL/security descriptor | Rust-owned aligned storage | all embedded pointers remain valid through synchronous create call |
 | WinTrust file/data/settings | stack owner | path/handle/settings outlive VERIFY and CLOSE calls |
@@ -342,6 +355,8 @@ open the installed KakaoTalk binary.
   checks through a fake native adapter;
 - signer/root/profile mismatch and identity/path replacement with zero UI
   calls and zero execution claims; and
+- exact discovery-versus-verification share modes; verification excludes write,
+  delete, and rename sharing; and
 - root-relation kind/component/order/case domain separation plus every
   ambiguous, nonportable, oversized, or absolute-like component refusal; and
 - canaries absent from `Debug`, stdout, stderr, JSON, test names, and failure
@@ -368,7 +383,9 @@ all later gates still require a fresh, explicitly named approval.
    calls unreachable and no live store has been opened.
 6. Obtain signed release provenance, add a repository-owned reviewed fixture,
    independently audit the unsafe adapter, and review signer/root profile
-   material. The current adapter deliberately returns no root digest.
+   material. The provenance/fixture acceptance plan is frozen in
+   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md), but no fixture or production
+   value exists and the current adapter deliberately returns no root digest.
 7. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 
@@ -378,7 +395,9 @@ all later gates still require a fresh, explicitly named approval.
 - [CryptUnprotectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptunprotectdata)
 - [SHGetKnownFolderPath](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath)
 - [GetSecurityInfo](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo)
+- [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
 - [GetFinalPathNameByHandleW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew)
+- [GetFileVersionInfoW](https://learn.microsoft.com/en-us/windows/win32/api/winver/nf-winver-getfileversioninfow)
 - [WinVerifyTrust](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-winverifytrust)
 - [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data)
 - [WINTRUST_SIGNATURE_SETTINGS](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_signature_settings)
