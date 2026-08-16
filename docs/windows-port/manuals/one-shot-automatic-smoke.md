@@ -4,8 +4,9 @@
 
 L40 is the highest-risk MVP gate. It permits at most one automatic commit in
 one approved session. A guarded transaction scaffold exists, but production
-capability, target/submit selectors, and a durable replay ledger are absent, so
-this manual cannot presently be executed.
+capability, target/submit selectors, and a durable replay store are absent, so
+this manual cannot presently be executed. The pure ledger codec/state machine
+does not satisfy this prerequisite.
 
 The release goal of repeated exact echoes is cumulative across separately
 approved sessions. It never means sending a batch in one session.

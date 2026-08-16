@@ -11,6 +11,7 @@ use crate::platform::{
     ApprovedSend, SendMode, SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform,
 };
 
+use super::ledger::{LedgerRecord, MutationLedger};
 use super::{FileVersion, KNOWN_PROFILE_ID};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -294,7 +295,7 @@ impl ExecutionClaim for ApprovedSend {
     }
 }
 
-pub(super) trait MutationPort {
+pub(super) trait MutationPort: MutationLedger {
     fn observe(&mut self, expected_message_utf16: &[u16]) -> Result<FreshState, UiError>;
     fn prepare_set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError>;
     fn set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError>;
@@ -308,20 +309,36 @@ pub(super) fn run_stage<C: ExecutionClaim, P: MutationPort>(
     claim: &C,
     port: &mut P,
 ) -> Result<SendOutcome, UiError> {
+    port.ensure_clear()?;
     let before = port.observe(message_utf16)?;
     validate_fresh(expected, &before, DraftState::Empty, false)?;
 
-    port.prepare_set_value(message_utf16)?;
-    claim.try_claim()?;
+    let stage_record = port.begin_stage()?;
+    if let Err(preflight_error) = port.prepare_set_value(message_utf16) {
+        return match port.resolve_restored_stage(stage_record) {
+            Ok(()) => Err(preflight_error),
+            Err(ledger_error) => Err(ledger_error),
+        };
+    }
+    if let Err(claim_error) = claim.try_claim() {
+        return match port.resolve_restored_stage(stage_record) {
+            Ok(()) => Err(claim_error),
+            Err(ledger_error) => Err(ledger_error),
+        };
+    }
+    let correlation = stage_record.correlation();
 
     // From the first SetValue entry onward, a returned error or panic cannot
     // prove that the provider made no change. Normalize the entire remainder
     // of the transaction to a fixed, non-retryable uncertainty boundary.
     match catch_unwind(AssertUnwindSafe(|| {
-        run_stage_after_claim(expected, message_utf16, port)
+        run_stage_after_claim(expected, message_utf16, port, stage_record)
     })) {
         Ok(Ok(outcome)) => Ok(outcome),
-        Ok(Err(_)) | Err(_) => Err(post_set_value_error(SendMode::StageOnly)),
+        Ok(Err(_)) | Err(_) => {
+            let _ = port.mark_indeterminate(correlation);
+            Err(post_set_value_error(SendMode::StageOnly))
+        }
     }
 }
 
@@ -329,6 +346,7 @@ fn run_stage_after_claim<P: MutationPort>(
     expected: &ExpectedState<'_>,
     message_utf16: &[u16],
     port: &mut P,
+    stage_record: LedgerRecord,
 ) -> Result<SendOutcome, UiError> {
     let stage_error = port.set_value(message_utf16).err();
     let staged = match port.observe(message_utf16) {
@@ -347,6 +365,7 @@ fn run_stage_after_claim<P: MutationPort>(
     port.set_value(&[])?;
     let restored = port.observe(message_utf16)?;
     validate_fresh(expected, &restored, DraftState::Empty, false)?;
+    port.resolve_restored_stage(stage_record)?;
 
     if let Some(stage_error) = stage_error {
         Err(stage_error)
@@ -361,18 +380,34 @@ pub(super) fn run_commit<C: ExecutionClaim, P: MutationPort>(
     claim: &C,
     port: &mut P,
 ) -> Result<SendOutcome, UiError> {
+    port.ensure_clear()?;
     let before = port.observe(message_utf16)?;
     validate_fresh(expected, &before, DraftState::Empty, true)?;
 
-    port.prepare_set_value(message_utf16)?;
-    claim.try_claim()?;
+    let stage_record = port.begin_stage()?;
+    if let Err(preflight_error) = port.prepare_set_value(message_utf16) {
+        return match port.resolve_restored_stage(stage_record) {
+            Ok(()) => Err(preflight_error),
+            Err(ledger_error) => Err(ledger_error),
+        };
+    }
+    if let Err(claim_error) = claim.try_claim() {
+        return match port.resolve_restored_stage(stage_record) {
+            Ok(()) => Err(claim_error),
+            Err(ledger_error) => Err(ledger_error),
+        };
+    }
+    let correlation = stage_record.correlation();
 
     match catch_unwind(AssertUnwindSafe(|| {
-        run_commit_after_claim(expected, message_utf16, port)
+        run_commit_after_claim(expected, message_utf16, port, stage_record)
     })) {
         Ok(Ok(outcome)) => Ok(outcome),
         Ok(Err(error)) if error.kind == UiErrorKind::SubmissionUncertain => Err(error),
-        Ok(Err(_)) | Err(_) => Err(post_set_value_error(SendMode::Commit)),
+        Ok(Err(_)) | Err(_) => {
+            let _ = port.mark_indeterminate(correlation);
+            Err(post_set_value_error(SendMode::Commit))
+        }
     }
 }
 
@@ -380,6 +415,7 @@ fn run_commit_after_claim<P: MutationPort>(
     expected: &ExpectedState<'_>,
     message_utf16: &[u16],
     port: &mut P,
+    stage_record: LedgerRecord,
 ) -> Result<SendOutcome, UiError> {
     let stage_error = port.set_value(message_utf16).err();
     let staged = match port.observe(message_utf16) {
@@ -390,23 +426,45 @@ fn run_commit_after_claim<P: MutationPort>(
     let commit_validation = validate_fresh(expected, &staged, DraftState::ExactMessage, true);
     if let Some(stage_error) = stage_error {
         restore_if_proven_owned(expected, message_utf16, port, &staged)?;
+        port.resolve_restored_stage(stage_record)?;
         return Err(stage_error);
     }
     if let Err(validation_error) = commit_validation {
         // A disappearing send selector is safe to recover from only when all
         // non-selector state still proves that the staged value is ours.
         restore_if_proven_owned(expected, message_utf16, port, &staged)?;
+        port.resolve_restored_stage(stage_record)?;
         return Err(validation_error);
     }
 
+    // Persist the commit boundary before the final native Invoke preflight.
+    // Any failure from this point leaves a blocking record; it is never
+    // automatically removed even when the exact staged value is restored.
+    let commit_record = match port.mark_commit(stage_record) {
+        Ok(record) => record,
+        Err(ledger_error) => {
+            let _ = restore_if_proven_owned(expected, message_utf16, port, &staged);
+            return Err(ledger_error);
+        }
+    };
+
     if let Err(preflight_error) = port.prepare_invoke() {
-        restore_if_proven_owned(expected, message_utf16, port, &staged)?;
+        let _ = restore_if_proven_owned(expected, message_utf16, port, &staged);
         return Err(preflight_error);
     }
 
     // There is exactly one submission call and no retry. Any returned error or
-    // panic after entry is uncertain because the provider may have acted.
-    match catch_unwind(AssertUnwindSafe(|| port.invoke_verified())) {
+    // panic after entry is uncertain because the provider may have acted. The
+    // durable record remains terminal even after an apparently successful call.
+    let invoke_result = catch_unwind(AssertUnwindSafe(|| port.invoke_verified()));
+    let ledger_result = port.mark_indeterminate(commit_record.correlation());
+    if ledger_result.is_err() {
+        return Err(error(
+            UiErrorKind::SubmissionUncertain,
+            "windows_commit_invoke_uncertain",
+        ));
+    }
+    match invoke_result {
         Ok(Ok(())) => Ok(SendOutcome::CommitIssued),
         Ok(Err(_)) | Err(_) => Err(error(
             UiErrorKind::SubmissionUncertain,
@@ -586,6 +644,9 @@ mod tests {
     use std::cell::Cell;
     use std::collections::VecDeque;
 
+    use super::super::ledger::{
+        DurableLedgerStore, LedgerController, LedgerStoreError, RecordCorrelation,
+    };
     use super::*;
 
     const MESSAGE: &[u16] = &[0x0043, 0x0041, 0x004E, 0x0041, 0x0052, 0x0059];
@@ -611,36 +672,98 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct FakeLedgerStore {
+        record: Option<LedgerRecord>,
+    }
+
+    impl DurableLedgerStore for FakeLedgerStore {
+        fn load(&mut self) -> Result<Option<LedgerRecord>, LedgerStoreError> {
+            Ok(self.record)
+        }
+
+        fn durable_replace(
+            &mut self,
+            expected: Option<LedgerRecord>,
+            next: LedgerRecord,
+        ) -> Result<(), LedgerStoreError> {
+            if self.record != expected {
+                return Err(LedgerStoreError::InvalidRecord);
+            }
+            self.record = Some(next);
+            Ok(())
+        }
+
+        fn durable_remove(&mut self, expected: LedgerRecord) -> Result<(), LedgerStoreError> {
+            if self.record != Some(expected) {
+                return Err(LedgerStoreError::InvalidRecord);
+            }
+            self.record = None;
+            Ok(())
+        }
+    }
+
     struct FakePort {
+        ledger: LedgerController<FakeLedgerStore>,
+        ledger_preflight_error: Option<UiError>,
+        ledger_begin_error: Option<UiError>,
+        ledger_commit_error: Option<UiError>,
+        ledger_indeterminate_error: Option<UiError>,
+        ledger_resolve_error: Option<UiError>,
+        ledger_preflight_calls: usize,
+        ledger_begin_calls: usize,
+        ledger_commit_calls: usize,
+        ledger_indeterminate_calls: usize,
+        ledger_resolve_calls: usize,
         states: VecDeque<Result<FreshState, UiError>>,
         set_results: VecDeque<Result<(), UiError>>,
         prepare_set_results: VecDeque<Result<(), UiError>>,
         prepare_invoke_result: Result<(), UiError>,
         invoke_result: Result<(), UiError>,
         panic_on_observe_call: Option<usize>,
+        panic_on_prepare_invoke: bool,
+        panic_on_invoke: bool,
         observe_calls: usize,
         prepare_set_calls: usize,
         set_calls: usize,
         clear_calls: usize,
         prepare_invoke_calls: usize,
         invoke_calls: usize,
+        events: Vec<&'static str>,
     }
 
     impl FakePort {
         fn with_states(states: impl IntoIterator<Item = FreshState>) -> Self {
             Self {
+                ledger: LedgerController::new(
+                    FakeLedgerStore::default(),
+                    RecordCorrelation::from_bytes([0x5A; 16]).unwrap(),
+                ),
+                ledger_preflight_error: None,
+                ledger_begin_error: None,
+                ledger_commit_error: None,
+                ledger_indeterminate_error: None,
+                ledger_resolve_error: None,
+                ledger_preflight_calls: 0,
+                ledger_begin_calls: 0,
+                ledger_commit_calls: 0,
+                ledger_indeterminate_calls: 0,
+                ledger_resolve_calls: 0,
                 states: states.into_iter().map(Ok).collect(),
                 set_results: VecDeque::new(),
                 prepare_set_results: VecDeque::new(),
                 prepare_invoke_result: Ok(()),
                 invoke_result: Ok(()),
                 panic_on_observe_call: None,
+                panic_on_prepare_invoke: false,
+                panic_on_invoke: false,
                 observe_calls: 0,
                 prepare_set_calls: 0,
                 set_calls: 0,
                 clear_calls: 0,
                 prepare_invoke_calls: 0,
                 invoke_calls: 0,
+                events: Vec::new(),
             }
         }
 
@@ -651,8 +774,59 @@ mod tests {
         }
     }
 
+    impl MutationLedger for FakePort {
+        fn ensure_clear(&mut self) -> Result<(), UiError> {
+            self.events.push("ledger_preflight");
+            self.ledger_preflight_calls += 1;
+            if let Some(error) = self.ledger_preflight_error.take() {
+                return Err(error);
+            }
+            self.ledger.ensure_clear()
+        }
+
+        fn begin_stage(&mut self) -> Result<LedgerRecord, UiError> {
+            self.events.push("ledger_stage");
+            self.ledger_begin_calls += 1;
+            if let Some(error) = self.ledger_begin_error.take() {
+                return Err(error);
+            }
+            self.ledger.begin_stage()
+        }
+
+        fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
+            self.events.push("ledger_commit");
+            self.ledger_commit_calls += 1;
+            if let Some(error) = self.ledger_commit_error.take() {
+                return Err(error);
+            }
+            self.ledger.mark_commit(stage)
+        }
+
+        fn mark_indeterminate(
+            &mut self,
+            correlation: RecordCorrelation,
+        ) -> Result<LedgerRecord, UiError> {
+            self.events.push("ledger_indeterminate");
+            self.ledger_indeterminate_calls += 1;
+            if let Some(error) = self.ledger_indeterminate_error.take() {
+                return Err(error);
+            }
+            self.ledger.mark_indeterminate(correlation)
+        }
+
+        fn resolve_restored_stage(&mut self, stage: LedgerRecord) -> Result<(), UiError> {
+            self.events.push("ledger_resolve");
+            self.ledger_resolve_calls += 1;
+            if let Some(error) = self.ledger_resolve_error.take() {
+                return Err(error);
+            }
+            self.ledger.resolve_restored_stage(stage)
+        }
+    }
+
     impl MutationPort for FakePort {
         fn observe(&mut self, _expected_message_utf16: &[u16]) -> Result<FreshState, UiError> {
+            self.events.push("observe");
             self.observe_calls += 1;
             if self.panic_on_observe_call == Some(self.observe_calls) {
                 panic!("synthetic post-SetValue provider panic");
@@ -663,6 +837,11 @@ mod tests {
         }
 
         fn prepare_set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError> {
+            self.events.push(if value_utf16.is_empty() {
+                "prepare_clear"
+            } else {
+                "prepare_set"
+            });
             if !value_utf16.is_empty() {
                 assert_eq!(value_utf16, MESSAGE);
             }
@@ -672,8 +851,10 @@ mod tests {
 
         fn set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError> {
             if value_utf16.is_empty() {
+                self.events.push("clear");
                 self.clear_calls += 1;
             } else {
+                self.events.push("set");
                 assert_eq!(value_utf16, MESSAGE);
                 self.set_calls += 1;
             }
@@ -681,12 +862,20 @@ mod tests {
         }
 
         fn prepare_invoke(&mut self) -> Result<(), UiError> {
+            self.events.push("prepare_invoke");
             self.prepare_invoke_calls += 1;
+            if self.panic_on_prepare_invoke {
+                panic!("synthetic final Invoke preflight panic");
+            }
             self.prepare_invoke_result.clone()
         }
 
         fn invoke_verified(&mut self) -> Result<(), UiError> {
+            self.events.push("invoke");
             self.invoke_calls += 1;
+            if self.panic_on_invoke {
+                panic!("synthetic Invoke provider panic");
+            }
             self.invoke_result.clone()
         }
     }
@@ -890,6 +1079,24 @@ mod tests {
         assert_eq!(port.set_calls, 1);
         assert_eq!(port.clear_calls, 1);
         assert_eq!(port.invoke_calls, 0);
+        assert_eq!(port.ledger_begin_calls, 1);
+        assert_eq!(port.ledger_resolve_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 0);
+        assert_eq!(
+            port.events,
+            [
+                "ledger_preflight",
+                "observe",
+                "ledger_stage",
+                "prepare_set",
+                "set",
+                "observe",
+                "prepare_clear",
+                "clear",
+                "observe",
+                "ledger_resolve",
+            ]
+        );
     }
 
     #[test]
@@ -920,6 +1127,49 @@ mod tests {
         assert!(run_stage(&expected(), MESSAGE, &claim, &mut port).is_err());
         assert_eq!(claim.calls.get(), 1);
         port.assert_no_mutation();
+        assert_eq!(port.ledger_begin_calls, 1);
+        assert_eq!(port.ledger_resolve_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 0);
+    }
+
+    #[test]
+    fn unavailable_ledger_refuses_before_claim_or_ui_mutation() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([valid(DraftState::Empty)]);
+        port.ledger_preflight_error = Some(error(
+            UiErrorKind::UnsupportedCapability,
+            "windows_ledger_unavailable",
+        ));
+
+        let refusal = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::UnsupportedCapability);
+        assert_eq!(refusal.operation, "windows_ledger_unavailable");
+        assert_eq!(claim.calls.get(), 0);
+        assert_eq!(port.ledger_preflight_calls, 1);
+        assert_eq!(port.ledger_begin_calls, 0);
+        assert_eq!(port.observe_calls, 0);
+        assert_eq!(port.prepare_set_calls, 0);
+        assert_eq!(port.events, ["ledger_preflight"]);
+        port.assert_no_mutation();
+    }
+
+    #[test]
+    fn existing_ledger_refuses_before_any_ui_observation() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([valid(DraftState::Empty)]);
+        port.ledger
+            .begin_stage()
+            .expect("synthetic prior process marker");
+
+        let refusal = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::SubmissionUncertain);
+        assert_eq!(refusal.operation, "windows_ledger_existing");
+        assert!(!refusal.retry_safe);
+        assert_eq!(claim.calls.get(), 0);
+        assert_eq!(port.ledger_preflight_calls, 1);
+        assert_eq!(port.observe_calls, 0);
+        assert_eq!(port.events, ["ledger_preflight"]);
+        port.assert_no_mutation();
     }
 
     #[test]
@@ -935,6 +1185,18 @@ mod tests {
         assert_eq!(error.kind, UiErrorKind::StaleSnapshot);
         assert_eq!(claim.calls.get(), 0);
         assert_eq!(port.prepare_set_calls, 1);
+        assert_eq!(port.ledger_begin_calls, 1);
+        assert_eq!(port.ledger_resolve_calls, 1);
+        assert_eq!(
+            port.events,
+            [
+                "ledger_preflight",
+                "observe",
+                "ledger_stage",
+                "prepare_set",
+                "ledger_resolve",
+            ]
+        );
         port.assert_no_mutation();
     }
 
@@ -970,6 +1232,25 @@ mod tests {
         assert_eq!(port.set_calls, 1);
         assert_eq!(port.clear_calls, 0);
         assert_eq!(port.invoke_calls, 1);
+        assert_eq!(port.ledger_begin_calls, 1);
+        assert_eq!(port.ledger_commit_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 1);
+        assert_eq!(port.ledger_resolve_calls, 0);
+        assert_eq!(
+            port.events,
+            [
+                "ledger_preflight",
+                "observe",
+                "ledger_stage",
+                "prepare_set",
+                "set",
+                "observe",
+                "ledger_commit",
+                "prepare_invoke",
+                "invoke",
+                "ledger_indeterminate",
+            ]
+        );
     }
 
     #[test]
@@ -984,6 +1265,127 @@ mod tests {
         assert!(!error.retry_safe);
         assert_eq!(port.invoke_calls, 1);
         assert_eq!(port.clear_calls, 0);
+        assert_eq!(port.ledger_commit_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 1);
+    }
+
+    #[test]
+    fn final_invoke_preflight_failure_restores_but_keeps_terminal_ledger() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([
+            valid(DraftState::Empty),
+            valid(DraftState::ExactMessage),
+            valid(DraftState::Empty),
+        ]);
+        port.prepare_invoke_result = Err(error(
+            UiErrorKind::StaleSnapshot,
+            "synthetic_invoke_preflight",
+        ));
+
+        let refusal = run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::SubmissionUncertain);
+        assert!(!refusal.retry_safe);
+        assert_eq!(port.set_calls, 1);
+        assert_eq!(port.clear_calls, 1);
+        assert_eq!(port.invoke_calls, 0);
+        assert_eq!(port.ledger_commit_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 1);
+        assert_eq!(port.ledger_resolve_calls, 0);
+    }
+
+    #[test]
+    fn commit_marker_failure_restores_owned_draft_but_never_invokes_or_resolves() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([
+            valid(DraftState::Empty),
+            valid(DraftState::ExactMessage),
+            valid(DraftState::Empty),
+        ]);
+        port.ledger_commit_error = Some(error(
+            UiErrorKind::SubmissionUncertain,
+            "windows_ledger_state_uncertain",
+        ));
+
+        let refusal = run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::SubmissionUncertain);
+        assert!(!refusal.retry_safe);
+        assert_eq!(port.set_calls, 1);
+        assert_eq!(port.clear_calls, 1);
+        assert_eq!(port.invoke_calls, 0);
+        assert_eq!(port.ledger_commit_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 0);
+        assert_eq!(port.ledger_resolve_calls, 0);
+    }
+
+    #[test]
+    fn post_invoke_ledger_failure_cannot_turn_a_commit_into_success() {
+        let claim = FakeClaim::accepting();
+        let mut port =
+            FakePort::with_states([valid(DraftState::Empty), valid(DraftState::ExactMessage)]);
+        port.ledger_indeterminate_error = Some(error(
+            UiErrorKind::SubmissionUncertain,
+            "windows_ledger_state_uncertain",
+        ));
+
+        let refusal = run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::SubmissionUncertain);
+        assert!(!refusal.retry_safe);
+        assert_eq!(port.invoke_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 1);
+        assert_eq!(port.clear_calls, 0);
+    }
+
+    #[test]
+    fn panic_immediately_before_or_after_invoke_keeps_terminal_ledger() {
+        for panic_site in ["preflight", "invoke"] {
+            let claim = FakeClaim::accepting();
+            let mut port =
+                FakePort::with_states([valid(DraftState::Empty), valid(DraftState::ExactMessage)]);
+            match panic_site {
+                "preflight" => port.panic_on_prepare_invoke = true,
+                "invoke" => port.panic_on_invoke = true,
+                _ => unreachable!(),
+            }
+
+            let refusal = run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+            assert_eq!(
+                refusal.kind,
+                UiErrorKind::SubmissionUncertain,
+                "{panic_site}"
+            );
+            assert!(!refusal.retry_safe, "{panic_site}");
+            assert_eq!(port.set_calls, 1, "{panic_site}");
+            assert_eq!(port.ledger_commit_calls, 1, "{panic_site}");
+            assert_eq!(port.ledger_indeterminate_calls, 1, "{panic_site}");
+            assert_eq!(
+                port.invoke_calls,
+                usize::from(panic_site == "invoke"),
+                "{panic_site}"
+            );
+            assert_eq!(port.clear_calls, 0, "{panic_site}");
+        }
+    }
+
+    #[test]
+    fn restored_stage_with_failed_ledger_removal_is_nonretryable() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([
+            valid(DraftState::Empty),
+            valid(DraftState::ExactMessage),
+            valid(DraftState::Empty),
+        ]);
+        port.ledger_resolve_error = Some(error(
+            UiErrorKind::SubmissionUncertain,
+            "windows_ledger_state_uncertain",
+        ));
+
+        let refusal = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::SubmissionUncertain);
+        assert!(!refusal.retry_safe);
+        assert_eq!(port.set_calls, 1);
+        assert_eq!(port.clear_calls, 1);
+        assert_eq!(port.ledger_resolve_calls, 1);
+        assert_eq!(port.ledger_indeterminate_calls, 1);
     }
 
     #[test]
@@ -1081,6 +1483,9 @@ mod tests {
             assert_eq!(port.set_calls, 1, "{case}");
             assert!(port.clear_calls <= 1, "{case}");
             assert_eq!(port.invoke_calls, 0, "{case}");
+            assert_eq!(port.ledger_begin_calls, 1, "{case}");
+            assert_eq!(port.ledger_indeterminate_calls, 1, "{case}");
+            assert_eq!(port.ledger_resolve_calls, 0, "{case}");
         }
     }
 

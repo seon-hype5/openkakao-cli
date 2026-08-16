@@ -215,9 +215,10 @@ contracts. It contains no selector values and authorizes no live work.
   exposing room/profile text.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
-- Review, implement, and adversarially test the proposed privacy-safe durable
-  started/indeterminate replay ledger before automatic commit capability can
-  be advertised.
+- Review and complete the proposed privacy-safe durable replay ledger. Its
+  fixed content-free codec, transition controller, transaction ordering, and
+  one-use policy correlation handoff are synthetically tested; the
+  DPAPI/ACL/atomic-file store remains absent and fails closed.
 - Add executable-signature and canonical-installation-root evidence.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
@@ -230,9 +231,11 @@ contracts. It contains no selector values and authorizes no live work.
 
 ## Next permissible step
 
-The offline multiple-window remediation is implemented and must first pass the
-full safe regression matrix. The failed L10 result does not authorize another
-live observation.
+The offline multiple-window remediation and pure replay-ledger scaffold are
+implemented and must pass the full safe regression matrix. The next safe
+offline work is the executable trust-verifier seam or the reviewed durable
+store implementation. The failed L10 result does not authorize another live
+observation.
 
 A future retry of DAG node L10, documented in
 [`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),

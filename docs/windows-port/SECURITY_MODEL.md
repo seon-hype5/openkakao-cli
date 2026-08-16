@@ -43,8 +43,10 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
 - Snapshot validity uses a half-open interval: equality with expiry is stale.
 - One approval is consumed by one synchronous reviewed sender call. A
   crate-private atomic claim prevents a second native write attempt.
-- Policy nonce tracking is process-local and hashed. Durable replay storage is
-  intentionally not introduced while production commit remains unavailable.
+- Policy nonce tracking is process-local and hashed. A content-free replay
+  codec/state machine is implemented synthetically, but durable Windows
+  storage is intentionally replaced by a fail-closed placeholder while
+  production commit remains unavailable.
 
 ## Message and output privacy
 
@@ -104,8 +106,11 @@ or write authority.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.
   Read-only discovery is process-wide single-flight, so one timed-out worker
   blocks later probes instead of allowing retained workers to accumulate.
-- Cross-process exclusion exists, but the proposed durable replay protocol is
-  not yet accepted or implemented.
+- Cross-process exclusion, the pure replay transition protocol, and a
+  policy-owned one-use redacted correlation token exist, but the proposed
+  DPAPI/ACL/atomic-file store is not yet accepted or implemented. All-feature
+  production therefore refuses at `windows_ledger_unavailable` before a UI
+  mutation claim.
 
 These are blockers to enabling production write capability, not reasons to
 weaken the gates.

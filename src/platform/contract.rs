@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use zeroize::Zeroize;
@@ -190,6 +191,42 @@ impl SendIntent {
     }
 }
 
+/// Opaque one-use correlation handed from policy to the durable ledger.
+/// It is deliberately non-Clone, non-serializing, zeroized, and redacted.
+pub(crate) struct TransactionCorrelation([u8; 16]);
+
+impl TransactionCorrelation {
+    fn from_policy(bytes: [u8; 16]) -> Result<Self, UiError> {
+        if bytes == [0; 16] {
+            Err(UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "policy_correlation_rng",
+            ))
+        } else {
+            Ok(Self(bytes))
+        }
+    }
+
+    #[cfg_attr(not(feature = "windows-ui-write"), allow(dead_code))]
+    pub(crate) fn into_bytes(mut self) -> [u8; 16] {
+        let bytes = self.0;
+        self.0.zeroize();
+        bytes
+    }
+}
+
+impl fmt::Debug for TransactionCorrelation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("TransactionCorrelation(<redacted>)")
+    }
+}
+
+impl Drop for TransactionCorrelation {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
 /// A safety-policy capability. Its fields are private and construction also
 /// requires the unforgeable token owned by `crate::safety`.
 pub struct ApprovedSend {
@@ -197,6 +234,7 @@ pub struct ApprovedSend {
     snapshot: UiSnapshot,
     approved_at_unix_ms: u64,
     execution_claimed: AtomicBool,
+    transaction_correlation: Mutex<Option<TransactionCorrelation>>,
 }
 
 impl ApprovedSend {
@@ -205,14 +243,18 @@ impl ApprovedSend {
         intent: SendIntent,
         snapshot: UiSnapshot,
         approved_at_unix_ms: u64,
+        transaction_correlation: [u8; 16],
         _token: ApprovalToken,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, UiError> {
+        Ok(Self {
             intent,
             snapshot,
             approved_at_unix_ms,
             execution_claimed: AtomicBool::new(false),
-        }
+            transaction_correlation: Mutex::new(Some(TransactionCorrelation::from_policy(
+                transaction_correlation,
+            )?)),
+        })
     }
 
     pub fn target(&self) -> TargetKind {
@@ -253,6 +295,24 @@ impl ApprovedSend {
             .map_err(|_| UiError::new(UiErrorKind::InvalidInput, "approved_send_already_claimed"))
     }
 
+    /// Moves the opaque policy-generated correlation into the guarded ledger
+    /// exactly once. The token is non-Clone, non-serializing, and redacted.
+    #[allow(dead_code)] // Consumed by the guarded Windows backend.
+    pub(crate) fn take_transaction_correlation(&self) -> Result<TransactionCorrelation, UiError> {
+        let mut correlation = self.transaction_correlation.lock().map_err(|_| {
+            UiError::new(
+                UiErrorKind::SubmissionUncertain,
+                "approved_send_correlation_uncertain",
+            )
+        })?;
+        correlation.take().ok_or_else(|| {
+            UiError::new(
+                UiErrorKind::InvalidInput,
+                "approved_send_correlation_consumed",
+            )
+        })
+    }
+
     #[allow(dead_code)] // Consumed by the guarded backend beginning in Wave 2.
     pub(crate) fn message(&self) -> &str {
         self.intent.message.expose_secret()
@@ -267,6 +327,7 @@ impl fmt::Debug for ApprovedSend {
             .field("mode", &self.mode())
             .field("message", &"<redacted>")
             .field("nonce", &"<redacted>")
+            .field("transaction_correlation", &"<redacted>")
             .field("snapshot", &self.snapshot)
             .field("approved_at_unix_ms", &self.approved_at_unix_ms)
             .finish()

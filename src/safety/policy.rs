@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
@@ -61,6 +62,7 @@ const OP_SNAPSHOT_TIME: &str = "policy_snapshot_time";
 const OP_TARGET_SNAPSHOT: &str = "policy_target_snapshot";
 const OP_INPUT_SNAPSHOT: &str = "policy_input_snapshot";
 const OP_CURRENT_TIME: &str = "policy_current_time";
+const OP_CORRELATION_RNG: &str = "policy_correlation_rng";
 
 /// Configuration kept at the safety boundary until root wires the legacy
 /// flat configuration module into the Windows CLI.
@@ -286,14 +288,16 @@ where
         let now_unix_ms = policy_now(&self.clock)?;
         validate_snapshot(&snapshot, intent.target, now_unix_ms)?;
 
-        lease.used_nonces.insert(nonce_key);
+        let transaction_correlation = generate_transaction_correlation()?;
         let approved_intent = redact_intent_nonce(intent);
         let approved = ApprovedSend::from_policy(
             approved_intent,
             snapshot,
             now_unix_ms,
+            transaction_correlation,
             ApprovalToken::issue(),
-        );
+        )?;
+        lease.used_nonces.insert(nonce_key);
 
         Ok(ApprovedOperation {
             approved,
@@ -701,6 +705,20 @@ fn nonce_digest(nonce: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+fn generate_transaction_correlation() -> Result<[u8; 16], UiError> {
+    let mut correlation = [0_u8; 16];
+    OsRng
+        .try_fill_bytes(&mut correlation)
+        .map_err(|_| policy_error(UiErrorKind::UnsupportedCapability, OP_CORRELATION_RNG))?;
+    if correlation == [0; 16] {
+        return Err(policy_error(
+            UiErrorKind::UnsupportedCapability,
+            OP_CORRELATION_RNG,
+        ));
+    }
+    Ok(correlation)
+}
+
 fn redact_intent_nonce(mut intent: SendIntent) -> SendIntent {
     intent.nonce.zeroize();
     intent.nonce.push_str(REDACTED_NONCE);
@@ -874,6 +892,66 @@ mod tests {
             self.commit_calls.set(self.commit_calls.get() + 1);
             Ok(self.outcome)
         }
+    }
+
+    struct CorrelationInspectingSender {
+        stage_calls: Cell<usize>,
+    }
+
+    impl crate::platform::contract::message_sender_seal::Sealed for CorrelationInspectingSender {}
+
+    impl MessageSender for CorrelationInspectingSender {
+        fn stage(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+            self.stage_calls.set(self.stage_calls.get() + 1);
+            let correlation = approved.take_transaction_correlation()?;
+            assert_eq!(
+                format!("{correlation:?}"),
+                "TransactionCorrelation(<redacted>)"
+            );
+            assert_ne!(correlation.into_bytes(), [0; 16]);
+
+            let replay = approved.take_transaction_correlation().unwrap_err();
+            assert_eq!(replay.kind, UiErrorKind::InvalidInput);
+            assert_eq!(replay.operation, "approved_send_correlation_consumed");
+            Ok(SendOutcome::StagedAndRestored)
+        }
+
+        fn commit(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+            panic!("synthetic stage approval must not dispatch commit")
+        }
+    }
+
+    #[test]
+    fn policy_correlation_is_nonzero_one_shot_and_redacted() {
+        let policy = WindowsSafetyPolicy::with_clock(
+            WindowsPolicyConfig::new(["SYNTHETIC_SELF_CHAT"]).unwrap(),
+            FixedClock,
+        );
+        let approval = policy
+            .authorize(
+                &StaticProbe(snapshot()),
+                "SYNTHETIC_SELF_CHAT",
+                SendIntent::new(
+                    TargetKind::SelfChat,
+                    SecretMessage::new("SYNTHETIC_BODY"),
+                    SendMode::StageOnly,
+                    true,
+                    "synthetic-correlation",
+                ),
+            )
+            .unwrap();
+        let debug = format!("{approval:?}");
+        assert!(!debug.contains("synthetic-correlation"));
+        assert!(debug.contains("<redacted>"));
+
+        let sender = CorrelationInspectingSender {
+            stage_calls: Cell::new(0),
+        };
+        assert_eq!(
+            approval.execute(&sender).unwrap(),
+            SendOutcome::StagedAndRestored
+        );
+        assert_eq!(sender.stage_calls.get(), 1);
     }
 
     #[test]

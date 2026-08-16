@@ -12,3 +12,7 @@ Each child writes only its assigned handoff file and records:
 
 Handoffs must not include message text, room/profile names, user identifiers,
 raw HWND/UIA identifiers, screenshots, or KakaoTalk data paths.
+
+Root integration/offline-scaffold handoffs follow the same privacy rules; see
+[`root-ledger-scaffold.md`](root-ledger-scaffold.md) for the current durable
+replay state-machine boundary and remaining production-store blockers.

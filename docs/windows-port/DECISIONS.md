@@ -133,3 +133,19 @@ returns or unwinds; thread-creation failure also clears it.
 This bounds a provider hang to one retained read-only worker per process. It
 does not claim to cancel the provider and does not change the synchronous,
 joined mutation-worker rule.
+
+## ADR-019: Compile a pure replay state machine but fail closed without storage
+
+Represent replay state with a strict fixed-size, content-free inner record and
+put all durable I/O behind a narrow compare-and-replace store trait. Persist a
+ledger-clear preflight before UI observation, then a stage marker before the
+final SetValue preflight and one-shot execution claim. Advance to a commit
+marker before final Invoke preflight, and retain an indeterminate marker after
+every Invoke result. Only an exact restored stage may be removed automatically.
+
+Until the reviewed current-user DPAPI, ACL/reparse, LocalAppData, and atomic
+write-through store exists, production uses `UnavailableLedger`. This keeps
+the transition code compiled and synthetically testable while adding an
+independent refusal before claim or UI mutation. Policy supplies the record
+correlation through a separate non-Clone, non-serializing, zeroizing token that
+the backend can consume exactly once.

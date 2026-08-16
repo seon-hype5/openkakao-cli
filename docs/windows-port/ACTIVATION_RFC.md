@@ -69,6 +69,22 @@ clipboard, hit-test, coordinate, or default-button fallback.
 
 ## C. Durable replay and crash-recovery ledger
 
+Offline implementation status: the content-free inner record codec, strict
+decoder, storage trait, and transition controller now exist behind synthetic
+tests. The guarded transaction checks for an existing record before UI
+observation, writes the stage boundary before its final SetValue preflight and
+one-shot claim, advances the commit boundary before the final Invoke preflight,
+and retains an indeterminate terminal state after every returned Invoke
+outcome.
+The policy now generates a nonzero random 128-bit correlation in a non-Clone,
+non-serializing, zeroizing token; the backend can consume it exactly once into
+the internal record form. Production deliberately uses an
+`UnavailableLedger`, so even an all-feature build refuses before UI
+observation, final native write preflight, claim, or `SetValue` until the
+DPAPI/ACL/atomic-file store receives separate review. This is an additional
+activation barrier, not acceptance of this proposal or live-write
+authorization.
+
 ### Threat model
 
 The ledger prevents accidental duplicate work by multiple openkakao processes,
@@ -190,8 +206,10 @@ authorized by this proposal.
 ## E. Activation order
 
 1. Review and accept this RFC without changing capability.
-2. Implement ledger and executable-verifier seams with only synthetic files,
-   fake trust results, and default-off/all-feature CI.
+2. Complete the ledger and executable-verifier seams with only synthetic
+   files, fake trust results, and default-off/all-feature CI. The pure ledger
+   state machine and policy correlation handoff are implemented; the Windows
+   DPAPI/ACL store and executable verifier remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

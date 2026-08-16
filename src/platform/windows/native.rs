@@ -59,15 +59,16 @@ use zeroize::Zeroize;
 #[cfg(any(feature = "windows-ui-write", test))]
 use zeroize::Zeroizing;
 
+#[cfg(feature = "windows-ui-write")]
+use super::{
+    ledger::{LedgerRecord, MutationLedger, RecordCorrelation, UnavailableLedger},
+    transaction::{self, CommitSelectorState, DraftState, ExpectedState, FreshState, MutationPort},
+    unix_now_ms, KNOWN_PROFILE,
+};
 use super::{
     profile_for, select_read_only_window, ComposerDiscovery, FileVersion, FingerprintKey,
     NativeComposer, NativeInspection, NativeProcess, NativeWindow, UiProfile, WindowDiscovery,
     TOP_LEVEL_CLASS,
-};
-#[cfg(feature = "windows-ui-write")]
-use super::{
-    transaction::{self, CommitSelectorState, DraftState, ExpectedState, FreshState, MutationPort},
-    unix_now_ms, KNOWN_PROFILE,
 };
 #[cfg(feature = "windows-ui-write")]
 use crate::platform::{ApprovedSend, SendOutcome};
@@ -699,8 +700,9 @@ pub(super) fn stage(
 ) -> Result<SendOutcome, UiError> {
     let _apartment = ComApartment::initialize_mta()?;
     let _mutex = NamedMutationMutex::acquire()?;
+    let correlation = RecordCorrelation::from_policy(approved.take_transaction_correlation()?)?;
     let message_utf16 = encode_secret_utf16(approved.message());
-    let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16);
+    let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16, correlation);
     transaction::run_stage(expected, &message_utf16, approved, &mut port)
 }
 
@@ -712,8 +714,9 @@ pub(super) fn commit(
 ) -> Result<SendOutcome, UiError> {
     let _apartment = ComApartment::initialize_mta()?;
     let _mutex = NamedMutationMutex::acquire()?;
+    let correlation = RecordCorrelation::from_policy(approved.take_transaction_correlation()?)?;
     let message_utf16 = encode_secret_utf16(approved.message());
-    let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16);
+    let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16, correlation);
     transaction::run_commit(expected, &message_utf16, approved, &mut port)
 }
 
@@ -822,6 +825,7 @@ struct NativeMutationIdentity {
 
 #[cfg(feature = "windows-ui-write")]
 struct NativeMutationPort<'message> {
+    ledger: UnavailableLedger,
     fingerprints: FingerprintKey,
     expires_at_unix_ms: u64,
     message_utf16: &'message [u16],
@@ -847,8 +851,10 @@ impl<'message> NativeMutationPort<'message> {
         fingerprints: FingerprintKey,
         expected: &ExpectedState<'_>,
         message_utf16: &'message [u16],
+        correlation: RecordCorrelation,
     ) -> Self {
         Self {
+            ledger: UnavailableLedger::new(correlation),
             fingerprints,
             expires_at_unix_ms: expected.expires_at_unix_ms,
             message_utf16,
@@ -980,6 +986,32 @@ impl<'message> NativeMutationPort<'message> {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(feature = "windows-ui-write")]
+impl MutationLedger for NativeMutationPort<'_> {
+    fn ensure_clear(&mut self) -> Result<(), UiError> {
+        self.ledger.ensure_clear()
+    }
+
+    fn begin_stage(&mut self) -> Result<LedgerRecord, UiError> {
+        self.ledger.begin_stage()
+    }
+
+    fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
+        self.ledger.mark_commit(stage)
+    }
+
+    fn mark_indeterminate(
+        &mut self,
+        correlation: RecordCorrelation,
+    ) -> Result<LedgerRecord, UiError> {
+        self.ledger.mark_indeterminate(correlation)
+    }
+
+    fn resolve_restored_stage(&mut self, stage: LedgerRecord) -> Result<(), UiError> {
+        self.ledger.resolve_restored_stage(stage)
     }
 }
 

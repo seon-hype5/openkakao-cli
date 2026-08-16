@@ -6,6 +6,8 @@
 //! boundary; the `windows-ui-write` feature compiles a transaction path that
 //! still fails closed until live self-target and send selectors are verified.
 
+#[cfg(any(feature = "windows-ui-write", test))]
+mod ledger;
 mod native;
 #[cfg(any(feature = "windows-ui-write", test))]
 mod transaction;
@@ -265,6 +267,14 @@ fn read_only_timeout_error() -> UiError {
     error
 }
 
+#[cfg(any(feature = "windows-ui-write", test))]
+fn mutation_thread_uncertainty_error() -> UiError {
+    UiError::new(
+        UiErrorKind::SubmissionUncertain,
+        "windows_transaction_thread_uncertain",
+    )
+}
+
 /// Per-process backend. Its random key makes every published native identity
 /// an execution-scoped fingerprint rather than a reusable machine identifier.
 pub struct WindowsBackend {
@@ -347,12 +357,9 @@ impl WindowsBackend {
                         "windows_transaction_thread_start",
                     )
                 })?;
-            worker.join().map_err(|_| {
-                UiError::new(
-                    UiErrorKind::UnsupportedCapability,
-                    "windows_transaction_thread_failed",
-                )
-            })?
+            worker
+                .join()
+                .map_err(|_| mutation_thread_uncertainty_error())?
         })
     }
 }
@@ -636,6 +643,14 @@ mod tests {
         drop(first);
         assert!(ReadOnlyProbeLease::claim(&in_flight).is_ok());
         assert!(!read_only_timeout_error().retry_safe);
+    }
+
+    #[test]
+    fn mutation_worker_panic_is_always_nonretryable_uncertainty() {
+        let error = mutation_thread_uncertainty_error();
+        assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+        assert_eq!(error.operation, "windows_transaction_thread_uncertain");
+        assert!(!error.retry_safe);
     }
 
     #[test]
