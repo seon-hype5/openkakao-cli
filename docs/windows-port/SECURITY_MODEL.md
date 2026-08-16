@@ -53,7 +53,13 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;
   session/integrity mismatch; and ambiguous windows/composers are refusals.
-- Snapshot validity uses a half-open interval: equality with expiry is stale.
+- Snapshot validity uses two half-open intervals: equality with either the
+  wall-clock expiry or approval-owned monotonic deadline is stale. A clock
+  rollback cannot extend the original remaining lifetime; a forward jump can
+  only refuse earlier.
+- The monotonic deadline is private, process-local, nonserializing, omitted
+  from Debug, and checked before sender dispatch, native observation, final
+  preflight, and each actual Value/Invoke call.
 - One approval is consumed by one synchronous reviewed sender call. A
   crate-private atomic claim prevents a second native write attempt.
 - Policy nonce tracking is process-local and hashed. A content-free replay

@@ -6,6 +6,7 @@
 //! exercised without touching a live desktop.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::time::Instant;
 
 use crate::platform::{
     ApprovedSend, SendMode, SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform,
@@ -121,6 +122,12 @@ impl<'a> ExpectedState<'a> {
         required_mode: SendMode,
         now_unix_ms: u64,
     ) -> Result<Self, UiError> {
+        if approved.monotonic_deadline_reached_at(Instant::now()) {
+            return Err(error(
+                UiErrorKind::StaleSnapshot,
+                "windows_approval_staleness",
+            ));
+        }
         if approved.mode() != required_mode {
             return Err(error(UiErrorKind::InvalidInput, "windows_approval_mode"));
         }

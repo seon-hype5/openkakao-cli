@@ -50,6 +50,14 @@ public API lends that value: callers receive `ApprovedOperation`, whose
 `execute` method consumes the operation and retains its policy mutex for the
 entire synchronous sender call.
 
+`ApprovedSend` privately carries both the approved Unix-millisecond timestamp
+and a process-local monotonic deadline derived from the snapshot's remaining
+lifetime. Neither adds a serialized field or public accessor. Equality with
+either expiry is stale. Policy refuses a reached monotonic deadline before
+sender dispatch, and the Windows implementation repeats both clock checks at
+native observation, final preflight, and the actual mutation boundary. System
+clock rollback therefore cannot lengthen an approval.
+
 The Windows sender independently validates mode and fresh evidence and uses a
 crate-private atomic one-shot execution claim immediately before its first
 write attempt. Policy then validates the returned outcome against the

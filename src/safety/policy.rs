@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::{Mutex, MutexGuard, TryLockError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::{rngs::OsRng, RngCore};
 use serde::Serialize;
@@ -290,8 +290,10 @@ where
 
         let (snapshot, target_binding) =
             inspect_for_policy(probe, requested_label, OP_AUTHORIZE_INSPECT)?;
+        let approved_at_monotonic = Instant::now();
         let now_unix_ms = policy_now(&self.clock)?;
         validate_snapshot(&snapshot, intent.target, now_unix_ms, &target_binding)?;
+        let approval_deadline = approval_deadline(&snapshot, now_unix_ms, approved_at_monotonic)?;
 
         let transaction_correlation = generate_transaction_correlation()?;
         let approved_intent = redact_intent_nonce(intent);
@@ -300,6 +302,7 @@ where
             snapshot,
             target_binding,
             now_unix_ms,
+            approval_deadline,
             transaction_correlation,
             ApprovalToken::issue(),
         )?;
@@ -406,6 +409,17 @@ impl ApprovedOperation<'_> {
     where
         S: MessageSender + ?Sized,
     {
+        self.execute_at(sender, Instant::now())
+    }
+
+    fn execute_at<S>(self, sender: &S, now_monotonic: Instant) -> Result<SendOutcome, UiError>
+    where
+        S: MessageSender + ?Sized,
+    {
+        if self.approved.monotonic_deadline_reached_at(now_monotonic) {
+            return Err(policy_error(UiErrorKind::StaleSnapshot, OP_SNAPSHOT_TIME));
+        }
+
         let mode = self.approved.mode();
         let outcome = match mode {
             SendMode::StageOnly => sender.stage(&self.approved),
@@ -624,6 +638,23 @@ fn validate_snapshot_time(snapshot: &UiSnapshot, now_unix_ms: u64) -> Result<(),
     Ok(())
 }
 
+fn approval_deadline(
+    snapshot: &UiSnapshot,
+    approved_at_unix_ms: u64,
+    approved_at_monotonic: Instant,
+) -> Result<Instant, UiError> {
+    let remaining_ms = snapshot
+        .target
+        .expires_at_unix_ms
+        .checked_sub(approved_at_unix_ms)
+        .filter(|remaining| *remaining > 0 && *remaining <= MAX_SNAPSHOT_TTL_MS)
+        .ok_or_else(|| policy_error(UiErrorKind::StaleSnapshot, OP_SNAPSHOT_TIME))?;
+
+    approved_at_monotonic
+        .checked_add(Duration::from_millis(remaining_ms))
+        .ok_or_else(|| policy_error(UiErrorKind::StaleSnapshot, OP_SNAPSHOT_TIME))
+}
+
 fn validate_target_snapshot(
     snapshot: &UiSnapshot,
     requested_target: TargetKind,
@@ -830,6 +861,56 @@ mod tests {
                 .kind,
             UiErrorKind::StaleSnapshot
         );
+
+        let anchor = Instant::now();
+        let deadline = approval_deadline(&state, 1_500, anchor)
+            .expect("synthetic remaining lifetime must form a deadline");
+        assert_eq!(
+            deadline.checked_duration_since(anchor),
+            Some(Duration::from_millis(500))
+        );
+        let exact_expiry = approval_deadline(&state, 2_000, anchor)
+            .expect_err("zero remaining lifetime must fail closed");
+        assert_eq!(exact_expiry.kind, UiErrorKind::StaleSnapshot);
+        assert_eq!(exact_expiry.operation, OP_SNAPSHOT_TIME);
+    }
+
+    #[test]
+    fn expired_monotonic_approval_refuses_before_sender_dispatch() {
+        let policy = WindowsSafetyPolicy::with_clock(
+            WindowsPolicyConfig::new(["SYNTHETIC_SELF_CHAT"]).unwrap(),
+            FixedClock,
+        );
+        let approval = policy
+            .authorize(
+                &StaticProbe(snapshot()),
+                "SYNTHETIC_SELF_CHAT",
+                SendIntent::new(
+                    TargetKind::SelfChat,
+                    SecretMessage::new("SYNTHETIC_BODY"),
+                    SendMode::StageOnly,
+                    true,
+                    "synthetic-expired-monotonic",
+                ),
+            )
+            .expect("synthetic state should authorize");
+        let sender = MismatchedOutcomeSender {
+            outcome: SendOutcome::StagedAndRestored,
+            stage_calls: Cell::new(0),
+            commit_calls: Cell::new(0),
+        };
+        let after_maximum_ttl = Instant::now()
+            .checked_add(Duration::from_millis(MAX_SNAPSHOT_TTL_MS + 1))
+            .expect("synthetic future instant must be representable");
+
+        let error = approval
+            .execute_at(&sender, after_maximum_ttl)
+            .expect_err("expired monotonic approval must fail closed");
+
+        assert_eq!(error.kind, UiErrorKind::StaleSnapshot);
+        assert_eq!(error.operation, OP_SNAPSHOT_TIME);
+        assert_eq!(sender.stage_calls.get(), 0);
+        assert_eq!(sender.commit_calls.get(), 0);
     }
 
     #[test]
@@ -987,6 +1068,8 @@ mod tests {
             .target_binding_matches_observed_utf16(&wrong_label));
         let debug = format!("{approval:?}");
         assert!(!debug.contains("synthetic-correlation"));
+        assert!(!debug.contains("approval_deadline"));
+        assert!(!format!("{:?}", approval.approved).contains("approval_deadline"));
         assert!(debug.contains("<redacted>"));
 
         let sender = CorrelationInspectingSender {

@@ -422,3 +422,27 @@ cover every state plus an exact-unique label mismatch and prove by panic
 canaries that no non-exact/non-unique state calls the verifier. This supersedes
 only ADR-033's tuple representation; it adds no selector, label read, Kakao
 value, live permission, or capability.
+
+## ADR-035: Seal every approval to a process-local monotonic deadline
+
+Do not rely on the snapshot's Unix-millisecond expiry alone. Immediately before
+the policy reads its wall clock, capture `std::time::Instant`; after the existing
+half-open snapshot validation, add only the remaining wall-clock lifetime to
+that anchor and store the resulting private deadline inside `ApprovedSend`.
+The deadline is neither public, cloneable independently, serializable, nor
+included in Debug output.
+
+Treat an approval as fresh only while both clocks remain fresh. Policy execute
+refuses at the monotonic boundary before calling a sender. The Windows backend
+checks the same approval-owned deadline before worker dispatch, native entry,
+correlation consumption, every fresh observation, final native revalidation,
+and the actual `SetValue` or `Invoke` call. Native checks retain the wall-clock
+expiry as a second independent gate. Equality is stale for both clocks.
+
+This makes a wall-clock rollback unable to extend an approval; a wall-clock
+advance can only refuse earlier. The deadline is intentionally process-local:
+approvals are already nonserializing in-process capabilities and cannot be
+restored after restart. Synthetic tests inject future `Instant` values and use
+pure clock-state cases; they do not sleep, change the system clock, inspect a
+desktop, or mutate UI. This decision changes no selector, capability, live
+permission, or retry rule.

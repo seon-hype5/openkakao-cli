@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use hmac::{Hmac, Mac};
 use serde::Serialize;
@@ -531,6 +532,17 @@ impl Drop for TransactionCorrelation {
     }
 }
 
+/// Process-local, non-serializing expiry for one approval. Wall-clock expiry
+/// remains part of the snapshot contract; this second clock prevents a system
+/// clock rollback from extending the approved lifetime.
+struct ApprovalDeadline(Instant);
+
+impl ApprovalDeadline {
+    fn reached_at(&self, now: Instant) -> bool {
+        now >= self.0
+    }
+}
+
 /// A safety-policy capability. Its fields are private and construction also
 /// requires the unforgeable token owned by `crate::safety`.
 pub struct ApprovedSend {
@@ -538,6 +550,7 @@ pub struct ApprovedSend {
     snapshot: UiSnapshot,
     target_binding: TargetBindingPermit,
     approved_at_unix_ms: u64,
+    approval_deadline: ApprovalDeadline,
     execution_claimed: AtomicBool,
     transaction_correlation: Mutex<Option<TransactionCorrelation>>,
 }
@@ -549,6 +562,7 @@ impl ApprovedSend {
         snapshot: UiSnapshot,
         target_binding: TargetBindingPermit,
         approved_at_unix_ms: u64,
+        approval_deadline: Instant,
         transaction_correlation: [u8; 16],
         _token: ApprovalToken,
     ) -> Result<Self, UiError> {
@@ -557,6 +571,7 @@ impl ApprovedSend {
             snapshot,
             target_binding,
             approved_at_unix_ms,
+            approval_deadline: ApprovalDeadline(approval_deadline),
             execution_claimed: AtomicBool::new(false),
             transaction_correlation: Mutex::new(Some(TransactionCorrelation::from_policy(
                 transaction_correlation,
@@ -586,6 +601,13 @@ impl ApprovedSend {
 
     pub fn approved_at_unix_ms(&self) -> u64 {
         self.approved_at_unix_ms
+    }
+
+    /// Reports whether the policy-owned process-local deadline has been
+    /// reached. The deadline itself remains private and non-serializing.
+    #[allow(dead_code)] // Consumed by policy and the guarded Windows backend.
+    pub(crate) fn monotonic_deadline_reached_at(&self, now: Instant) -> bool {
+        self.approval_deadline.reached_at(now)
     }
 
     /// Confirms that the policy-carried permit validates the exact snapshot
@@ -906,6 +928,30 @@ mod tests {
                 selector_profile_id: Some("synthetic-profile".to_string()),
             },
         }
+    }
+
+    #[test]
+    fn approval_deadline_is_half_open_at_the_exact_monotonic_boundary() {
+        let anchor = Instant::now();
+        let deadline = ApprovalDeadline(
+            anchor
+                .checked_add(std::time::Duration::from_millis(10))
+                .expect("synthetic deadline must be representable"),
+        );
+        let just_before = anchor
+            .checked_add(std::time::Duration::from_millis(9))
+            .expect("synthetic instant must be representable");
+        let exact = anchor
+            .checked_add(std::time::Duration::from_millis(10))
+            .expect("synthetic instant must be representable");
+
+        assert!(!deadline.reached_at(just_before));
+        assert!(deadline.reached_at(exact));
+        assert!(deadline.reached_at(
+            anchor
+                .checked_add(std::time::Duration::from_millis(11))
+                .expect("synthetic instant must be representable")
+        ));
     }
 
     #[test]

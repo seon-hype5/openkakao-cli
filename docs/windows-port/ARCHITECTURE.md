@@ -114,6 +114,13 @@ policy validates the returned outcome: stage accepts only
 `StagedAndRestored`; commit accepts only commit-attempt outcomes. Any mismatch
 becomes `SubmissionUncertain` and is never retry-safe.
 
+Authorization pairs the validated Unix-millisecond snapshot time with a
+process-local monotonic `Instant`. The remaining wall-clock lifetime is sealed
+as a private deadline in `ApprovedSend`; it is omitted from Debug and cannot be
+serialized. `execute` checks it before sender dispatch. A system-clock rollback
+therefore cannot extend the approval, while a forward jump can only make the
+independent wall-clock checks refuse earlier. Both intervals are half-open.
+
 `ApprovedSend` also contains a crate-private atomic execution claim. The
 Windows backend claims it only after all pre-mutation validation and
 immediately before the first write attempt. Once claimed, every success or
@@ -129,11 +136,14 @@ ownership, timeout, poisoning, or stale evidence refuses without retry.
 Fresh validation binds the approval to the platform, target, process ID,
 executable-instance fingerprint, process creation time, session, HWND,
 window/composer fingerprints, UI profile, modal/focus/draft state, and a
-half-open expiry interval. A separate fresh target-binding flag is mandatory;
-the prior self/exact/unique booleans cannot substitute for it. The native
-boundary immediately requeries the PID, HWND, executable path, process
-creation time, session, integrity, and exact UIA element before the execution
-claim.
+half-open wall-clock expiry interval plus the approval-owned monotonic
+deadline. The deadline is checked before worker/native entry, before consuming
+the transaction correlation, before every native observation, at final
+revalidation, and immediately before each `SetValue` or `Invoke`. A separate
+fresh target-binding flag is mandatory; the prior self/exact/unique booleans
+cannot substitute for it. The native boundary immediately requeries the PID,
+HWND, executable path, process creation time, session, integrity, and exact UIA
+element before the execution claim.
 
 The native mutation port borrows the same `ApprovedSend` for the entire
 synchronous transaction. Any future ephemeral target label is compared only

@@ -12,6 +12,8 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::ptr;
+#[cfg(feature = "windows-ui-write")]
+use std::time::Instant;
 
 #[cfg(feature = "windows-ui-write")]
 use windows::core::BSTR;
@@ -700,8 +702,10 @@ pub(super) fn stage(
     approved: &ApprovedSend,
     expected: &ExpectedState<'_>,
 ) -> Result<SendOutcome, UiError> {
+    ensure_mutation_time(approved, expected.expires_at_unix_ms)?;
     let _apartment = ComApartment::initialize_mta()?;
     let _mutex = NamedMutationMutex::acquire()?;
+    ensure_mutation_time(approved, expected.expires_at_unix_ms)?;
     let correlation = RecordCorrelation::from_policy(approved.take_transaction_correlation()?)?;
     let message_utf16 = encode_secret_utf16(approved.message());
     let mut port = NativeMutationPort::new(
@@ -720,8 +724,10 @@ pub(super) fn commit(
     approved: &ApprovedSend,
     expected: &ExpectedState<'_>,
 ) -> Result<SendOutcome, UiError> {
+    ensure_mutation_time(approved, expected.expires_at_unix_ms)?;
     let _apartment = ComApartment::initialize_mta()?;
     let _mutex = NamedMutationMutex::acquire()?;
+    ensure_mutation_time(approved, expected.expires_at_unix_ms)?;
     let correlation = RecordCorrelation::from_policy(approved.take_transaction_correlation()?)?;
     let message_utf16 = encode_secret_utf16(approved.message());
     let mut port = NativeMutationPort::new(
@@ -732,6 +738,29 @@ pub(super) fn commit(
         correlation,
     );
     transaction::run_commit(expected, &message_utf16, approved, &mut port)
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn ensure_mutation_time(approved: &ApprovedSend, expires_at_unix_ms: u64) -> Result<(), UiError> {
+    let now_unix_ms = unix_now_ms();
+    let monotonic_deadline_reached = approved.monotonic_deadline_reached_at(Instant::now());
+    if mutation_time_expired(monotonic_deadline_reached, now_unix_ms, expires_at_unix_ms) {
+        Err(UiError::new(
+            UiErrorKind::StaleSnapshot,
+            "windows_mutation_staleness",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
+const fn mutation_time_expired(
+    monotonic_deadline_reached: bool,
+    now_unix_ms: u64,
+    expires_at_unix_ms: u64,
+) -> bool {
+    monotonic_deadline_reached || now_unix_ms >= expires_at_unix_ms
 }
 
 /// Encodes directly into its final zeroizing allocation. A valid UTF-8
@@ -886,6 +915,7 @@ impl<'operation> NativeMutationPort<'operation> {
     }
 
     fn revalidate_before_mutation(&self, required_draft: DraftState) -> Result<(), UiError> {
+        ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         let identity = self.identity.as_ref().ok_or_else(|| {
             UiError::new(
                 UiErrorKind::StaleSnapshot,
@@ -958,13 +988,6 @@ impl<'operation> NativeMutationPort<'operation> {
                 "windows_mutation_integrity",
             ));
         }
-        if unix_now_ms() >= self.expires_at_unix_ms {
-            return Err(UiError::new(
-                UiErrorKind::StaleSnapshot,
-                "windows_mutation_staleness",
-            ));
-        }
-
         validate_mutation_composer_element(element, identity, &KNOWN_PROFILE)?;
         let enabled = unsafe { element.CurrentIsEnabled() }
             .map_err(|error| map_windows_error(error, "windows_mutation_composer_enabled"))?
@@ -1044,6 +1067,7 @@ impl MutationLedger for NativeMutationPort<'_> {
 #[cfg(feature = "windows-ui-write")]
 impl MutationPort for NativeMutationPort<'_> {
     fn observe(&mut self, expected_message_utf16: &[u16]) -> Result<FreshState, UiError> {
+        ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         if expected_message_utf16 != self.message_utf16 {
             return Err(UiError::new(
                 UiErrorKind::InvalidInput,
@@ -1207,6 +1231,7 @@ impl MutationPort for NativeMutationPort<'_> {
             )
         })?;
         let value = ScrubbedBstr::from_wide(value_utf16);
+        ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         // SAFETY: the exact writable ValuePattern was freshly revalidated in
         // this MTA apartment while the named mutex is held. The BSTR remains
         // alive through the synchronous call and is scrubbed before free.
@@ -1241,6 +1266,7 @@ impl MutationPort for NativeMutationPort<'_> {
                 "windows_commit_selector_unconfigured",
             )
         })?;
+        ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         // SAFETY: this interface can only be stored after an exact, unique,
         // profile-bound send selector and InvokePattern are verified. The
         // current profile stores none, so production cannot reach this call.
@@ -1716,5 +1742,13 @@ mod tests {
             assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
             assert!(!error.retry_safe);
         }
+    }
+
+    #[test]
+    fn mutation_time_refuses_when_either_clock_reaches_expiry() {
+        assert!(!mutation_time_expired(false, 1_999, 2_000));
+        assert!(mutation_time_expired(true, 1_999, 2_000));
+        assert!(mutation_time_expired(false, 2_000, 2_000));
+        assert!(mutation_time_expired(false, 2_001, 2_000));
     }
 }

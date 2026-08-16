@@ -47,6 +47,27 @@ This list was checked against the locally resolved generated source for
 `WTHelperGetProvSignerFromChain` are gated by both Catalog and Sip, while
 `WTHelperGetProvCertFromChain` is gated by Cryptography.
 
+## Approval lifetime boundary
+
+Offline status: implemented and still fail-closed. Policy captures a
+process-local `Instant` alongside the approved wall-clock reading and stores a
+private deadline computed from the snapshot's remaining lifetime. The deadline
+is nonserializing and absent from Debug. The effective expiry is the earlier of
+the existing wall-clock gate and this monotonic gate; equality refuses.
+
+The policy checks the monotonic deadline before sender dispatch. The Windows
+path checks it before scoped-worker/native entry, again before consuming the
+one-shot ledger correlation, at the start of every native observation, at
+final native revalidation, and immediately before `SetValue` or `Invoke`.
+Wall-clock expiry remains checked alongside it. Synthetic tests pass explicit
+future monotonic values and pure clock-state booleans; no test sleeps, changes
+the system clock, opens a live UI, or invokes a native mutation API.
+
+This boundary closes the previously recorded clock-rollback lifetime risk. It
+does not make approvals durable across restart, because approvals are already
+nonserializing in-process capabilities. It adds no Windows dependency,
+selector, label observer, trust value, send capability, or live authorization.
+
 ## Native target-binding permit boundary
 
 Offline status: the mutation port now borrows the same `ApprovedSend` used by

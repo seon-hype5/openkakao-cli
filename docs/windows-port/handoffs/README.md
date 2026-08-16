@@ -57,3 +57,6 @@ preflight wiring, and the still-absent production selector and label observer.
 [`root-native-target-observation-state.md`](root-native-target-observation-state.md)
 records the closed absent/inexact/ambiguous/exact-unique selection model and
 why only an exact-unique state may invoke the approval-owned label verifier.
+[`root-monotonic-approval-deadline.md`](root-monotonic-approval-deadline.md)
+records the approval-owned process-local deadline, its policy/native
+enforcement points, and why system-clock rollback can no longer extend TTL.

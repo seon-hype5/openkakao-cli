@@ -73,6 +73,22 @@ The buffer would have to remain UTF-16/zeroizing, never become a Rust `String`,
 and be scrubbed before COM release. Until that design is approved and measured,
 target identity remains false.
 
+### A.1 Approval lifetime
+
+Offline contract status: implemented synthetically, not activated. A write
+approval carries a private process-local monotonic deadline derived from the
+remaining validated snapshot lifetime. Policy dispatch and the guarded native
+path require both that deadline and the existing wall-clock expiry to remain
+fresh, with equality stale. Checks occur before sender/native entry,
+correlation consumption, observation, final preflight, and the actual
+Value/Invoke boundary. Clock rollback cannot extend an approval, while a clock
+advance only fails closed earlier.
+
+The deadline is omitted from Debug and serialization and cannot survive a
+process restart independently of its nonserializing approval. Synthetic tests
+use injected future instants and pure clock states only. This completed
+contract supplies no selector or permission and does not authorize L10-L40.
+
 ## B. Exact submit selector
 
 A submit profile may be proposed only after target binding is accepted. Its

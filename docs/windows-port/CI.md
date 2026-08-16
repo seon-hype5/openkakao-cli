@@ -72,6 +72,9 @@ performs no UI mutation, and cannot read user or application state.
   values. They cover every closed selection state, prove that only exact-unique
   selection invokes the callback, and preserve false required gates for a
   mismatched label; they never call the production observer or read a UI label.
+- Approval-lifetime tests use synthetic `Instant` values and a pure two-clock
+  truth table. They prove exact-boundary refusal and zero sender dispatch after
+  monotonic expiry without sleeping or changing the runner's system clock.
 - There is no service container, desktop session preparation, application
   installation, account setup, network login, or secret injection.
 - `RUST_BACKTRACE=0` prevents failure backtraces from becoming accidental
