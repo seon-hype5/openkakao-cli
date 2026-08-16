@@ -78,12 +78,14 @@ and retains an indeterminate terminal state after every returned Invoke
 outcome.
 The policy now generates a nonzero random 128-bit correlation in a non-Clone,
 non-serializing, zeroizing token; the backend can consume it exactly once into
-the internal record form. Production deliberately uses an
-`UnavailableLedger`, so even an all-feature build refuses before UI
-observation, final native write preflight, claim, or `SetValue` until the
-DPAPI/ACL/atomic-file store receives separate review. This is an additional
-activation barrier, not acceptance of this proposal or live-write
-authorization.
+the internal record form. An explicit-synthetic-base Windows store now
+implements current-user DPAPI, protected exact-user ACLs, handle/reparse
+checks, bounded exclusive I/O, write-through replacement/tombstones, reload
+verification, and test-only fault injection. It has no production
+`LocalAppData` constructor and is not wired to the native mutation port.
+Production therefore still deliberately uses `UnavailableLedger` and refuses
+before UI observation, final native write preflight, claim, or `SetValue`.
+This is an additional activation barrier, not live-write authorization.
 
 ### Threat model
 
@@ -224,9 +226,10 @@ observation.
 1. Review and accept this RFC without changing capability.
 2. Complete the ledger and executable-verifier seams with only synthetic
    files, fake trust results, and default-off/all-feature CI. The pure ledger
-   state machine, policy correlation handoff, and pure executable-trust
-   decision seam are implemented; the Windows DPAPI/ACL store and native
-   executable observer remain incomplete.
+   state machine, policy correlation handoff, pure executable-trust decision
+   seam, and a disconnected synthetic-base Windows DPAPI/ACL store are
+   implemented; the production LocalAppData/volume constructor, production
+   ledger wiring, and native executable observer remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

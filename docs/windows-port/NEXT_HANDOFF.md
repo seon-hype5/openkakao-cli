@@ -219,9 +219,10 @@ implementation; it likewise authorizes no probe or production wiring.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
 - Review and complete the proposed privacy-safe durable replay ledger. Its
-  fixed content-free codec, transition controller, transaction ordering, and
-  one-use policy correlation handoff are synthetically tested; the
-  DPAPI/ACL/atomic-file store remains absent and fails closed.
+  fixed codec/controller/ordering/correlation and an explicit-temporary-base
+  Windows DPAPI/protected-ACL/write-through store are synthetically tested.
+  The production LocalAppData/volume constructor and native-port wiring remain
+  absent and fail closed.
 - Complete executable-signature and canonical-installation-root evidence. The
   content-free decision seam and adversarial fakes exist; reviewed signer/root
   digests and the native handle/WinVerifyTrust observer remain absent and fail
@@ -237,12 +238,12 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-The offline multiple-window remediation, pure replay-ledger scaffold, pure
-executable-trust decision seam, and native boundary inventory are implemented
-and must pass the full safe regression matrix. The next safe offline work is
-the inventory's synthetic-base-directory durable store, kept disconnected
-from production, or its fake-adapter trust observer with no real-path/signature
-probe.
+The offline multiple-window remediation, replay-ledger scaffold,
+explicit-synthetic-base native ledger store, pure executable-trust decision
+seam, and native boundary inventory are implemented and must pass the full
+safe regression matrix. The next safe offline work is the ledger's
+LocalAppData/volume adapter kept disconnected from production, or the trust
+boundary's fake native adapter with no real-path/signature probe.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

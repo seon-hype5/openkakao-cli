@@ -177,3 +177,16 @@ rejection, and a SHA-256 leaf-SPKI pin.
 The inventory is not production wiring. Add APIs in reviewable stages, test
 only synthetic storage/fake trust adapters, and keep both unavailable
 placeholders until their independent review and profile evidence exist.
+
+## ADR-022: Compile the native ledger against synthetic storage first
+
+Implement current-user DPAPI, exact protected ACLs, no-reparse handle checks,
+bounded exclusive I/O, write-through replacement, and tombstone removal only
+behind an explicit synthetic temporary-base constructor. Inject failures at
+every durable boundary and reload after each one. Any leftover temporary or
+tombstone artifact blocks automatic use.
+
+Do not add a production LocalAppData constructor or replace
+`UnavailableLedger` in the same change. Parent-chain/local-volume review,
+independent unsafe audit, real process-termination testing, and human recovery
+remain separate activation decisions.

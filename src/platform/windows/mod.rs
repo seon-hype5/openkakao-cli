@@ -10,6 +10,8 @@
 mod executable_trust;
 #[cfg(any(feature = "windows-ui-write", test))]
 mod ledger;
+#[cfg(feature = "windows-ui-write")]
+mod ledger_native;
 mod native;
 #[cfg(any(feature = "windows-ui-write", test))]
 mod transaction;

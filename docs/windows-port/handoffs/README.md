@@ -18,3 +18,5 @@ Root integration/offline-scaffold handoffs follow the same privacy rules; see
 replay state-machine boundary and remaining production-store blockers.
 The successor [`root-executable-trust-scaffold.md`](root-executable-trust-scaffold.md)
 records the content-free trust decision seam and its missing native observer.
+[`root-native-ledger-store.md`](root-native-ledger-store.md) records the later
+explicit-synthetic-base DPAPI/ACL store and why production remains unavailable.

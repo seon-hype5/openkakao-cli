@@ -110,10 +110,11 @@ or write authority.
   Read-only discovery is process-wide single-flight, so one timed-out worker
   blocks later probes instead of allowing retained workers to accumulate.
 - Cross-process exclusion, the pure replay transition protocol, and a
-  policy-owned one-use redacted correlation token exist, but the proposed
-  DPAPI/ACL/atomic-file store is not yet accepted or implemented. All-feature
-  production therefore refuses at `windows_ledger_unavailable` before a UI
-  mutation claim.
+  policy-owned one-use redacted correlation token exist. A current-user
+  DPAPI/protected-ACL/write-through store is synthetically tested only under an
+  explicit temporary base. Its production LocalAppData/volume constructor and
+  native-port wiring remain absent, so all-feature production still refuses at
+  `windows_ledger_unavailable` before a UI mutation claim.
 
 These are blockers to enabling production write capability, not reasons to
 weaken the gates.
