@@ -207,12 +207,17 @@ ports, never KakaoTalk or another desktop application.
 
 ## Remaining activation blockers and risks
 
+[`ACTIVATION_RFC.md`](ACTIVATION_RFC.md) now defines proposed evidence,
+privacy, durability, crash-recovery, executable-trust, and activation-order
+contracts. It contains no selector values and authorizes no live work.
+
 - Design and measure a privacy-safe exact self-chat identity selector without
   exposing room/profile text.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
-- Design a privacy-safe durable cross-process started/indeterminate replay
-  ledger before automatic commit capability can be advertised.
+- Review, implement, and adversarially test the proposed privacy-safe durable
+  started/indeterminate replay ledger before automatic commit capability can
+  be advertised.
 - Add executable-signature and canonical-installation-root evidence.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in

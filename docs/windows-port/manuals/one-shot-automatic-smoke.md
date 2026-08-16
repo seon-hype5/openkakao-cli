@@ -3,8 +3,9 @@
 > **Gate L40 — NOT AUTHORIZED NOW. It requires fresh immediate approval for one commit.**
 
 L40 is the highest-risk MVP gate. It permits at most one automatic commit in
-one approved session. The current Windows backend does not implement stage or
-commit, so this manual cannot presently be executed.
+one approved session. A guarded transaction scaffold exists, but production
+capability, target/submit selectors, and a durable replay ledger are absent, so
+this manual cannot presently be executed.
 
 The release goal of repeated exact echoes is cumulative across separately
 approved sessions. It never means sending a batch in one session.
@@ -18,7 +19,9 @@ approved sessions. It never means sending a batch in one session.
 - A reviewed implementation supports a verified submit-button invocation.
   Key-input fallback requires its own approved RFC and is otherwise forbidden.
 - Cross-process mutual exclusion, one-shot nonce consumption, snapshot TTL,
-  user-activity detection, and exact staged readback are all active.
+  user-activity detection, exact staged readback, and the accepted durable
+  ledger protocol from [the activation RFC](../ACTIVATION_RFC.md) are all
+  active.
 - The user gives a separate immediate approval naming L40 and exactly one
   automatic synthetic commit. Prior approvals do not carry forward.
 - Root is the sole automation controller and all child agents are stopped.

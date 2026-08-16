@@ -91,6 +91,10 @@ nor mutex outlives the transaction invisibly.
 
 ## Remaining security blockers
 
+The proposed contracts and activation order are in
+[`ACTIVATION_RFC.md`](ACTIVATION_RFC.md). Merging that proposal grants no live
+or write authority.
+
 - No privacy-safe measured selector proves that the current room is the
   requested self-chat.
 - No live-measured exact unique send-button selector/InvokePattern is
@@ -100,8 +104,8 @@ nor mutex outlives the transaction invisibly.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.
   Read-only discovery is process-wide single-flight, so one timed-out worker
   blocks later probes instead of allowing retained workers to accumulate.
-- Cross-process exclusion exists, but durable cross-process replay history is
-  not yet designed.
+- Cross-process exclusion exists, but the proposed durable replay protocol is
+  not yet accepted or implemented.
 
 These are blockers to enabling production write capability, not reasons to
 weaken the gates.

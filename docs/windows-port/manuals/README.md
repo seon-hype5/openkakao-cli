@@ -5,6 +5,9 @@
 These manuals describe future, separately approved validation. Reading them,
 merging them, or obtaining a green CI result does not authorize a live probe,
 UI mutation, submission, data access, screenshot, or artifact capture.
+Production-activation prerequisites are proposed separately in
+[`ACTIVATION_RFC.md`](../ACTIVATION_RFC.md); that document is also not
+authorization.
 
 ## Mandatory sequence
 
