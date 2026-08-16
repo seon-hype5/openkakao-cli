@@ -66,3 +66,6 @@ mutation-boundary checks, and the residual unowned/custom-overlay limitation.
 [`root-read-only-com-cancellation.md`](root-read-only-com-cancellation.md)
 records the pinned worker-thread cancellation handshake, unchanged
 single-flight fallback, and residual custom-marshaler/provider limitations.
+[`root-windows-ci-parity.md`](root-windows-ci-parity.md) records the hosted
+Windows workflow's static documentation/pin checks, synthetic compatibility
+targets, release parity, and the still-external first hosted run.

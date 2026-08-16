@@ -20,12 +20,21 @@ action update requires provenance review in the action's official repository
 and a static check that rejects moving tags, branches, abbreviated SHAs, and
 non-hex refs.
 
+The workflow also checks every local Markdown link below `docs/windows-port`,
+rejects links that escape the repository, confirms the exact toolchain pin,
+and rejects any mutable third-party action reference. Changes anywhere in the
+Windows-port documentation trigger this gate, so a broken handoff or manual
+cannot bypass review through a narrower path filter. The check is inline
+PowerShell and does not depend on changing the runner's script-execution
+policy.
+
 ## Automated Windows gates
 
 The job runs in this order and stops on the first failure:
 
 | Gate | Command | Safety basis |
 |---|---|---|
+| Documentation and pins | Inline PowerShell link/action/toolchain validator | Reads only committed Markdown, this workflow, and `rust-toolchain.toml`; rejects broken/out-of-tree links and mutable action refs |
 | Format | `cargo fmt --all -- --check` | Source-only formatting check |
 | Lint | `cargo clippy --locked --all-targets --all-features -- -D warnings` | Compiles/lints targets; does not execute the product |
 | Library | `cargo test --locked --lib` | Unit tests use synthetic values; the only native trust call targets the committed inert fixture with cache-only/no-UI policy and exactly one CLOSE |
@@ -33,8 +42,11 @@ The job runs in this order and stops on the first failure:
 | Binary unit | `cargo test --locked --bin openkakao-cli` | Parser and unit coverage; no command dispatch against a live app |
 | Windows contracts | `cargo test --locked --test windows_backend --test windows_policy --test windows_cli` | Capability, fake, policy, redaction, and zero-mutation coverage |
 | Guarded backend contract | `cargo test --locked --all-features --test windows_backend` | Verifies the feature-enabled production backend remains fail-closed without calling `inspect`, `stage`, or `commit` |
+| Compatibility suites | `cargo test --locked --test auth_flow_test --test loco_client_test --test loco_crypto_test --test loco_packet_test --test message_db_test` | Runs the same synthetic compatibility targets used by the local final matrix |
 | CLI compatibility | Fourteen individually named `cli_test` cases, each run with `--exact` | Closed allowlist of help/version/usage parsing only |
-| Builds | `cargo build --locked` and `cargo build --locked --all-features` | Builds both the default read-only artifact and the feature-gated artifact using the committed lockfile; neither is executed |
+| Debug builds | `cargo build --locked` and `cargo build --locked --all-features` | Builds both the default read-only artifact and the feature-gated artifact using the committed lockfile; neither is executed |
+| Release builds | `cargo build --locked --release` and `cargo build --locked --release --all-features` | Repeats the default/all-feature compile boundary under release optimization without executing either artifact |
+| Release Windows tests | `cargo test --locked --release --all-features --lib platform::windows` | Repeats the synthetic Windows unit-test subtree against the optimized all-feature build |
 
 The CLI compatibility step is a closed allowlist. It deliberately excludes
 these cases because they can enter legacy local-state or credential diagnostic
@@ -157,8 +169,9 @@ approved manual activity and is not implied by a green build.
 ## Gate interpretation
 
 A green workflow proves compilation, formatting, lint, synthetic policy, fake
-orchestration, redaction, and fail-closed behavior. It does not prove selector
-compatibility with a live application, self-chat identity, empty-draft
-evidence, stage safety, echo detection, or submission correctness. Those
-claims belong to the separately approved manuals under
+orchestration, compatibility regressions, debug/release compilation,
+redaction, and fail-closed behavior. It does not prove selector compatibility
+with a live application, self-chat identity, empty-draft evidence, stage
+safety, echo detection, or submission correctness. Those claims belong to the
+separately approved manuals under
 [`manuals/`](manuals/README.md); none is authorized by CI success.

@@ -511,3 +511,23 @@ total budget, pre-readiness permit closure, terminal HRESULT classification,
 and thread-release ordering without calling COM or a desktop API. This
 decision adds no dependency feature, selector, capability, live permission,
 or KakaoTalk observation.
+
+## ADR-038: Make hosted Windows CI match the local safe release matrix
+
+Gate the same five synthetic compatibility targets, both default and
+all-feature release builds, and the optimized all-feature Windows unit-test
+subtree that root already requires locally. Keep the existing exact-name CLI
+allowlist; never broaden it to a whole target or a skip-based denylist.
+
+Validate every local link below `docs/windows-port`, reject resolved targets
+outside the repository, require the exact repository toolchain pin, and parse
+every third-party `uses:` reference in the Windows workflow as a full
+lowercase 40-hex commit SHA. Trigger the workflow for every Windows-port
+documentation change. Keep this validator inline so the hosted gate does not
+depend on relaxing PowerShell execution policy or installing a parser.
+
+These additions may read repository source and execute only synthetic tests.
+They must not invoke the product, prepare a desktop session, upload artifacts,
+inject secrets, or infer live authorization from a green result. The first
+GitHub-hosted run remains external evidence; local parity proves only that the
+committed commands pass in the current non-live workspace.

@@ -11,9 +11,7 @@ on:
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
       - ".github/workflows/windows.yml"
-      - "docs/windows-port/CI.md"
-      - "docs/windows-port/TRUST_PROVENANCE.md"
-      - "docs/windows-port/manuals/**"
+      - "docs/windows-port/**"
   pull_request:
     paths:
       - "src/**"
@@ -24,9 +22,7 @@ on:
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
       - ".github/workflows/windows.yml"
-      - "docs/windows-port/CI.md"
-      - "docs/windows-port/TRUST_PROVENANCE.md"
-      - "docs/windows-port/manuals/**"
+      - "docs/windows-port/**"
   workflow_dispatch:
 
 permissions:
@@ -52,6 +48,77 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      - name: Validate Windows documentation and CI pins
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          $repositoryRoot = (Get-Location).Path
+          $repositoryPrefix = $repositoryRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) +
+            [System.IO.Path]::DirectorySeparatorChar
+          $documentationRoot = Join-Path $repositoryRoot "docs/windows-port"
+          $workflowPath = Join-Path $repositoryRoot ".github/workflows/windows.yml"
+          $toolchainPath = Join-Path $repositoryRoot "rust-toolchain.toml"
+          $markdownFiles = @(Get-ChildItem -LiteralPath $documentationRoot -Recurse -File -Filter "*.md")
+          $brokenLinks = [System.Collections.Generic.List[string]]::new()
+          $localLinkCount = 0
+
+          foreach ($file in $markdownFiles) {
+            $contents = Get-Content -LiteralPath $file.FullName -Raw
+            $links = [regex]::Matches($contents, '\[[^\]]*\]\((?<target>[^)]+)\)')
+            foreach ($link in $links) {
+              $target = $link.Groups["target"].Value.Trim().Trim('<', '>')
+              if ($target -match '^(?i:https?://|mailto:|#)') {
+                continue
+              }
+              $pathPart = ($target -split '#', 2)[0]
+              if ([string]::IsNullOrWhiteSpace($pathPart)) {
+                continue
+              }
+              $localLinkCount++
+              $decodedPath = [uri]::UnescapeDataString($pathPart)
+              $resolvedPath = [System.IO.Path]::GetFullPath((Join-Path $file.DirectoryName $decodedPath))
+              if (-not $resolvedPath.StartsWith($repositoryPrefix, [System.StringComparison]::OrdinalIgnoreCase) -or
+                -not (Test-Path -LiteralPath $resolvedPath)) {
+                $relativeFile = [System.IO.Path]::GetRelativePath($repositoryRoot, $file.FullName)
+                $brokenLinks.Add("${relativeFile}: ${target}")
+              }
+            }
+          }
+          if ($brokenLinks.Count -ne 0) {
+            throw "broken or out-of-repository local links: $($brokenLinks -join '; ')"
+          }
+
+          $thirdPartyActionCount = 0
+          foreach ($line in Get-Content -LiteralPath $workflowPath) {
+            if ($line -notmatch '^\s*uses:\s*(?<reference>\S+)') {
+              continue
+            }
+            $actionReference = $Matches["reference"]
+            if ($actionReference.StartsWith("./", [System.StringComparison]::Ordinal)) {
+              continue
+            }
+            $thirdPartyActionCount++
+            if ($actionReference -notmatch '^[^@\s]+@[0-9a-f]{40}$') {
+              throw "mutable third-party action reference"
+            }
+          }
+          if ($thirdPartyActionCount -eq 0) {
+            throw "no third-party action references found"
+          }
+
+          $toolchainPinned = Select-String -LiteralPath $toolchainPath -Pattern '^channel = "1\.95\.0"$' -Quiet
+          if (-not $toolchainPinned) {
+            throw "rust-toolchain.toml must pin channel 1.95.0"
+          }
+          Write-Output (
+            "windows_port_markdown_files={0} local_links={1} broken=0 action_refs={2} pinned={2}" -f
+              $markdownFiles.Count,
+              $localLinkCount,
+              $thirdPartyActionCount
+          )
 
       - name: Install pinned repository toolchain
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
@@ -106,6 +173,9 @@ jobs:
       - name: Run feature-gated Windows backend contract tests
         run: cargo test --locked --all-features --test windows_backend
 
+      - name: Run synthetic compatibility suites
+        run: cargo test --locked --test auth_flow_test --test loco_client_test --test loco_crypto_test --test loco_packet_test --test message_db_test
+
       - name: Run safe CLI compatibility selection
         shell: pwsh
         run: |
@@ -138,6 +208,15 @@ jobs:
 
       - name: Build feature-gated Windows debug binary
         run: cargo build --locked --all-features
+
+      - name: Build Windows release binary
+        run: cargo build --locked --release
+
+      - name: Build feature-gated Windows release binary
+        run: cargo build --locked --release --all-features
+
+      - name: Run release feature-gated Windows tests
+        run: cargo test --locked --release --all-features --lib platform::windows
 
       # Deliberately no upload-artifact step. The workflow never invokes a
       # live UI command and retains only dependency/compiler caches.

@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`d4532399d00438eb7489fdb20f06ed95c768c7b3`. The commit containing this
+`34227b4b68d1b0ec3e6b13c844ed4de2e9970eb7`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -55,7 +55,9 @@ concurrency limit.
 - approval-owned process-local monotonic lifetime enforcement:
   `e94801fa9f181e95fc44505ba374b80be3e5ace2`; and
 - same-process owner-group modal evidence with repeated mutation-boundary
-  checks: `d4532399d00438eb7489fdb20f06ed95c768c7b3`.
+  checks: `d4532399d00438eb7489fdb20f06ed95c768c7b3`; and
+- pinned-worker read-only COM call cancellation with retained single-flight:
+  `34227b4b68d1b0ec3e6b13c844ed4de2e9970eb7`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -216,6 +218,16 @@ restricted to metadata-only inspection; mutation workers remain synchronous,
 joined, and cancellation-disabled. Pure tests call no native COM or desktop
 API, and no live provider compatibility was measured.
 
+The current successor makes hosted Windows CI reproduce the complete local
+safe release matrix. It adds the five synthetic compatibility targets,
+default and all-feature release builds, and optimized all-feature Windows unit
+tests. An inline PowerShell gate validates every Windows-port local Markdown
+link, rejects out-of-repository targets and mutable action references, and
+rechecks the exact Rust toolchain pin. Every Windows-port documentation change
+now triggers the workflow. The exact-name CLI allowlist, read-only permissions,
+no-artifact policy, and ban on product invocation remain unchanged. The
+commands pass locally; the first GitHub-hosted run remains external evidence.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -228,6 +240,9 @@ API, and no live provider compatibility was measured.
   worker through one zero-wait COM cancellation request and returns a
   non-retryable timeout. Unsupported or still-running providers keep the lease
   until they return, so further probes create no worker.
+- Windows CI statically validates documentation links, action/toolchain pins,
+  and runs the synthetic compatibility targets plus default/all-feature debug
+  and release builds and optimized Windows tests without invoking an artifact.
 - Inspection is metadata-only and redacted. It does not read titles, UIA
   Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
 - Modal evidence covers a disabled selected window plus visible same-process
@@ -326,7 +341,7 @@ All recorded final-matrix Rust commands used the ignored
 | release build, default and all features | passed |
 | release all-feature Windows synthetic tests | 111 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 45 files, 53 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 46 files, 54 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -338,8 +353,10 @@ substituted for them.
 Windows CI pins all three third-party actions by full reviewed commit SHA,
 uses read-only repository permissions, disables checkout credential
 persistence, uploads no artifact, and runs default plus explicitly scoped
-all-feature synthetic coverage. The workflow itself was statically validated;
-its first GitHub-hosted run remains an external integration check.
+all-feature synthetic coverage in debug and release profiles. Its committed
+inline documentation/action/toolchain validator and every newly added command
+passed locally; the first GitHub-hosted run remains an external integration
+check.
 
 ## Safety ledger for this implementation session
 
@@ -433,12 +450,12 @@ target-observation state, and an approval-owned monotonic deadline are
 implemented. Conventional same-process owner-group popup evidence and repeated
 mutation-boundary modal checks are now implemented as well. Read-only COM
 cancellation now uses a pinned worker-thread handshake while preserving
-single-flight fallback for unsupported providers. All pass the full safe
-regression matrix. The next safe work is a second independent unsafe review
-and a clean pinned-Windows CI reproduction, followed separately by reviewed
+single-flight fallback for unsupported providers. The committed Windows
+workflow now mirrors the local safe compatibility and release matrix. All pass
+locally. The next safe work is a second independent unsafe review and a clean
+pinned-Windows hosted CI reproduction, followed separately by reviewed
 production signer/root provenance. None of these tasks requires or authorizes
-a real KakaoTalk path or signature, a live label probe, or a trust-store
-change.
+a real KakaoTalk path or signature, a live label probe, or a trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in
