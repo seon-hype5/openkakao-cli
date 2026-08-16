@@ -526,18 +526,24 @@ fn indeterminate_is_exit_21_and_never_retry_safe() {
     assert_eq!(value["outcome"], "indeterminate");
     assert_eq!(value["retry_safe"], false);
 
-    let mut report =
-        build_action_report(ReportAction::LocalSend, BackendKind::Fake, &safe_snapshot());
-    report.schema_version = 99;
-    report.outcome = SendOutcome::Indeterminate;
-    report.attempted = false;
-    report.retry_safe = true;
-    let normalized = render_report(&report, OutputMode::Json);
-    let normalized_value: Value = serde_json::from_str(normalized.stdout.trim())
-        .expect("normalized report JSON should parse");
+    for outcome in [
+        SendOutcome::CommitIssued,
+        SendOutcome::SubmittedUnverified,
+        SendOutcome::Indeterminate,
+    ] {
+        let mut report =
+            build_action_report(ReportAction::LocalSend, BackendKind::Fake, &safe_snapshot());
+        report.schema_version = 99;
+        report.outcome = outcome;
+        report.attempted = false;
+        report.retry_safe = true;
+        let normalized = render_report(&report, OutputMode::Json);
+        let normalized_value: Value = serde_json::from_str(normalized.stdout.trim())
+            .expect("normalized report JSON should parse");
 
-    assert_eq!(normalized.exit_code, ExitCode::SubmissionIndeterminate);
-    assert_eq!(normalized_value["schema_version"], SCHEMA_VERSION);
-    assert_eq!(normalized_value["attempted"], true);
-    assert_eq!(normalized_value["retry_safe"], false);
+        assert_eq!(normalized.exit_code, ExitCode::SubmissionIndeterminate);
+        assert_eq!(normalized_value["schema_version"], SCHEMA_VERSION);
+        assert_eq!(normalized_value["attempted"], true);
+        assert_eq!(normalized_value["retry_safe"], false);
+    }
 }

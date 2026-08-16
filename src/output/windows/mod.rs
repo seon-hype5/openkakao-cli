@@ -78,6 +78,8 @@ const OPERATION_CODES: &[&str] = &[
     "windows_uia_window",
     "windows_window_changed_during_inspect",
     "windows_window_enabled",
+    "windows_write_capability_unavailable",
+    "windows_write_config_disabled",
     "windows_write_mode_not_in_wave_1",
 ];
 const EVIDENCE_CODES: &[&str] = &[
@@ -165,7 +167,17 @@ pub fn build_action_report(
     backend: BackendKind,
     snapshot: &UiSnapshot,
 ) -> ActionReport {
-    let outcome = action.outcome();
+    build_action_report_with_outcome(action, backend, snapshot, action.outcome())
+}
+
+/// Builds a redacted report for an explicitly completed transaction outcome.
+/// Callers cannot add free-form action, profile, or evidence strings.
+pub fn build_action_report_with_outcome(
+    action: ReportAction,
+    backend: BackendKind,
+    snapshot: &UiSnapshot,
+    outcome: SendOutcome,
+) -> ActionReport {
     ActionReport {
         schema_version: SCHEMA_VERSION,
         action: action.code().to_string(),
@@ -182,7 +194,10 @@ pub fn build_action_report(
 
 pub fn render_report(report: &ActionReport, mode: OutputMode) -> RenderedOutput {
     let report = normalized_report(report);
-    let exit_code = if report.outcome == SendOutcome::Indeterminate {
+    let exit_code = if matches!(
+        report.outcome,
+        SendOutcome::CommitIssued | SendOutcome::SubmittedUnverified | SendOutcome::Indeterminate
+    ) {
         ExitCode::SubmissionIndeterminate
     } else {
         ExitCode::Success

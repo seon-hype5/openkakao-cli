@@ -37,13 +37,15 @@ use openkakao_cli::cli::windows::{
 };
 #[cfg(target_os = "windows")]
 use openkakao_cli::output::windows::{
-    build_action_report, render_error, render_report, OutputMode, RenderedOutput, ReportAction,
+    build_action_report, build_action_report_with_outcome, render_error, render_report, OutputMode,
+    RenderedOutput, ReportAction,
 };
 #[cfg(target_os = "windows")]
 use openkakao_cli::platform::windows::WindowsBackend;
 #[cfg(target_os = "windows")]
 use openkakao_cli::platform::{
-    BackendKind, ExitCode, SendIntent, SendMode, TargetKind, UiError, UiErrorKind,
+    BackendKind, ExitCode, MessageSender, PlatformProbe, SendIntent, SendMode, TargetKind, UiError,
+    UiErrorKind,
 };
 #[cfg(target_os = "windows")]
 use openkakao_cli::safety::{WindowsPolicyConfig, WindowsSafetyPolicy};
@@ -750,12 +752,12 @@ fn run_windows_ui_doctor(options: &UiDoctorOptions, json: bool) -> RenderedOutpu
 }
 
 #[cfg(target_os = "windows")]
-fn windows_dry_run_nonce() -> String {
+fn windows_transaction_nonce() -> String {
     let unix_nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    format!("dry-run-{}-{unix_nanos}", std::process::id())
+    format!("windows-ui-{}-{unix_nanos}", std::process::id())
 }
 
 #[cfg(target_os = "windows")]
@@ -764,19 +766,55 @@ fn run_windows_local_send(
     config: &config::OpenKakaoConfig,
     json: bool,
 ) -> RenderedOutput {
+    let backend = WindowsBackend::default();
+    let mut input = ReaderMessageInput::new(io::stdin().lock());
+    run_windows_local_send_with(
+        options,
+        config,
+        json,
+        &backend,
+        &mut input,
+        windows_transaction_nonce(),
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn run_windows_local_send_with<P, I>(
+    options: &WindowsLocalSendOptions,
+    config: &config::OpenKakaoConfig,
+    json: bool,
+    backend: &P,
+    input: &mut I,
+    nonce: String,
+) -> RenderedOutput
+where
+    P: PlatformProbe + MessageSender + ?Sized,
+    I: MessageInput + ?Sized,
+{
     let output_mode = windows_output_mode(json);
     let mode = match options.mode() {
         Ok(mode) => mode,
         Err(error) => return render_error(&error, output_mode),
     };
     if mode != SendMode::DryRun {
-        return render_error(
-            &UiError::new(
-                UiErrorKind::UnsupportedCapability,
-                "windows_write_mode_not_in_wave_1",
-            ),
-            output_mode,
-        );
+        if !config.safety.allow_ax_send {
+            return render_error(
+                &UiError::new(
+                    UiErrorKind::UnsupportedCapability,
+                    "windows_write_config_disabled",
+                ),
+                output_mode,
+            );
+        }
+        if !backend.capabilities().send_open_chat {
+            return render_error(
+                &UiError::new(
+                    UiErrorKind::UnsupportedCapability,
+                    "windows_write_capability_unavailable",
+                ),
+                output_mode,
+            );
+        }
     }
 
     let policy_config =
@@ -785,7 +823,6 @@ fn run_windows_local_send(
             Err(error) => return render_error(&error, output_mode),
         };
 
-    let mut input = ReaderMessageInput::new(io::stdin().lock());
     let message = match input.read_message() {
         Ok(message) => message,
         Err(error) => return render_error(&error, output_mode),
@@ -793,22 +830,44 @@ fn run_windows_local_send(
     let intent = SendIntent::new(
         TargetKind::SelfChat,
         message,
-        SendMode::DryRun,
+        mode,
         options.explicit_yes(),
-        windows_dry_run_nonce(),
+        nonce,
     );
     let policy = WindowsSafetyPolicy::new(policy_config);
-    let backend = WindowsBackend::default();
-    match policy.dry_run(&backend, options.self_chat_name_secret(), &intent) {
-        Ok(plan) => render_report(
-            &build_action_report(
-                ReportAction::LocalSend,
-                BackendKind::WindowsUia,
-                plan.snapshot(),
+    match mode {
+        SendMode::DryRun => match policy.dry_run(backend, options.self_chat_name_secret(), &intent)
+        {
+            Ok(plan) => render_report(
+                &build_action_report(
+                    ReportAction::LocalSend,
+                    BackendKind::WindowsUia,
+                    plan.snapshot(),
+                ),
+                output_mode,
             ),
-            output_mode,
-        ),
-        Err(error) => render_error(&error, output_mode),
+            Err(error) => render_error(&error, output_mode),
+        },
+        SendMode::StageOnly | SendMode::Commit => {
+            match policy.authorize(backend, options.self_chat_name_secret(), intent) {
+                Ok(approval) => {
+                    let snapshot = approval.snapshot().clone();
+                    match approval.execute(backend) {
+                        Ok(outcome) => render_report(
+                            &build_action_report_with_outcome(
+                                ReportAction::LocalSend,
+                                BackendKind::WindowsUia,
+                                &snapshot,
+                                outcome,
+                            ),
+                            output_mode,
+                        ),
+                        Err(error) => render_error(&error, output_mode),
+                    }
+                }
+                Err(error) => render_error(&error, output_mode),
+            }
+        }
     }
 }
 
@@ -2673,6 +2732,165 @@ mod tests {
             "--opened-only",
         ])
         .is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    fn windows_local_send_options(mode: &str) -> WindowsLocalSendOptions {
+        let cli = Cli::try_parse_from([
+            "openkakao-cli",
+            "local-send",
+            "SYNTHETIC_SELF_CHAT",
+            "--stdin",
+            "--opened-only",
+            mode,
+            "--yes",
+        ])
+        .expect("synthetic Windows write arguments should parse");
+        match cli.command {
+            Commands::LocalSend(options) => options,
+            other => panic!("expected local-send, got {other:?}"),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn windows_safe_snapshot() -> openkakao_cli::platform::UiSnapshot {
+        use openkakao_cli::platform::{
+            AppSnapshot, ChatTargetSnapshot, InputSnapshot, ProcessFingerprint, UiPlatform,
+            UiSnapshot,
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test clock should follow the Unix epoch")
+            .as_millis()
+            .try_into()
+            .expect("test timestamp should fit in u64");
+        UiSnapshot {
+            app: AppSnapshot {
+                platform: UiPlatform::Windows,
+                app_running: true,
+                process: Some(ProcessFingerprint {
+                    pid: 7,
+                    executable: "run:11111111111111111111111111111111".to_string(),
+                    session_id: Some(1),
+                }),
+                app_version: Some("26.7.0.5255".to_string()),
+                interactive_session_match: true,
+                integrity_compatible: true,
+                known_ui_profile: true,
+                top_level_window_count: 1,
+                modal_present: false,
+            },
+            target: ChatTargetSnapshot {
+                kind: TargetKind::SelfChat,
+                self_chat_verified: true,
+                exact_match: true,
+                unique_match: true,
+                window: Some("run:22222222222222222222222222222222".to_string()),
+                composer: Some("run:33333333333333333333333333333333".to_string()),
+                observed_at_unix_ms: now,
+                expires_at_unix_ms: now.saturating_add(5_000),
+            },
+            input: InputSnapshot {
+                present: true,
+                unique: true,
+                enabled: true,
+                writable: true,
+                draft_empty: true,
+                focused: false,
+                selector_profile_id: Some("kakaotalk-windows-26.7.0.5255".to_string()),
+            },
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn windows_write_test_config() -> config::OpenKakaoConfig {
+        let mut config = config::OpenKakaoConfig::default();
+        config.safety.allow_ax_send = true;
+        config.safety.allowed_send_chats = vec!["SYNTHETIC_SELF_CHAT".to_string()];
+        config
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_write_config_refuses_before_input_or_probe() {
+        let options = windows_local_send_options("--stage-only");
+        let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+        let mut input = ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+
+        let output = run_windows_local_send_with(
+            &options,
+            &config::OpenKakaoConfig::default(),
+            true,
+            &backend,
+            &mut input,
+            "config-refusal".to_string(),
+        );
+
+        assert_eq!(output.exit_code, ExitCode::CapabilityUnavailable);
+        assert!(output.stderr.contains("windows_write_config_disabled"));
+        assert_eq!(input.into_inner().position(), 0);
+        assert_eq!(backend.inspect_calls(), 0);
+        assert_eq!(backend.stage_calls(), 0);
+        assert_eq!(backend.commit_calls(), 0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_production_write_capability_refuses_before_stdin_or_ui() {
+        let options = windows_local_send_options("--stage-only");
+        let backend = WindowsBackend::default();
+        let mut input = ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+
+        let output = run_windows_local_send_with(
+            &options,
+            &windows_write_test_config(),
+            true,
+            &backend,
+            &mut input,
+            "capability-refusal".to_string(),
+        );
+
+        assert_eq!(output.exit_code, ExitCode::CapabilityUnavailable);
+        assert!(output
+            .stderr
+            .contains("windows_write_capability_unavailable"));
+        assert_eq!(input.into_inner().position(), 0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_synthetic_write_modes_dispatch_exactly_once() {
+        for (mode, expected_outcome) in [
+            ("--stage-only", "staged_and_restored"),
+            ("--commit", "commit_issued"),
+        ] {
+            let options = windows_local_send_options(mode);
+            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+            let mut input =
+                ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+            let output = run_windows_local_send_with(
+                &options,
+                &windows_write_test_config(),
+                true,
+                &backend,
+                &mut input,
+                format!("synthetic-{expected_outcome}"),
+            );
+            let value: serde_json::Value = serde_json::from_str(output.stdout.trim())
+                .expect("synthetic transaction report should be JSON");
+
+            assert_eq!(value["outcome"], expected_outcome);
+            assert_eq!(backend.inspect_calls(), 1);
+            assert_eq!(backend.stage_calls(), usize::from(mode == "--stage-only"));
+            assert_eq!(backend.commit_calls(), usize::from(mode == "--commit"));
+            if mode == "--commit" {
+                assert_eq!(output.exit_code, ExitCode::SubmissionIndeterminate);
+                assert_eq!(value["retry_safe"], false);
+            } else {
+                assert_eq!(output.exit_code, ExitCode::Success);
+            }
+        }
     }
 
     #[cfg(target_os = "windows")]
