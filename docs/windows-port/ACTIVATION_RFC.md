@@ -33,11 +33,17 @@ UTF-16 candidate, and the proof commits to the complete redacted snapshot.
 The approval retains a private permit, and fresh mutation state independently
 requires `target_binding_verified`. Wrong-case, whitespace, normalization,
 surrogate, replay, and state-movement negatives are covered without live UI.
+The native mutation port now carries that same approval into fresh observation
+and final preflight. Its exact UTF-16 verifier always uses the approval's own
+private snapshot, accepts no caller-selected snapshot, and retains no observed
+label.
 
 The production Windows observer remains deliberately disconnected: it reads
-no title/Name/label, produces no proof, leaves target binding false, and cannot
-read draft Value. This scaffold satisfies no measurement requirement below
-and grants no live or write authority.
+no title/Name/label, passes no candidate to the verifier, produces no proof,
+leaves target binding false, and cannot read draft Value. Synthetic absent,
+mismatch, inexact, and non-unique cases cover the permit seam. This scaffold
+satisfies no measurement requirement below and grants no live or write
+authority.
 
 The current policy checks that a requested label occurs exactly once in the
 configured allowlist, while the native snapshot independently leaves

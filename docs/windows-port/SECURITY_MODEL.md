@@ -42,6 +42,10 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
   Unicode-normalized, or unpaired-surrogate target evidence is a refusal.
 - Fresh native state must re-establish target binding; setting only
   self/exact/unique flags cannot authorize draft access or mutation.
+- The native mutation port carries the same approval through observation and
+  final preflight. An observed UTF-16 label can be checked only against that
+  approval's private policy-bound snapshot; callers cannot substitute a
+  different snapshot, and no observed label is retained.
 - PID alone is insufficient. A run-local digest includes executable identity
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;
@@ -79,8 +83,9 @@ The offline target-binding contract uses a new random HMAC-SHA-256 key for
 each policy inspection. It streams the configured label through UTF-16 without
 allocating a second label buffer. Returned proof bytes have no public accessor,
 format only as redacted, are never serialized, commit to the full snapshot,
-and cannot validate under another request key. No production label read was
-added; therefore production cannot currently create such proof.
+and cannot validate under another request key. The native observer currently
+passes no label to the approval-owned verifier, so no production label read was
+added and production cannot currently create such proof.
 
 No KakaoTalk data directory, database, token, cookie, credential, process
 memory, injection, hook, unofficial login, or telemetry is used by this port.

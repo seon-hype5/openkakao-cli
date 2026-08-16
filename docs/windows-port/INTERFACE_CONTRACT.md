@@ -57,9 +57,13 @@ dispatched mode. An incompatible successful result is normalized to
 `SubmissionUncertain`.
 
 An approved operation retains the opaque target-binding permit. The native
-state machine requires independently fresh `target_binding_verified` evidence
-in addition to the prior self/exact/unique flags before draft access or any
-mutation. Current production observation always leaves that evidence false.
+mutation port borrows that exact approval through the synchronous operation;
+its label verifier is fixed to the approval's private policy-bound snapshot and
+accepts no caller-selected snapshot. The state machine requires independently
+fresh `target_binding_verified` evidence in addition to separate exact and
+unique claims before draft access or any mutation, and repeats the same
+approval-owned check in final native preflight. Current production observation
+passes no label and always leaves that evidence false.
 
 The native transaction is compiled only by the default-off
 `windows-ui-write` feature. This feature is not authorization. Runtime also

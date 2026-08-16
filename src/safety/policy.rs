@@ -977,6 +977,14 @@ mod tests {
             )
             .unwrap();
         assert!(approval.approved.target_binding_verified());
+        let exact_label: Vec<u16> = "SYNTHETIC_SELF_CHAT".encode_utf16().collect();
+        let wrong_label: Vec<u16> = "SYNTHETIC_OTHER_CHAT".encode_utf16().collect();
+        assert!(approval
+            .approved
+            .target_binding_matches_observed_utf16(&exact_label));
+        assert!(!approval
+            .approved
+            .target_binding_matches_observed_utf16(&wrong_label));
         let debug = format!("{approval:?}");
         assert!(!debug.contains("synthetic-correlation"));
         assert!(debug.contains("<redacted>"));

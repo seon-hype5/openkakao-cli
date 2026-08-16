@@ -51,3 +51,6 @@ production values/wiring.
 [`root-native-root-allocation-lifetime.md`](root-native-root-allocation-lifetime.md)
 records the synthetic success/failure/refusal/NULL proof that every non-null
 Shell output is owned before HRESULT interpretation and released exactly once.
+[`root-native-target-permit-plumbing.md`](root-native-target-permit-plumbing.md)
+records the approval-owned native label-binding verifier, its fresh/final
+preflight wiring, and the still-absent production selector and label observer.

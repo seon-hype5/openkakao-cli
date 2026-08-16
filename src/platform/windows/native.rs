@@ -704,7 +704,13 @@ pub(super) fn stage(
     let _mutex = NamedMutationMutex::acquire()?;
     let correlation = RecordCorrelation::from_policy(approved.take_transaction_correlation()?)?;
     let message_utf16 = encode_secret_utf16(approved.message());
-    let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16, correlation);
+    let mut port = NativeMutationPort::new(
+        fingerprints,
+        approved,
+        expected,
+        &message_utf16,
+        correlation,
+    );
     transaction::run_stage(expected, &message_utf16, approved, &mut port)
 }
 
@@ -718,7 +724,13 @@ pub(super) fn commit(
     let _mutex = NamedMutationMutex::acquire()?;
     let correlation = RecordCorrelation::from_policy(approved.take_transaction_correlation()?)?;
     let message_utf16 = encode_secret_utf16(approved.message());
-    let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16, correlation);
+    let mut port = NativeMutationPort::new(
+        fingerprints,
+        approved,
+        expected,
+        &message_utf16,
+        correlation,
+    );
     transaction::run_commit(expected, &message_utf16, approved, &mut port)
 }
 
@@ -826,12 +838,13 @@ struct NativeMutationIdentity {
 }
 
 #[cfg(feature = "windows-ui-write")]
-struct NativeMutationPort<'message> {
+struct NativeMutationPort<'operation> {
     executable_trust: UnavailableExecutableTrust,
     ledger: LazyProductionLedger,
+    approved: &'operation ApprovedSend,
     fingerprints: FingerprintKey,
     expires_at_unix_ms: u64,
-    message_utf16: &'message [u16],
+    message_utf16: &'operation [u16],
     identity: Option<NativeMutationIdentity>,
     composer_element: Option<IUIAutomationElement>,
     value_pattern: Option<IUIAutomationValuePattern>,
@@ -849,16 +862,18 @@ enum PreparedMutation {
 }
 
 #[cfg(feature = "windows-ui-write")]
-impl<'message> NativeMutationPort<'message> {
+impl<'operation> NativeMutationPort<'operation> {
     fn new(
         fingerprints: FingerprintKey,
+        approved: &'operation ApprovedSend,
         expected: &ExpectedState<'_>,
-        message_utf16: &'message [u16],
+        message_utf16: &'operation [u16],
         correlation: RecordCorrelation,
     ) -> Self {
         Self {
             executable_trust: UnavailableExecutableTrust,
             ledger: LazyProductionLedger::new(correlation),
+            approved,
             fingerprints,
             expires_at_unix_ms: expected.expires_at_unix_ms,
             message_utf16,
@@ -976,7 +991,7 @@ impl<'message> NativeMutationPort<'message> {
         // Current profile has no independently verified non-content self-chat
         // selector. Refuse before CurrentValue so an arbitrary room's draft is
         // never read, even when a public caller forges approval booleans.
-        if !verify_self_target(identity.hwnd)? {
+        if !verify_self_target(identity.hwnd, self.approved)? {
             return Err(UiError::new(
                 UiErrorKind::TargetNotSelf,
                 "windows_mutation_target_unverified",
@@ -1118,19 +1133,17 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.composer_writable = opened.writable;
         fresh.composer_focused = opened.focused;
 
-        // These claims are intentionally independent of the approval snapshot.
-        // No measured self-chat selector exists for this profile, so the native
-        // observer cannot assert any target identity and must not read Value.
-        let target = observe_self_target(hwnd)?;
+        // Process, window, and composer claims come from fresh native evidence.
+        // Target identity must additionally match the request-scoped approval
+        // binding. No measured self-chat selector exists for this profile, so
+        // the native observer cannot assert target identity and must not read
+        // Value.
+        let target = observe_self_target(hwnd, self.approved)?;
         fresh.self_chat_verified = target.self_chat_verified;
         fresh.target_binding_verified = target.target_binding_verified;
         fresh.exact_target = target.exact;
         fresh.unique_target = target.unique;
-        fresh.draft = if target.self_chat_verified
-            && target.target_binding_verified
-            && target.exact
-            && target.unique
-        {
+        fresh.draft = if target.authorizes_target_access() {
             classify_current_value(&opened.value_pattern, self.message_utf16)?
         } else {
             DraftState::Unobserved
@@ -1281,7 +1294,7 @@ fn foreground_indicates_user_activity(
     ))
 }
 
-#[cfg(feature = "windows-ui-write")]
+#[cfg(any(feature = "windows-ui-write", test))]
 struct TargetEvidence {
     self_chat_verified: bool,
     target_binding_verified: bool,
@@ -1289,27 +1302,48 @@ struct TargetEvidence {
     unique: bool,
 }
 
-#[cfg(feature = "windows-ui-write")]
-fn observe_self_target(_hwnd: HWND) -> Result<TargetEvidence, UiError> {
-    // Profile 26.7.0.5255 has no privacy-safe, measured self-chat identity
-    // selector. Do not inspect Name/title text or substitute process identity.
-    Ok(TargetEvidence {
-        self_chat_verified: false,
-        target_binding_verified: false,
-        exact: false,
-        unique: false,
-    })
+#[cfg(any(feature = "windows-ui-write", test))]
+impl TargetEvidence {
+    fn authorizes_target_access(&self) -> bool {
+        self.self_chat_verified && self.target_binding_verified && self.exact && self.unique
+    }
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
+fn target_evidence_from_observed_label(
+    observed_label_utf16: Option<&[u16]>,
+    exact: bool,
+    unique: bool,
+    verify_binding: impl FnOnce(&[u16]) -> bool,
+) -> TargetEvidence {
+    let target_binding_verified = observed_label_utf16.is_some_and(verify_binding);
+    TargetEvidence {
+        self_chat_verified: target_binding_verified,
+        target_binding_verified,
+        exact,
+        unique,
+    }
 }
 
 #[cfg(feature = "windows-ui-write")]
-fn verify_self_target(hwnd: HWND) -> Result<bool, UiError> {
-    let target = observe_self_target(hwnd)?;
-    Ok(
-        target.self_chat_verified
-            && target.target_binding_verified
-            && target.exact
-            && target.unique,
-    )
+fn observe_self_target(_hwnd: HWND, approved: &ApprovedSend) -> Result<TargetEvidence, UiError> {
+    // Profile 26.7.0.5255 has no privacy-safe, measured self-chat identity
+    // selector. Pass no observed label, which deterministically refuses without
+    // inspecting Name/title text or substituting process identity. A future
+    // selector must keep the label ephemeral and use the approval's own bound
+    // snapshot through this callback.
+    Ok(target_evidence_from_observed_label(
+        None,
+        false,
+        false,
+        |observed_label_utf16| approved.target_binding_matches_observed_utf16(observed_label_utf16),
+    ))
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn verify_self_target(hwnd: HWND, approved: &ApprovedSend) -> Result<bool, UiError> {
+    let target = observe_self_target(hwnd, approved)?;
+    Ok(target.authorizes_target_access())
 }
 
 #[cfg(feature = "windows-ui-write")]
@@ -1590,6 +1624,58 @@ mod tests {
         assert!(classify_foreground_activity(10, 10, None, 42));
         assert!(classify_foreground_activity(10, 11, Some(42), 42));
         assert!(!classify_foreground_activity(10, 11, Some(99), 42));
+    }
+
+    #[test]
+    fn target_evidence_requires_ephemeral_binding_and_exact_unique_selection() {
+        let expected: Vec<u16> = "SYNTHETIC_SELF_TARGET".encode_utf16().collect();
+
+        let absent = target_evidence_from_observed_label(None, true, true, |_| {
+            panic!("binding verifier must not run without an observed label")
+        });
+        assert!(!absent.self_chat_verified);
+        assert!(!absent.target_binding_verified);
+        assert!(absent.exact);
+        assert!(absent.unique);
+        assert!(!absent.authorizes_target_access());
+
+        let exact = target_evidence_from_observed_label(Some(&expected), true, true, |candidate| {
+            candidate == expected
+        });
+        assert!(exact.self_chat_verified);
+        assert!(exact.target_binding_verified);
+        assert!(exact.exact);
+        assert!(exact.unique);
+        assert!(exact.authorizes_target_access());
+
+        let inexact =
+            target_evidence_from_observed_label(Some(&expected), false, true, |candidate| {
+                candidate == expected
+            });
+        assert!(inexact.self_chat_verified);
+        assert!(inexact.target_binding_verified);
+        assert!(!inexact.exact);
+        assert!(inexact.unique);
+        assert!(!inexact.authorizes_target_access());
+
+        let wrong: Vec<u16> = "SYNTHETIC_OTHER_TARGET".encode_utf16().collect();
+        let mismatched =
+            target_evidence_from_observed_label(Some(&wrong), true, true, |candidate| {
+                candidate == expected
+            });
+        assert!(!mismatched.self_chat_verified);
+        assert!(!mismatched.target_binding_verified);
+        assert!(!mismatched.authorizes_target_access());
+
+        let ambiguous =
+            target_evidence_from_observed_label(Some(&expected), true, false, |candidate| {
+                candidate == expected
+            });
+        assert!(ambiguous.self_chat_verified);
+        assert!(ambiguous.target_binding_verified);
+        assert!(ambiguous.exact);
+        assert!(!ambiguous.unique);
+        assert!(!ambiguous.authorizes_target_access());
     }
 
     #[test]

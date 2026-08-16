@@ -381,3 +381,24 @@ release wrapper. Cover success, `E_FAIL`, relative-path refusal, successful
 NULL, and failed NULL without invoking `SHGetKnownFolderPath`. The production
 release remains `CoTaskMemFree`, the full adapter remains disconnected, and
 this decision supplies no Kakao value, native observation, or activation.
+
+## ADR-033: Carry approval-owned target binding through native preflight
+
+Do not let a native target observer choose which authorization snapshot an
+observed label is checked against. `ApprovedSend` exposes only an exact UTF-16
+label check that always verifies the permit against the private snapshot stored
+inside that same approval. It accepts no caller-supplied snapshot.
+
+Make `NativeMutationPort` borrow that `ApprovedSend` for the full synchronous
+stage or commit operation. Use the same approval-owned check during fresh
+observation and every final target preflight before draft access, `SetValue`,
+or `Invoke`. Reduce an ephemeral observed-label option to booleans immediately;
+retain no label in `TargetEvidence` or the port. Exactness and uniqueness remain
+separate mandatory evidence rather than consequences of a label match.
+
+The current profile passes no observed label and sets exactness and uniqueness
+false, so the verifier is not called and production still refuses without
+reading title, UIA Name, or any room/profile text. Synthetic tests cover absent,
+exact, mismatched, inexact, and non-unique observations. This decision adds
+permit plumbing only; it supplies no selector, label reader, live permission,
+or write activation.

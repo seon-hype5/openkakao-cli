@@ -135,6 +135,14 @@ boundary immediately requeries the PID, HWND, executable path, process
 creation time, session, integrity, and exact UIA element before the execution
 claim.
 
+The native mutation port borrows the same `ApprovedSend` for the entire
+synchronous transaction. Any future ephemeral target label is compared only
+through that approval, whose verifier is permanently tied to its private
+policy snapshot; a native caller cannot supply a different snapshot. The
+observer immediately reduces the result to booleans and retains no label.
+The current profile supplies no label and therefore keeps the fresh and final
+target gates closed.
+
 Stage-only is designed as:
 
 1. observe and exactly match the approved state;

@@ -8,8 +8,9 @@ Applies only behind the default-off `windows-ui-write` feature
 ## Purpose and non-authorization
 
 This document freezes the minimum Windows namespaces, native call ordering,
-ownership rules, and synthetic-test seams for the two activation boundaries:
+ownership rules, and synthetic-test seams for the three activation boundaries:
 
+- the approval-owned native target-binding permit;
 - the trust-ordered lazy production ledger; and
 - `UnavailableExecutableTrust`.
 
@@ -45,6 +46,29 @@ This list was checked against the locally resolved generated source for
 `windows` 0.62.2. In that version, `WTHelperProvDataFromStateData` and
 `WTHelperGetProvSignerFromChain` are gated by both Catalog and Sip, while
 `WTHelperGetProvCertFromChain` is gated by Cryptography.
+
+## Native target-binding permit boundary
+
+Offline status: the mutation port now borrows the same `ApprovedSend` used by
+the guarded transaction for the whole synchronous stage or commit call. Fresh
+target observation and final native target revalidation invoke an exact UTF-16
+comparison through that approval. The comparison is fixed to the private
+policy-bound snapshot stored in the approval; native callers cannot substitute
+another snapshot.
+
+An observer may pass an ephemeral label slice only to the comparison callback.
+The callback result is reduced immediately to target booleans, while exactness
+and uniqueness remain separate required claims. Neither `TargetEvidence` nor
+`NativeMutationPort` retains the label. The same conjunction gates draft Value
+access and the final preflight before `SetValue` or `Invoke`.
+
+The current profile has no measured privacy-safe selector. Its observer passes
+no label and false exact/unique claims, performs no title/UIA Name/room text
+read, and therefore refuses deterministically. Pure synthetic tests prove that
+an absent label does not invoke the binding callback and that mismatched,
+inexact, or non-unique evidence cannot satisfy the full target gate. This
+plumbing authorizes no selector measurement, native label read, L10 retry, or
+mutation.
 
 ## Durable ledger boundary
 

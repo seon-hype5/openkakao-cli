@@ -596,16 +596,17 @@ impl ApprovedSend {
         self.target_binding.verifies_snapshot(&self.snapshot)
     }
 
-    /// Future native target observers use this after an ephemeral UTF-16 read
-    /// and before draft access or mutation. No observed label is retained.
+    /// Native target observers use this after an ephemeral UTF-16 read and
+    /// before draft access or mutation. Verification is fixed to this
+    /// approval's own policy-bound snapshot; callers cannot substitute a
+    /// different snapshot. No observed label is retained.
     #[allow(dead_code)]
     pub(crate) fn target_binding_matches_observed_utf16(
         &self,
         observed_label_utf16: &[u16],
-        snapshot: &UiSnapshot,
     ) -> bool {
         self.target_binding
-            .verifies_observed_target_utf16(observed_label_utf16, snapshot)
+            .verifies_observed_target_utf16(observed_label_utf16, &self.snapshot)
     }
 
     /// Atomically consumes this approval for its sole mutation attempt.

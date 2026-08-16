@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`. The commit containing this
+`3b06ecc785acde8fb0b01073ee535c142b8eb0b5`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -43,9 +43,11 @@ concurrency limit.
 - canonical trust-path share-guard audit and remediation:
   `27f50c8d0a272eb0b9af35d99568c431001157b5`;
 - repository-owned signed fixture and offline WinTrust lifetime qualification:
-  `74dff3ef5c6d957f275f3c21d7af375b0c2f04c5`; and
+  `74dff3ef5c6d957f275f3c21d7af375b0c2f04c5`;
 - guarded native installation-root relation derivation:
-  `efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`.
+  `efa4f13d6d94a71aeadcaadb7d6962b0bb17601d`; and
+- Shell result ownership before HRESULT interpretation:
+  `3b06ecc785acde8fb0b01073ee535c142b8eb0b5`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -150,6 +152,15 @@ ownership before HRESULT interpretation. Synthetic `CoTaskMemAlloc` buffers
 and a counting matching release prove one free on success, `E_FAIL`, and later
 path refusal, and zero frees for NULL. No test calls `SHGetKnownFolderPath`.
 
+The latest successor closes a native target-permit plumbing gap. The mutation
+port now borrows the same `ApprovedSend` throughout fresh observation and
+final preflight, and an ephemeral observed UTF-16 label can be checked only
+against that approval's own private policy-bound snapshot. Native callers can
+no longer substitute a snapshot, and neither the port nor target evidence
+retains the label. Synthetic absent, exact, mismatch, inexact, and non-unique
+cases cover the seam. Production still supplies no label or selector evidence
+and performs no new UI read.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -174,6 +185,9 @@ path refusal, and zero frees for NULL. No test calls `SHGetKnownFolderPath`.
 - Policy dry-run/authorization require request-scoped, nonserializing exact
   observed-target evidence; stale, replayed, normalized, or state-moved proof
   refuses.
+- The native mutation port carries that same approval through fresh and final
+  target checks; its label verifier is fixed to the approval-owned snapshot and
+  stores no observed label.
 - Write execution uses a consumed approval lease, a sealed sender, an atomic
   one-shot claim, exact mode/outcome compatibility, and no retry edge.
 - `windows-ui-write` is a real default-off compile boundary. All-feature builds
@@ -227,8 +241,8 @@ All recorded final-matrix Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 177 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 103 passed |
+| `cargo test --locked --lib` | 178 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 104 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -243,9 +257,9 @@ All recorded final-matrix Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 103 passed |
+| release all-feature Windows synthetic tests | 104 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Markdown local links and pinned-action policy | 41 files, 45 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 41 files, 45 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -290,9 +304,11 @@ the reviewed `windows` 0.62.2 feature/API/ownership inventory for offline
 implementation; it likewise authorizes no probe or production wiring.
 
 - The request/proof and fresh transaction gates for privacy-safe target
-  binding are implemented synthetically. Design and measure the exact native
-  self-chat selector, and add an ephemeral UTF-16 observer only if a separately
-  approved RFC amendment permits it; no room/profile text may be exposed.
+  binding are implemented synthetically, and the native port now keeps the
+  approval-owned permit through fresh observation and final preflight. Design
+  and measure the exact native self-chat selector, and add an ephemeral UTF-16
+  observer only if a separately approved RFC amendment permits it; no
+  room/profile text may be exposed or retained.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
 - Review and complete the proposed privacy-safe durable replay ledger. Its
@@ -336,12 +352,12 @@ trust-ordered lazy production ledger factory, pure executable-trust decision
 seam, disconnected native trust API adapter, focused source/API audit, and
 repository-owned signed fixture with bounded structural/SPKI and offline
 VERIFY/CLOSE tests, guarded root derivation, and exact Shell allocation-lifetime
-tests are implemented and must pass the full safe regression matrix. The next
-safe work is a second independent unsafe review and a clean pinned-Windows CI
-reproduction, followed separately by reviewed production signer/root
-provenance. Further synthetic target-binding adversarial review is also
-permitted. None of these tasks requires or authorizes a real KakaoTalk path or
-signature, a live label probe, or a trust-store change.
+tests, plus approval-owned native target-permit plumbing, are implemented and
+pass the full safe regression matrix. The next safe work is a second
+independent unsafe review and a clean pinned-Windows CI reproduction, followed
+separately by reviewed production signer/root provenance. None of these tasks
+requires or authorizes a real KakaoTalk path or signature, a live label probe,
+or a trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in
