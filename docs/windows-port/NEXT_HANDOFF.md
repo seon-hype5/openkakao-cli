@@ -1,146 +1,178 @@
-# Windows port handoff after Phase 0 and Wave 1
+# Windows port handoff after Wave 2 / I20
 
 Date: 2026-08-16 KST
 
 ## Status
 
-The user-requested Phase 0 and Wave 1 scope is complete on
-`integration/windows-mvp`. The root integration commit is
-`a2c9cb1cf4ddc1f210dbc2afac8e52bcc265b0fe`. The commit containing this handoff
-is the next branch-tip commit; its exact SHA must be reported outside this file
-because a commit cannot contain its own content-derived SHA.
+The non-live Windows release candidate is complete through DAG task `I20` on
+branch `integration/windows-mvp`. The reviewed implementation tip is
+`272c8cb70c716066e22b9d5a6cf8e2d8da3a3d43`. The commit containing this
+handoff is its clean successor and must be reported externally because a
+commit cannot embed its own content-derived SHA.
 
-Completed DAG tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
-`P30`, and `I10`.
+Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
+`P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-Execution used the requested topology: root plus exactly three
-`gpt-5.6-sol` children at `reasoning=max`, with child subdelegation disabled.
-At most two Rust builds were allowed concurrently.
+Not completed or authorized: live gates `L10`, `L20`, `L30`, `L40`, and final
+post-live task `R00`. A green I20 does not carry authority into any live gate.
 
-Not started: Wave 2 (`P40`, `P50`, `P60`, `I20`), live validation (`L10` through
-`L40`), and release-candidate task `R00`. None is implied by completion of this
-handoff.
+The requested topology was used: root plus Child A/B/C, with isolated
+worktrees and no child subdelegation. Rust builds were kept within the stated
+concurrency limit.
 
-## Source and commit provenance
+## Provenance
 
-- pinned upstream: `be6edd442c803de8e4f06bfc4446d166ac474952`
-- frozen contract: `d974c0597528e079919d4c45ee0893fa61d4335d`
-- root UIA property-condition RFC on this branch: `bdf56d0`
-- Child B safety source: `6963c73067cc3beb77783a49dd422a2d7fa26f52`
-  -> integration cherry-pick `941d54a`
-- Child A backend source: `2b70e3b73c8d9c409d4186324a651b8c02e4ebb1`
-  -> integration cherry-pick `fba97d0`
-- Child C CLI/output source: `02fb7d85bfa52c117f3b803b5d971be741df70c4`
-  -> integration cherry-pick `b8a624d`
-- root Wave 1 wiring and reconciliation:
-  `a2c9cb1cf4ddc1f210dbc2afac8e52bcc265b0fe`
+- pinned upstream: `be6edd442c803de8e4f06bfc4446d166ac474952`;
+- frozen contract: `d974c0597528e079919d4c45ee0893fa61d4335d`;
+- Wave 1 integration ancestor:
+  `fed2bb1558b4e07878f17f4c8140aab5ead682b2`;
+- P50 child source: `f9ca1964942276fa3fb0a4305a5408afb5599e2d`,
+  integrated and reconciled beginning at `cd0faf4`;
+- P60 child source: `f09fc19bb05e11b0d4659a726e662e414c1e1408`,
+  integrated at `b6b4c7b` and hardened at `fb51d1f`;
+- P40 child source: `47452d8327d4ce52929de17523a6fc4f971d4293`,
+  integrated at `280a35e`;
+- root guarded orchestration and contract chain: `ebc9368`, `5550384`,
+  `8a89431`, `658b541`, `a61b3d7`, `f60876c`, and `60adc01`; and
+- final root adversarial reconciliation, CI, tests, and documentation:
+  `272c8cb70c716066e22b9d5a6cf8e2d8da3a3d43`.
 
-Intake used the required policy -> backend -> CLI order. Each child commit had
-the frozen contract as an ancestor, stayed inside its assigned ownership, and
-passed `git diff --check`. The three child worktrees were clean at handoff.
+The Child A native unsafe audit and Child B adversarial audit were followed by
+a focused re-audit of root's fixes. The re-audit found no correctness blocker
+for merging the default-off scaffold.
 
-## Delivered behavior
+## Delivered release-candidate behavior
 
-- A Windows MSVC toolchain and isolated development workspace are documented
-  in `TOOLCHAIN.md`; the repository no longer requires SQLCipher/OpenSSL merely
-  to compile the Windows UI-only target.
-- `PlatformProbe`, sealed `ApprovedSend`, stable snapshot/error/outcome types,
-  a fake backend, and exact-and-unique matching form the frozen contract.
-- The Windows backend performs read-only exact top-level discovery, limited
-  process/path/version/session/integrity checks, and bounded metadata-only UIA
-  composer selection on a dedicated windowless MTA thread.
-- The safety policy is self-chat-only and deny-by-default, with an exact
-  allowlist, five-second maximum snapshot TTL, 1,000-scalar/4,000-byte input
-  bounds, one-shot hashed nonces, and a process-local non-Send approval lease.
-- Windows CLI dispatch adds `doctor --ui` and stdin-only, opened-only
-  `local-send`. Dry-run is the default. Stage/commit are refused before stdin
-  or UI inspection, and rejected positional message text is not echoed.
-- Reports use schema version 1, fixed allowlisted evidence, stable exit codes,
-  separated stdout/stderr, execution-scoped fingerprints, and no raw message,
-  room/profile name, HWND, or UIA runtime ID.
-- A successful policy dry-run retains and reports the same validated redacted
-  snapshot, avoiding a second-probe race. Secret input buffers are zeroized on
-  failure and the final `SecretMessage` is zeroized on drop.
+- Windows process/window/version/session/integrity/process-creation and exact
+  composer metadata discovery runs on a dedicated windowless MTA thread.
+- Inspection is metadata-only and redacted. It does not read titles, UIA
+  Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
+- Windows CLI provides `doctor --ui` and stdin-only/opened-only `local-send`,
+  with generic parse failures that cannot echo a rejected positional message.
+- Input stops at 4,001 raw bytes, accepts at most 4,000 valid UTF-8 bytes and
+  1,000 Unicode scalars, rejects dangerous controls/whitespace forms, and
+  zeroizes secret buffers.
+- The exact allowlist is checked before stdin. Windows has its own default-off
+  `safety.allow_windows_ui_write` flag; macOS `allow_ax_send` cannot authorize
+  it.
+- Dry-run is inspection-only by type and reuses one policy snapshot.
+- Write execution uses a consumed approval lease, a sealed sender, an atomic
+  one-shot claim, exact mode/outcome compatibility, and no retry edge.
+- `windows-ui-write` is a real default-off compile boundary. All-feature builds
+  compile the native Value/Invoke path without granting authority.
+- The guarded transaction binds PID/HWND/path/process creation/session/UIA
+  evidence, half-open TTL, a named cross-process mutex, final native preflight,
+  exact stage readback, owned-value-only restore, and at most one Invoke.
+- Same-process foreground popups count as user activity. Mutex contention,
+  abandonment, wait failure, and every error/panic after SetValue entry are
+  `SubmissionUncertain`, exit 21, and never retry-safe.
+- Secret UTF-16 is written directly into a presized zeroizing allocation;
+  outbound and CurrentValue BSTR allocations are scrubbed before release.
+- Reports remain schema v1 and allowlist action/profile/evidence/operation
+  codes. Unknown strings are redacted in human and JSON streams.
 
-## Intentional fail-closed limitation
+## Intentional production refusal
 
-The production backend does not read window titles, UIA Name or Value
-properties, room/profile names, or draft contents. Therefore it never claims
-`exact_match`, `unique_match`, `self_chat_verified`, or `draft_empty`.
-`doctor --ui` can return redacted metadata, but a production `local-send`
-dry-run currently reaches policy refusal rather than a successful plan. Only
-synthetic fake snapshots exercise the successful orchestration path.
+The transaction code exists for review and synthetic verification, but a live
+write is not reachable:
 
-This is deliberate: process/window/composer metadata alone cannot prove the
-target is self-chat or that no draft would be overwritten. Do not weaken these
-fields or infer them from process identity in Wave 2.
+1. `windows-ui-write` defaults off;
+2. `allow_windows_ui_write` defaults false;
+3. `WindowsBackend::capabilities()` reports `send_open_chat=false` even in an
+   all-feature build;
+4. native `self_chat_verified`, exact-target, and unique-target evidence are
+   always false; and
+5. the commit selector is `Unconfigured` and no InvokePattern is acquired.
 
-## Final non-mutating verification
+Thus production stage/commit refuse before stdin or UI inspection in root
+dispatch, and normal policy authorization using `WindowsBackend` cannot mint
+an operation. Even a synthetic cross-backend approval is stopped by the
+Windows sender's independently fresh target and selector evidence. These gates
+must not be weakened merely to make a live test possible.
 
-All commands used the ignored `.target/integration` directory.
+## Final non-live verification
+
+All Rust commands used the ignored
+`C:\Users\ihvna\source\openkakao-dev\repo\.target\wave2-root` directory.
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --lib` | 84 passed |
-| `cargo test --bin openkakao-cli` | 170 passed |
-| `cargo test --test windows_backend` | 2 passed |
-| `cargo test --test windows_policy` | 16 passed |
-| `cargo test --test windows_cli` | 2 passed |
-| safe `cargo test --test cli_test` selection | 14 passed, 3 excluded |
-| `cargo clippy --all-targets --all-features -- -D warnings` | passed |
-| `cargo build` | passed |
-| final staged `git diff --check` | passed |
+| `cargo test --locked --lib` | 104 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 24 passed |
+| `cargo test --locked --bin openkakao-cli` | 177 passed |
+| `cargo test --locked --test windows_backend` | 2 passed |
+| `cargo test --locked --test windows_policy` | 23 passed |
+| `cargo test --locked --test windows_cli` | 2 passed |
+| `cargo test --locked --all-features --test windows_backend` | 2 passed |
+| closed exact `cli_test` allowlist | 14 passed; 3 live/local-state cases excluded |
+| `auth_flow_test` | 23 passed |
+| `loco_client_test` | 13 passed |
+| `loco_crypto_test` | 12 passed |
+| `loco_packet_test` | 13 passed |
+| `message_db_test` | 20 passed |
+| `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
+| debug build, default and all features | passed |
+| release build, default and all features | passed |
+| Markdown local links and pinned-action policy | passed |
+| final `git diff --check` | passed |
 
-Additional synthetic compatibility suites passed during integration:
-`auth_flow_test` 23, `loco_client_test` 13, `loco_crypto_test` 12,
-`loco_packet_test` 13, and `message_db_test` 20.
-
-The three excluded `cli_test` cases were
+The excluded `cli_test` cases are
 `doctor_json_outputs_valid_json`, `auth_status_json_outputs_valid_json`, and
-`cache_stats_json_outputs_valid_json`, because the legacy paths may load
-credential or local-database diagnostics. No full live-dependent test command
-was substituted for them.
+`cache_stats_json_outputs_valid_json`; their legacy paths may load local-state
+or credential diagnostics. No broad test command or product invocation was
+substituted for them.
 
-## Safety ledger
+Windows CI pins all three third-party actions by full reviewed commit SHA,
+uses read-only repository permissions, disables checkout credential
+persistence, uploads no artifact, and runs default plus explicitly scoped
+all-feature synthetic coverage. The workflow itself was statically validated;
+its first GitHub-hosted run remains an external integration check.
 
-- KakaoTalk UI mutations: 0
-- stage calls against the production backend: 0
-- commit calls against the production backend: 0
-- actual messages sent: 0
-- live UIA probes: 0
-- KakaoTalk data/database reads: 0
-- credential/token reads: 0
-- process-memory reads, injection, or hooks: 0
-- pushes: 0
-- pull requests: 0
+## Safety ledger for this implementation session
 
-KakaoTalk inspection during Phase 0 was limited to running-process and
-executable file metadata needed to record version `26.7.0.5255`. Package
-installation and the upstream clone used normal network access; no KakaoTalk
-network operation was performed.
+- live KakaoTalk/UIA probes: 0;
+- KakaoTalk UI mutations: 0;
+- production backend stage calls: 0;
+- production backend commit/Invoke calls: 0;
+- actual messages sent: 0;
+- KakaoTalk files/databases read: 0;
+- credential/token reads: 0;
+- screenshots/UI dumps/process-memory reads/injection/hooks: 0;
+- automatic retries: 0;
+- pushes: 0; and
+- pull requests/releases: 0.
 
-## Residual risks and open work
+All mutation counts in automated tests belong to fake or in-memory synthetic
+ports, never KakaoTalk or another desktop application.
 
-- A privacy-preserving way to prove self-chat identity and empty draft is not
-  designed. Wave 2 mutation work cannot safely become usable without it.
-- The selector profile was not exercised against live KakaoTalk UI. Provider
-  changes will fail closed, but compatibility is unconfirmed.
-- Executable signing and canonical installation-root verification are absent.
-- Modal evidence is limited to the selected top-level window being disabled.
-- An eight-second UIA caller timeout cannot cancel a blocked COM provider call;
-  a detached read-only worker may remain until the provider returns.
-- Replay protection and mutual exclusion are process-local, not cross-process
-  or durable.
-- Windows CI and macOS/Linux regression execution are deferred to `P60`;
-  macOS AX behavior cannot be executed on this host.
+## Remaining activation blockers and risks
 
-## Next session
+- Design and measure a privacy-safe exact self-chat identity selector without
+  exposing room/profile text.
+- Measure and review an exact unique send-button selector and InvokePattern;
+  no keyboard fallback is permitted.
+- Design a privacy-safe durable cross-process started/indeterminate replay
+  ledger before automatic commit capability can be advertised.
+- Add executable-signature and canonical-installation-root evidence.
+- Expand modal evidence beyond the current conservative window state.
+- A third-party UIA provider can hang; COM calls cannot be safely cancelled in
+  process after entry.
+- Run the committed workflow on a GitHub Windows runner and obtain reviewed
+  macOS/Linux regression signals before upstream release work.
+- No live selector compatibility, target identity, empty-draft proof, stage
+  restoration, or submission result has been measured.
 
-Start by reading this file, `SECURITY_MODEL.md`, `DECISIONS.md`, and the three
-child handoffs. Verify the branch tip and clean worktrees. Wave 2 requires a new
-explicit user request and should begin with the identity/draft evidence design,
-the adversarial audit, and Windows CI/manual documentation. Do not run `L10`
-or any later live-validation task merely because `I10` is complete. `L20`
-through `L40` have separate manual gates, and `L40` requires fresh explicit
-approval for exactly one automatic self-chat commit.
+## Next permissible step
+
+The next DAG node is L10, documented in
+[`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md).
+It is a live read-only KakaoTalk/UIA gate and is **not authorized by this
+handoff**. It requires fresh user approval naming L10 and must preserve focus,
+composer, clipboard, and all user data.
+
+L20 through L40 remain blocked both by sequence and by missing production
+selectors. L20 modifies the composer, L30 reserves submission for the user,
+and L40 requires a separate immediate approval for exactly one automatic
+self-chat commit. `R00` cannot complete until those gates do; do not mark it
+complete based on I20.
