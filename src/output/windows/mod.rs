@@ -12,8 +12,74 @@ pub const SCHEMA_VERSION: u8 = 1;
 const DOCTOR_ACTION: &str = "doctor_ui";
 const LOCAL_SEND_ACTION: &str = "local_send";
 const REDACTED_ACTION: &str = "redacted";
+const REDACTED_OPERATION: &str = "redacted_operation";
 const WINDOWS_PROFILE_V1: &str = "kakaotalk_windows_26_7_0_5255";
 const SYNTHETIC_PROFILE_V1: &str = "synthetic_windows_profile_v1";
+const OPERATION_CODES: &[&str] = &[
+    "approved_send_already_claimed",
+    "invalid_windows_local_send_options",
+    "policy_allowlist_config",
+    "policy_allowlist_match",
+    "policy_app_snapshot",
+    "policy_approval_mutex",
+    "policy_authorize_inspect",
+    "policy_current_time",
+    "policy_dry_run_inspect",
+    "policy_execute_mode",
+    "policy_input_snapshot",
+    "policy_inspect_capability",
+    "policy_nonce_replay",
+    "policy_send_capability",
+    "policy_snapshot_time",
+    "policy_target_snapshot",
+    "policy_validate_confirmation",
+    "policy_validate_message",
+    "policy_validate_mode",
+    "policy_validate_nonce",
+    "read_windows_stdin",
+    "windows_commit_not_in_wave_1",
+    "windows_com_initialize",
+    "windows_config_load",
+    "windows_doctor_ui_loco_conflict",
+    "windows_enumeration",
+    "windows_enumeration_callback",
+    "windows_inspect_target",
+    "windows_probe_thread_failed",
+    "windows_probe_thread_start",
+    "windows_process_image",
+    "windows_process_image_length",
+    "windows_process_open",
+    "windows_process_session",
+    "windows_read_only_inspect",
+    "windows_stage_not_in_wave_1",
+    "windows_stdin_invalid_utf8",
+    "windows_stdin_too_large",
+    "windows_token_integrity",
+    "windows_token_integrity_layout",
+    "windows_token_integrity_sid",
+    "windows_token_integrity_size",
+    "windows_token_open",
+    "windows_ui_doctor_required",
+    "windows_ui_inspect_unavailable",
+    "windows_uia_class_condition",
+    "windows_uia_composer",
+    "windows_uia_composer_class",
+    "windows_uia_composer_count",
+    "windows_uia_composer_enabled",
+    "windows_uia_composer_focus",
+    "windows_uia_composer_id",
+    "windows_uia_composer_type",
+    "windows_uia_create",
+    "windows_uia_find_composer",
+    "windows_uia_id_condition",
+    "windows_uia_selector_condition",
+    "windows_uia_selector_validation",
+    "windows_uia_type_condition",
+    "windows_uia_window",
+    "windows_window_changed_during_inspect",
+    "windows_window_enabled",
+    "windows_write_mode_not_in_wave_1",
+];
 const EVIDENCE_CODES: &[&str] = &[
     "app_running",
     "app_not_running",
@@ -143,9 +209,10 @@ pub fn render_error(error: &UiError, mode: OutputMode) -> RenderedOutput {
     let exit_code = ExitCode::for_error(error.kind);
     let retry_safe = effective_error_retry_safe(error);
     let outcome = error_outcome(error.kind);
+    let operation = safe_operation(error.operation);
     let diagnostic = format!(
         "windows_ui_error operation={} code={} outcome={} retry_safe={} exit_code={}\n",
-        error.operation,
+        operation,
         error.kind.code(),
         outcome,
         retry_safe,
@@ -160,7 +227,7 @@ pub fn render_error(error: &UiError, mode: OutputMode) -> RenderedOutput {
                 status: "error",
                 error: ErrorBody {
                     code: error.kind.code(),
-                    operation: error.operation,
+                    operation,
                 },
                 outcome,
                 retry_safe,
@@ -219,6 +286,14 @@ fn normalized_report(report: &ActionReport) -> ActionReport {
 
 fn effective_error_retry_safe(error: &UiError) -> bool {
     error.kind != UiErrorKind::SubmissionUncertain && error.retry_safe
+}
+
+fn safe_operation(operation: &'static str) -> &'static str {
+    if OPERATION_CODES.contains(&operation) {
+        operation
+    } else {
+        REDACTED_OPERATION
+    }
 }
 
 const fn error_outcome(kind: UiErrorKind) -> &'static str {

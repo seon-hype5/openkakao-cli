@@ -23,6 +23,7 @@ const SELECTOR_CANARY: &str = "SENSITIVE_SELECTOR_CANARY";
 const ACTION_INJECTION_CANARY: &str = "SENSITIVE_ACTION_INJECTION_CANARY";
 const PROFILE_INJECTION_CANARY: &str = "SENSITIVE_PROFILE_INJECTION_CANARY";
 const EVIDENCE_INJECTION_CANARY: &str = "SENSITIVE_EVIDENCE_INJECTION_CANARY";
+const OPERATION_INJECTION_CANARY: &str = "SENSITIVE_OPERATION_INJECTION_CANARY";
 
 #[derive(Parser)]
 #[command(name = "windows-cli-test")]
@@ -483,6 +484,31 @@ fn refusal_errors_map_to_stable_exit_codes_and_separate_streams() {
         assert!(rendered.stderr.starts_with("windows_ui_error "));
         assert!(!rendered.stderr.contains('{'));
     }
+}
+
+#[test]
+fn error_operation_is_closed_and_unknown_values_are_redacted() {
+    for mode in [OutputMode::Human, OutputMode::Json] {
+        let rendered = render_error(
+            &UiError::new(UiErrorKind::Timeout, OPERATION_INJECTION_CANARY),
+            mode,
+        );
+        assert!(!rendered.stdout.contains(OPERATION_INJECTION_CANARY));
+        assert!(!rendered.stderr.contains(OPERATION_INJECTION_CANARY));
+        assert!(rendered.stderr.contains("operation=redacted_operation"));
+        if mode == OutputMode::Json {
+            let value: Value = serde_json::from_str(rendered.stdout.trim())
+                .expect("redacted error JSON should parse");
+            assert_eq!(value["error"]["operation"], "redacted_operation");
+        }
+    }
+
+    let known = render_error(
+        &UiError::new(UiErrorKind::InvalidInput, "policy_validate_message"),
+        OutputMode::Json,
+    );
+    assert!(known.stdout.contains("policy_validate_message"));
+    assert!(known.stderr.contains("policy_validate_message"));
 }
 
 #[test]
