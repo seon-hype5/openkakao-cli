@@ -183,6 +183,16 @@ ordinary CLI startup.
 
 ## D. Executable trust and canonical installation root
 
+Offline implementation status: a content-free verifier profile/evidence seam
+now models handle-derived final-path provenance, normalized local fixed-volume
+status, reparse refusal, process-creation binding, three-way file-identity
+agreement, exact version, no-UI/cache-only Authenticode behavior, catalog
+ambiguity, exact signer cardinality/digest, and exact install-root digest.
+Synthetic adversarial tests cover each refusal independently and redact every
+opaque identity. No real signer/root digest or native trust call is present.
+Production uses `UnavailableExecutableTrust` before ledger or UI observation,
+so this is an additional activation barrier rather than a trust claim.
+
 The current basename/version check is insufficient for activation. A future
 profile must open the executable itself, obtain its final normalized path from
 that handle with `GetFinalPathNameByHandleW`, and bind the handle's file
@@ -208,8 +218,9 @@ authorized by this proposal.
 1. Review and accept this RFC without changing capability.
 2. Complete the ledger and executable-verifier seams with only synthetic
    files, fake trust results, and default-off/all-feature CI. The pure ledger
-   state machine and policy correlation handoff are implemented; the Windows
-   DPAPI/ACL store and executable verifier remain incomplete.
+   state machine, policy correlation handoff, and pure executable-trust
+   decision seam are implemented; the Windows DPAPI/ACL store and native
+   executable observer remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

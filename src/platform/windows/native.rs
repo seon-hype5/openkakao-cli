@@ -61,6 +61,7 @@ use zeroize::Zeroizing;
 
 #[cfg(feature = "windows-ui-write")]
 use super::{
+    executable_trust::{ExecutableTrustBoundary, UnavailableExecutableTrust},
     ledger::{LedgerRecord, MutationLedger, RecordCorrelation, UnavailableLedger},
     transaction::{self, CommitSelectorState, DraftState, ExpectedState, FreshState, MutationPort},
     unix_now_ms, KNOWN_PROFILE,
@@ -825,6 +826,7 @@ struct NativeMutationIdentity {
 
 #[cfg(feature = "windows-ui-write")]
 struct NativeMutationPort<'message> {
+    executable_trust: UnavailableExecutableTrust,
     ledger: UnavailableLedger,
     fingerprints: FingerprintKey,
     expires_at_unix_ms: u64,
@@ -854,6 +856,7 @@ impl<'message> NativeMutationPort<'message> {
         correlation: RecordCorrelation,
     ) -> Self {
         Self {
+            executable_trust: UnavailableExecutableTrust,
             ledger: UnavailableLedger::new(correlation),
             fingerprints,
             expires_at_unix_ms: expected.expires_at_unix_ms,
@@ -986,6 +989,13 @@ impl<'message> NativeMutationPort<'message> {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(feature = "windows-ui-write")]
+impl ExecutableTrustBoundary for NativeMutationPort<'_> {
+    fn verify_executable_trust(&mut self) -> Result<(), UiError> {
+        self.executable_trust.verify_executable_trust()
     }
 }
 

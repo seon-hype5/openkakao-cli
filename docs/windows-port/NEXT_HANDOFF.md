@@ -219,7 +219,10 @@ contracts. It contains no selector values and authorizes no live work.
   fixed content-free codec, transition controller, transaction ordering, and
   one-use policy correlation handoff are synthetically tested; the
   DPAPI/ACL/atomic-file store remains absent and fails closed.
-- Add executable-signature and canonical-installation-root evidence.
+- Complete executable-signature and canonical-installation-root evidence. The
+  content-free decision seam and adversarial fakes exist; reviewed signer/root
+  digests and the native handle/WinVerifyTrust observer remain absent and fail
+  closed.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
@@ -231,11 +234,11 @@ contracts. It contains no selector values and authorizes no live work.
 
 ## Next permissible step
 
-The offline multiple-window remediation and pure replay-ledger scaffold are
-implemented and must pass the full safe regression matrix. The next safe
-offline work is the executable trust-verifier seam or the reviewed durable
-store implementation. The failed L10 result does not authorize another live
-observation.
+The offline multiple-window remediation, pure replay-ledger scaffold, and pure
+executable-trust decision seam are implemented and must pass the full safe
+regression matrix. The next safe offline work is a reviewed durable store or
+native trust observer RFC/implementation with no real-path/signature probe.
+The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in
 [`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),

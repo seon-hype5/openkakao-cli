@@ -101,7 +101,10 @@ or write authority.
   requested self-chat.
 - No live-measured exact unique send-button selector/InvokePattern is
   configured.
-- Signing and canonical installation-root verification are absent.
+- A pure signing/canonical-root decision seam exists, but the native observer,
+  reviewed signer/root digests, and WinVerifyTrust integration are absent.
+  Production refuses at `windows_executable_trust_unavailable` before ledger
+  or UI observation.
 - Modal evidence remains narrower than a full application-wide model.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.
   Read-only discovery is process-wide single-flight, so one timed-out worker

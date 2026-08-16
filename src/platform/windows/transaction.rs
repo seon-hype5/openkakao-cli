@@ -11,6 +11,7 @@ use crate::platform::{
     ApprovedSend, SendMode, SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform,
 };
 
+use super::executable_trust::ExecutableTrustBoundary;
 use super::ledger::{LedgerRecord, MutationLedger};
 use super::{FileVersion, KNOWN_PROFILE_ID};
 
@@ -295,7 +296,7 @@ impl ExecutionClaim for ApprovedSend {
     }
 }
 
-pub(super) trait MutationPort: MutationLedger {
+pub(super) trait MutationPort: ExecutableTrustBoundary + MutationLedger {
     fn observe(&mut self, expected_message_utf16: &[u16]) -> Result<FreshState, UiError>;
     fn prepare_set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError>;
     fn set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError>;
@@ -309,6 +310,7 @@ pub(super) fn run_stage<C: ExecutionClaim, P: MutationPort>(
     claim: &C,
     port: &mut P,
 ) -> Result<SendOutcome, UiError> {
+    port.verify_executable_trust()?;
     port.ensure_clear()?;
     let before = port.observe(message_utf16)?;
     validate_fresh(expected, &before, DraftState::Empty, false)?;
@@ -380,6 +382,7 @@ pub(super) fn run_commit<C: ExecutionClaim, P: MutationPort>(
     claim: &C,
     port: &mut P,
 ) -> Result<SendOutcome, UiError> {
+    port.verify_executable_trust()?;
     port.ensure_clear()?;
     let before = port.observe(message_utf16)?;
     validate_fresh(expected, &before, DraftState::Empty, true)?;
@@ -704,6 +707,8 @@ mod tests {
     }
 
     struct FakePort {
+        trust_error: Option<UiError>,
+        trust_calls: usize,
         ledger: LedgerController<FakeLedgerStore>,
         ledger_preflight_error: Option<UiError>,
         ledger_begin_error: Option<UiError>,
@@ -735,6 +740,8 @@ mod tests {
     impl FakePort {
         fn with_states(states: impl IntoIterator<Item = FreshState>) -> Self {
             Self {
+                trust_error: None,
+                trust_calls: 0,
                 ledger: LedgerController::new(
                     FakeLedgerStore::default(),
                     RecordCorrelation::from_bytes([0x5A; 16]).unwrap(),
@@ -771,6 +778,17 @@ mod tests {
             assert_eq!(self.set_calls, 0);
             assert_eq!(self.clear_calls, 0);
             assert_eq!(self.invoke_calls, 0);
+        }
+    }
+
+    impl ExecutableTrustBoundary for FakePort {
+        fn verify_executable_trust(&mut self) -> Result<(), UiError> {
+            self.events.push("trust_preflight");
+            self.trust_calls += 1;
+            match self.trust_error.take() {
+                Some(error) => Err(error),
+                None => Ok(()),
+            }
         }
     }
 
@@ -1085,6 +1103,7 @@ mod tests {
         assert_eq!(
             port.events,
             [
+                "trust_preflight",
                 "ledger_preflight",
                 "observe",
                 "ledger_stage",
@@ -1133,6 +1152,26 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_executable_trust_refuses_before_ledger_or_ui_observation() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([valid(DraftState::Empty)]);
+        port.trust_error = Some(error(
+            UiErrorKind::UnsupportedCapability,
+            "windows_executable_trust_unavailable",
+        ));
+
+        let refusal = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(refusal.kind, UiErrorKind::UnsupportedCapability);
+        assert_eq!(refusal.operation, "windows_executable_trust_unavailable");
+        assert_eq!(claim.calls.get(), 0);
+        assert_eq!(port.trust_calls, 1);
+        assert_eq!(port.ledger_preflight_calls, 0);
+        assert_eq!(port.observe_calls, 0);
+        assert_eq!(port.events, ["trust_preflight"]);
+        port.assert_no_mutation();
+    }
+
+    #[test]
     fn unavailable_ledger_refuses_before_claim_or_ui_mutation() {
         let claim = FakeClaim::accepting();
         let mut port = FakePort::with_states([valid(DraftState::Empty)]);
@@ -1149,7 +1188,7 @@ mod tests {
         assert_eq!(port.ledger_begin_calls, 0);
         assert_eq!(port.observe_calls, 0);
         assert_eq!(port.prepare_set_calls, 0);
-        assert_eq!(port.events, ["ledger_preflight"]);
+        assert_eq!(port.events, ["trust_preflight", "ledger_preflight"]);
         port.assert_no_mutation();
     }
 
@@ -1168,7 +1207,7 @@ mod tests {
         assert_eq!(claim.calls.get(), 0);
         assert_eq!(port.ledger_preflight_calls, 1);
         assert_eq!(port.observe_calls, 0);
-        assert_eq!(port.events, ["ledger_preflight"]);
+        assert_eq!(port.events, ["trust_preflight", "ledger_preflight"]);
         port.assert_no_mutation();
     }
 
@@ -1190,6 +1229,7 @@ mod tests {
         assert_eq!(
             port.events,
             [
+                "trust_preflight",
                 "ledger_preflight",
                 "observe",
                 "ledger_stage",
@@ -1239,6 +1279,7 @@ mod tests {
         assert_eq!(
             port.events,
             [
+                "trust_preflight",
                 "ledger_preflight",
                 "observe",
                 "ledger_stage",

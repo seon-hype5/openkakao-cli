@@ -16,3 +16,5 @@ raw HWND/UIA identifiers, screenshots, or KakaoTalk data paths.
 Root integration/offline-scaffold handoffs follow the same privacy rules; see
 [`root-ledger-scaffold.md`](root-ledger-scaffold.md) for the current durable
 replay state-machine boundary and remaining production-store blockers.
+The successor [`root-executable-trust-scaffold.md`](root-executable-trust-scaffold.md)
+records the content-free trust decision seam and its missing native observer.

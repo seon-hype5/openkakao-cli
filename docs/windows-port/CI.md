@@ -67,11 +67,12 @@ performs no UI mutation, and cannot read user or application state.
 authorization switch. Enabling it compiles the reviewed transaction and
 native call sites, but the production profile still advertises
 `send_open_chat=false` because no privacy-safe self-target proof or measured
-send-button selector is configured. The content-free replay state machine is
-covered synthetically, while production's missing DPAPI/ACL store is an
-additional `windows_ledger_unavailable` refusal. All-feature CI is compile and
-synthetic behavior coverage only; it must never be interpreted as permission
-to run a live UI command.
+send-button selector is configured. Content-free replay and executable-trust
+decision seams are covered synthetically, while production's missing native
+trust observer and DPAPI/ACL store add
+`windows_executable_trust_unavailable`/`windows_ledger_unavailable` refusals.
+All-feature CI is compile and synthetic behavior coverage only; it must never
+be interpreted as permission to run a live UI command.
 
 ## Cache and artifact policy
 

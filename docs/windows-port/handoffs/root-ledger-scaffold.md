@@ -131,9 +131,11 @@ Before production storage can be connected, the remaining ledger work is:
    partial writes, rename/flush failures, and process-crash recovery; and
 6. a separately authorized human-only recovery design.
 
-The target selector, submit selector, executable signer/install-root verifier,
-and all live gates also remain blocked as described in
-`docs/windows-port/ACTIVATION_RFC.md`.
+The successor
+[`root-executable-trust-scaffold.md`](root-executable-trust-scaffold.md)
+implements only the pure signer/install-root decision seam; its native observer
+and reviewed profile remain blocked. Target/submit selectors and all live gates
+also remain blocked as described in `docs/windows-port/ACTIVATION_RFC.md`.
 
 ## Safety ledger
 

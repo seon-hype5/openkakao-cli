@@ -7,6 +7,8 @@
 //! still fails closed until live self-target and send selectors are verified.
 
 #[cfg(any(feature = "windows-ui-write", test))]
+mod executable_trust;
+#[cfg(any(feature = "windows-ui-write", test))]
 mod ledger;
 mod native;
 #[cfg(any(feature = "windows-ui-write", test))]

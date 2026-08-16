@@ -149,3 +149,17 @@ the transition code compiled and synthetically testable while adding an
 independent refusal before claim or UI mutation. Policy supplies the record
 correlation through a separate non-Clone, non-serializing, zeroizing token that
 the backend can consume exactly once.
+
+## ADR-020: Model executable trust without observing the current installation
+
+Keep raw executable paths, file IDs, certificate material, and signer/root
+values out of the platform contract. A pure verifier accepts only
+content-free facts derived from an opened process-image handle: canonical
+local fixed-volume path, no reparse point, process-creation binding, exact
+file-identity agreement, no-UI/cache-only trusted Authenticode, one exact
+signer digest, and one exact canonical-root digest.
+
+Do not guess signer or root values from the current machine. Until reviewed
+release provenance supplies them and a separately reviewed native observer is
+implemented, production uses `UnavailableExecutableTrust` and refuses before
+ledger or UI observation. The seam adds no Windows API feature or live probe.
