@@ -446,3 +446,30 @@ restored after restart. Synthetic tests inject future `Instant` values and use
 pure clock-state cases; they do not sleep, change the system clock, inspect a
 desktop, or mutate UI. This decision changes no selector, capability, live
 permission, or retry rule.
+
+## ADR-036: Treat visible owned popups in the selected owner group as modal
+
+Do not infer modal absence solely from the selected window's enabled style.
+After exact executable-name verification during native inspection,
+synchronously enumerate top-level windows and mark the selected window blocked
+when it is disabled or a visible same-process candidate has an owner and the
+same `GA_ROOTOWNER`. Ignore hidden,
+foreign-process, unowned, and different-root-owner candidates. Treat every
+matching owned popup as blocking even if it might be modeless; safety accepts
+that conservative false positive. Any relevant owner-chain uncertainty fails
+closed.
+
+Read only HWND/PID, visibility, owner, and root-owner metadata. Retain no
+candidate collection or text, and never query a candidate title/class, UIA
+Name/Value, room/profile label, or draft. The already selected window's exact
+class/PID is revalidated. Positive modal evidence prevents composer
+traversal and suppresses composer identity and input availability in the
+public snapshot. Repeat the scan in fresh observation, final native preflight,
+and each actual `SetValue`/`Invoke` boundary before the final time check and
+native call.
+
+Pure synthetic classification and mapping tests invoke no desktop API. This
+generic owner-chain rule cannot recognize unowned custom dialogs or overlays
+drawn inside the selected window, so those remain future negative measurement
+requirements. The decision adds no selector, write capability, live
+authorization, or KakaoTalk observation.

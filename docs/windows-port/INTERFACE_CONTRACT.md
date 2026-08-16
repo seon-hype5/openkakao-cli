@@ -32,6 +32,15 @@ diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
 states; native/COM failures remain `UiError`. Target identity and draft-empty
 claims stay false in the current production profile.
 
+After exact executable-name verification, `AppSnapshot.modal_present` is true
+for a disabled selected window or a visible, owned, same-process top-level
+popup in the selected window's root-owner group. The scan uses only
+HWND/PID/visibility/owner metadata and retains no candidate identifier.
+Hidden, foreign-process, unowned, and
+different-root-owner candidates do not set the flag; an uncertain relevant
+owner-chain query returns an error. Any positive modal result suppresses
+composer identity and input-availability evidence in the snapshot.
+
 Policy inspection differs from ordinary doctor inspection only by an opaque,
 request-scoped binding challenge. A probe can mint evidence only by supplying
 an exact observed UTF-16 label to the request. HMAC-SHA-256 binds the match to
@@ -63,6 +72,17 @@ crate-private atomic one-shot execution claim immediately before its first
 write attempt. Policy then validates the returned outcome against the
 dispatched mode. An incompatible successful result is normalized to
 `SubmissionUncertain`.
+
+Fresh observation and final native preflight repeat the owner-group modal
+scan. The native port repeats it once more at each actual `SetValue` or
+`Invoke` boundary, followed by the two-clock freshness check and native call.
+A positive final preflight returns `ModalPresent` with the fixed allowlisted
+operation `windows_mutation_modal`; uncertainty never becomes modal absence.
+After the one-shot claim and entry into a Value/Invoke method, the transaction's
+existing conservative uncertainty boundary still applies even if this last
+gate refuses before the OS call. The generic owner-chain rule conservatively
+blocks visible modeless owned popups as well, but cannot prove the absence of
+unowned or in-window custom overlays.
 
 An approved operation retains the opaque target-binding permit. The native
 mutation port borrows that exact approval through the synchronous operation;

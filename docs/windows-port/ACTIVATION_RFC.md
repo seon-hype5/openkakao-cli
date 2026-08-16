@@ -89,6 +89,32 @@ process restart independently of its nonserializing approval. Synthetic tests
 use injected future instants and pure clock states only. This completed
 contract supplies no selector or permission and does not authorize L10-L40.
 
+### A.2 Process owner-group modal evidence
+
+Offline contract status: implemented without live observation or activation.
+After exact executable-name verification, the selected window is modal-blocked
+when it is disabled or when desktop top-level enumeration finds a visible
+same-process candidate that has an owner and shares the selected window's
+`GA_ROOTOWNER`. A foreign-process, hidden, unowned, or different-root-owner
+window does not block. Every matching owned popup blocks conservatively even
+if it might be modeless, and missing relevant owner-chain metadata is a closed
+error rather than modal absence.
+
+The scan reads no candidate title/class, UIA Name/Value, room/profile text, or
+draft. Its callback retains only fixed selected metadata and booleans; the
+already selected window's exact class/PID is revalidated. Positive evidence
+prevents composer traversal and suppresses composer identity and
+input-availability evidence in the public snapshot. The mutation path repeats
+the scan in fresh observation, final preflight, and immediately before the
+actual Value/Invoke boundary. Pure synthetic classification and
+snapshot-mapping tests call no desktop API.
+
+This generic rule covers conventional Win32 owned dialogs but cannot detect an
+unowned custom dialog or an overlay rendered inside the selected window.
+Negative live measurement for those shapes remains part of future selector
+qualification. This completed offline boundary supplies no Kakao selector,
+does not authorize another L10 attempt, and changes no send capability.
+
 ## B. Exact submit selector
 
 A submit profile may be proposed only after target binding is accepted. Its

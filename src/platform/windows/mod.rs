@@ -199,6 +199,7 @@ struct NativeWindow {
     fingerprint: String,
     visible: bool,
     enabled: bool,
+    modal_present: bool,
     process: NativeProcess,
     composer: ComposerDiscovery,
 }
@@ -492,6 +493,7 @@ fn map_unique_window(
         .flatten()
         .and_then(|version| profile_for(Some(version)));
     let known_ui_profile = profile.is_some();
+    let modal_present = process_verified && window.modal_present;
 
     let process = process_verified.then(|| ProcessFingerprint {
         pid: window.process.pid,
@@ -499,7 +501,9 @@ fn map_unique_window(
         session_id: Some(window.process.session_id),
     });
 
-    let (input, composer) = if let Some(profile) = profile {
+    let (input, composer) = if modal_present {
+        (unavailable_input(profile.map(|profile| profile.id)), None)
+    } else if let Some(profile) = profile {
         match window.composer {
             ComposerDiscovery::Unique(composer) => (
                 InputSnapshot {
@@ -548,7 +552,7 @@ fn map_unique_window(
             integrity_compatible: process_verified && window.process.integrity_compatible,
             known_ui_profile,
             top_level_window_count: 1,
-            modal_present: process_verified && !window.enabled,
+            modal_present,
         },
         target: ChatTargetSnapshot {
             kind: target_kind,
@@ -610,6 +614,7 @@ mod tests {
             fingerprint: fingerprint.to_string(),
             visible: true,
             enabled: true,
+            modal_present: false,
             process: process(version),
             composer,
         }
@@ -831,6 +836,41 @@ mod tests {
         assert!(snapshot.input.writable);
         assert!(!snapshot.input.draft_empty);
         assert_eq!(snapshot.target.expires_at_unix_ms, 5_030);
+    }
+
+    #[test]
+    fn modal_evidence_suppresses_composer_identity_and_input_evidence() {
+        let mut native_window = window(
+            Some(FileVersion::KNOWN),
+            ComposerDiscovery::Unique(NativeComposer {
+                fingerprint: "run:synthetic-composer".to_string(),
+                enabled: true,
+                value_pattern_present: true,
+                writable: true,
+                focused: false,
+            }),
+        );
+        native_window.modal_present = true;
+
+        let snapshot = map_native(
+            TargetKind::SelfChat,
+            NativeInspection {
+                window: WindowDiscovery::Unique(native_window),
+            },
+            31,
+        );
+
+        assert!(snapshot.app.modal_present);
+        assert!(snapshot.app.known_ui_profile);
+        assert!(snapshot.target.composer.is_none());
+        assert!(!snapshot.input.present);
+        assert!(!snapshot.input.unique);
+        assert!(!snapshot.input.enabled);
+        assert!(!snapshot.input.writable);
+        assert_eq!(
+            snapshot.input.selector_profile_id.as_deref(),
+            Some(KNOWN_PROFILE.id)
+        );
     }
 
     #[test]

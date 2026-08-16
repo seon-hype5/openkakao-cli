@@ -75,6 +75,9 @@ performs no UI mutation, and cannot read user or application state.
 - Approval-lifetime tests use synthetic `Instant` values and a pure two-clock
   truth table. They prove exact-boundary refusal and zero sender dispatch after
   monotonic expiry without sleeping or changing the runner's system clock.
+- Modal tests pass only synthetic HWND/PID/visibility/owner-group numbers to a
+  pure classifier and map a synthetic native snapshot. They never call
+  `EnumWindows`, `GetWindow`, `GetAncestor`, UIA, or another desktop API.
 - There is no service container, desktop session preparation, application
   installation, account setup, network login, or secret injection.
 - `RUST_BACKTRACE=0` prevents failure backtraces from becoming accidental

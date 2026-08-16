@@ -103,6 +103,7 @@ const OPERATION_CODES: &[&str] = &[
     "windows_window_enabled",
     "windows_write_capability_unavailable",
     "windows_write_config_disabled",
+    "windows_mutation_modal",
     "windows_mutation_mutex_abandoned_uncertain",
     "windows_mutation_mutex_contended_uncertain",
     "windows_mutation_mutex_wait_uncertain",

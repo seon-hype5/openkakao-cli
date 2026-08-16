@@ -51,6 +51,9 @@ The Windows backend may:
   single read-only probe;
 - verify PID, executable path, file version, process creation time, session,
   integrity compatibility, and visible/enabled state;
+- classify the selected window as modal-blocked when it is disabled or a
+  visible same-process owned top-level popup belongs to the same root-owner
+  group, using only HWND relationship metadata;
 - when several exact-class windows exist, narrow them only if exactly one has
   one exact composer and every other inspected window has no exact composer;
 - classify zero, one, duplicate, internally ambiguous, or over-limit
@@ -74,6 +77,16 @@ properties, room/profile labels, or draft text. It consequently leaves
 `exact_match`, `unique_match`, `self_chat_verified`, and `draft_empty` false.
 `doctor --ui` can return this redacted diagnostic state; production
 `local-send` cannot turn it into an approval.
+
+Only after exact executable-name verification, modal discovery separately
+enumerates top-level windows but retains only a boolean. A candidate blocks
+when it is visible, belongs to the selected PID, has an owner, and has the same
+`GA_ROOTOWNER` as the selected window. Hidden, foreign-process, unowned, and
+different-root-owner windows do not block.
+Every visible owned popup in that group is deliberately treated as blocking,
+even if it could be modeless. Missing owner-chain metadata fails closed. When
+modal evidence is present, composer traversal is skipped and the public
+snapshot suppresses any composer identity or input-availability evidence.
 
 For policy inspection, a per-request random HMAC key and the configured label
 tag are hidden inside `InspectRequest`. A probe receives no raw configured
@@ -145,6 +158,15 @@ cannot substitute for it. The native boundary immediately requeries the PID,
 HWND, executable path, process creation time, session, integrity, and exact UIA
 element before the execution claim.
 
+The same owner-group modal scan runs during fresh observation, final native
+preflight, and again immediately before each actual `SetValue` or `Invoke`.
+The last scan is followed by the approval time check and native call, leaving
+no intentionally intervening UI operation. A selected window that becomes
+disabled is also blocking. Generic owner-chain evidence cannot identify an
+unowned custom overlay or an in-window overlay; activation still requires
+negative live measurements and any version-specific rule needed for those
+states.
+
 The native mutation port borrows the same `ApprovedSend` for the entire
 synchronous transaction. Any future ephemeral target label is compared only
 through that approval, whose verifier is permanently tied to its private
@@ -178,7 +200,9 @@ draft Value access, `SetValue`, or `Invoke` in production.
 
 UI Automation interfaces remain on the MTA thread that created them, and COM
 initialization is balanced on that thread. Enumeration callbacks are bounded;
-process handles use limited query access and are closed on all paths. Message
+the modal callback retains no HWND collection or text and reduces candidate
+metadata to booleans. Process handles use limited query access and are closed
+on all paths. Message
 and CurrentValue UTF-16/BSTR allocations have unique ownership and are scrubbed
 before release. The transaction uses no detached mutation worker, so the
 policy lease and OS mutex cannot be dropped before a reviewed sender returns.

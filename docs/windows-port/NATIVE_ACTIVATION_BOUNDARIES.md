@@ -3,13 +3,16 @@
 Status: accepted implementation inventory; no live authorization
 
 Binding baseline: `windows = 0.62.2`
-Applies only behind the default-off `windows-ui-write` feature
+The mutation portions apply only behind the default-off
+`windows-ui-write` feature; owner-group modal inspection is also present in
+the default read-only build.
 
 ## Purpose and non-authorization
 
 This document freezes the minimum Windows namespaces, native call ordering,
-ownership rules, and synthetic-test seams for the three activation boundaries:
+ownership rules, and synthetic-test seams for four activation boundaries:
 
+- process owner-group modal evidence;
 - the approval-owned native target-binding permit;
 - the trust-ordered lazy production ledger; and
 - `UnavailableExecutableTrust`.
@@ -46,6 +49,10 @@ This list was checked against the locally resolved generated source for
 `windows` 0.62.2. In that version, `WTHelperProvDataFromStateData` and
 `WTHelperGetProvSignerFromChain` are gated by both Catalog and Sip, while
 `WTHelperGetProvCertFromChain` is gated by Cryptography.
+The modal boundary uses `EnumWindows`, `GetWindowThreadProcessId`,
+`IsWindowVisible`, `GetWindow(GW_OWNER)`, and
+`GetAncestor(GA_ROOTOWNER)` from the already enabled
+`Win32_UI_WindowsAndMessaging` feature, so it adds no dependency feature.
 
 ## Approval lifetime boundary
 
@@ -67,6 +74,40 @@ This boundary closes the previously recorded clock-rollback lifetime risk. It
 does not make approvals durable across restart, because approvals are already
 nonserializing in-process capabilities. It adds no Windows dependency,
 selector, label observer, trust value, send capability, or live authorization.
+
+## Process owner-group modal boundary
+
+Offline status: implemented in read-only inspection and the disconnected
+mutation path. Read-only enumeration begins only after exact executable-name
+verification. A disabled selected window is blocking. Otherwise a second
+top-level HWND blocks only when it is visible, reports the selected PID, has a
+non-null owner, and resolves to the same root-owner HWND as the selected
+window. Hidden, foreign-process, unowned, and different-root-owner candidates
+are ignored. A visible owned popup is conservatively blocking even if it is
+modeless. An owner/root-owner query failure after relevant PID and visibility
+evidence is stale uncertainty, not absence.
+
+The enumeration callback catches Rust unwind, retains no candidate collection,
+and reads no title, class, UIA property, or content. It carries only selected
+HWND/PID/root-owner metadata and output booleans for the synchronous call. The
+selected HWND/class/PID is revalidated after enumeration, and its enabled state
+is reread. Positive evidence prevents UIA composer traversal and causes public
+mapping to suppress composer identity and input-availability claims.
+
+Fresh mutation observation uses the same helper. Final native preflight and
+the actual `SetValue`/`Invoke` methods each rescan under the transaction mutex;
+at the actual boundary the scan is followed by the two-clock check and native
+call. Before the execution claim, a positive scan is a `ModalPresent` refusal.
+After claim and Value/Invoke method entry, the existing conservative
+`SubmissionUncertain` normalization remains in force even if the last scan
+stops before the OS call. Pure tests cover self/foreign/hidden/unowned/
+different-group/matching/uncertain shapes and modal snapshot suppression
+without calling a desktop API. Generic owner chains cannot detect unowned
+custom or in-window overlays, so future activation measurement must retain
+those negative cases.
+
+This boundary introduces no selector, Kakao content read, write authority, or
+live-session permission.
 
 ## Native target-binding permit boundary
 
@@ -442,18 +483,20 @@ open the installed KakaoTalk binary.
 - an actual cache-only/noninteractive fixture VERIFY followed by exactly one
   CLOSE, accepting either trust result and opening no installed executable;
 - signer/root/profile mismatch and identity/path replacement with zero UI
-  calls and zero execution claims; and
+  calls and zero execution claims;
 - exact discovery-versus-verification share modes; verification excludes write,
-  delete, and rename sharing; and
+  delete, and rename sharing;
 - root-relation kind/component/order/case domain separation plus every
-  ambiguous, nonportable, oversized, or absolute-like component refusal; and
+  ambiguous, nonportable, oversized, or absolute-like component refusal;
 - exact known-folder GUID routing, same-volume strict-descendant derivation,
   sibling-prefix/volume/ADS/device/non-ASCII/depth refusal, and equality with
   the source-static reviewed relation digest without observed-value promotion;
 - synthetic Shell allocation success/failure/path-refusal/NULL ownership with
   exact matching-release counts and no known-folder call; and
 - canaries absent from `Debug`, stdout, stderr, JSON, test names, and failure
-  messages.
+  messages; and
+- pure modal owner-group classification plus snapshot suppression, with no
+  `EnumWindows`, owner query, UIA call, or desktop enumeration in tests.
 
 Automated tests must not run the product binary, enumerate desktop windows,
 call the production native observer, or access KakaoTalk files. Live L10 and
@@ -489,6 +532,11 @@ all later gates still require a fresh, explicitly named approval.
 
 ## Primary references
 
+- [EnumWindows](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-enumwindows)
+- [GetWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindow)
+- [GetAncestor](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getancestor)
+- [IsWindowVisible](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindowvisible)
+- [Window ownership overview](https://learn.microsoft.com/en-us/windows/win32/learnwin32/what-is-a-window-)
 - [CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)
 - [CryptUnprotectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptunprotectdata)
 - [SHGetKnownFolderPath](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath)

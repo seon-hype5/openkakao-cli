@@ -60,3 +60,6 @@ why only an exact-unique state may invoke the approval-owned label verifier.
 [`root-monotonic-approval-deadline.md`](root-monotonic-approval-deadline.md)
 records the approval-owned process-local deadline, its policy/native
 enforcement points, and why system-clock rollback can no longer extend TTL.
+[`root-process-modal-evidence.md`](root-process-modal-evidence.md) records the
+same-process owner-group popup scan, composer-evidence suppression, repeated
+mutation-boundary checks, and the residual unowned/custom-overlay limitation.

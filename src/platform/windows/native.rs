@@ -52,8 +52,8 @@ use windows::Win32::UI::Accessibility::{IUIAutomationElement, IUIAutomationInvok
 #[cfg(feature = "windows-ui-write")]
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetClassNameW, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible,
-    GWL_STYLE, WS_DISABLED,
+    EnumWindows, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW,
+    GetWindowThreadProcessId, IsWindowVisible, GA_ROOTOWNER, GWL_STYLE, GW_OWNER, WS_DISABLED,
 };
 
 #[cfg(feature = "windows-ui-write")]
@@ -190,6 +190,221 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
     }
 }
 
+#[derive(Clone, Copy)]
+struct WindowOwnerGroup {
+    hwnd: usize,
+    pid: u32,
+    root_owner: usize,
+}
+
+#[derive(Clone, Copy)]
+struct OwnedPopupObservation {
+    hwnd: usize,
+    pid: u32,
+    visible: bool,
+    owner: Option<usize>,
+    root_owner: Option<usize>,
+}
+
+fn owned_popup_blocks_selected(
+    selected: WindowOwnerGroup,
+    candidate: OwnedPopupObservation,
+) -> Result<bool, ()> {
+    if selected.hwnd == 0 || selected.pid == 0 || selected.root_owner == 0 {
+        return Err(());
+    }
+    if candidate.hwnd == selected.hwnd
+        || candidate.pid != selected.pid
+        || !candidate.visible
+        || candidate.owner.is_none_or(|owner| owner == 0)
+    {
+        return Ok(false);
+    }
+
+    candidate
+        .root_owner
+        .filter(|root_owner| *root_owner != 0)
+        .map(|root_owner| root_owner == selected.root_owner)
+        .ok_or(())
+}
+
+struct ModalEnumContext {
+    selected: WindowOwnerGroup,
+    modal_present: bool,
+    query_uncertain: bool,
+    callback_panicked: bool,
+}
+
+fn query_window_owner(hwnd: HWND) -> Result<Option<usize>, ()> {
+    // A null GW_OWNER result is the normal representation of an unowned
+    // top-level window. Clearing last-error lets the windows crate distinguish
+    // that result (S_OK) from an actual query failure.
+    // SAFETY: this worker owns its thread-local last-error slot, and both calls
+    // only inspect the borrowed HWND.
+    unsafe { SetLastError(ERROR_SUCCESS) };
+    match unsafe { GetWindow(hwnd, GW_OWNER) } {
+        Ok(owner) => Ok(Some(owner.0 as usize)),
+        Err(error) if error.code().is_ok() => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
+fn query_root_owner(hwnd: HWND) -> Option<usize> {
+    // SAFETY: this is a read-only relationship query over a borrowed HWND.
+    let root_owner = unsafe { GetAncestor(hwnd, GA_ROOTOWNER) };
+    (!root_owner.0.is_null()).then_some(root_owner.0 as usize)
+}
+
+fn process_modal_present(
+    selected_hwnd: HWND,
+    selected_pid: u32,
+    selected_enabled: bool,
+) -> Result<bool, UiError> {
+    revalidate_window(selected_hwnd, selected_pid)?;
+    if !selected_enabled {
+        return Ok(true);
+    }
+
+    // GA_ROOTOWNER follows the parent/owner chain without reading any window
+    // title or UIA content. A null result for a freshly revalidated HWND is
+    // treated as concurrent state change, never as evidence that no modal is
+    // present.
+    let Some(selected_root_owner) = query_root_owner(selected_hwnd) else {
+        return Err(stale_window_error());
+    };
+
+    let mut context = ModalEnumContext {
+        selected: WindowOwnerGroup {
+            hwnd: selected_hwnd.0 as usize,
+            pid: selected_pid,
+            root_owner: selected_root_owner,
+        },
+        modal_present: false,
+        query_uncertain: false,
+        callback_panicked: false,
+    };
+    let context_ptr = ptr::from_mut(&mut context);
+
+    // SAFETY: the context remains exclusively borrowed for this synchronous
+    // enumeration. The callback retains no candidate HWND and collects only
+    // booleans beyond the fixed selected-window metadata.
+    let result = unsafe {
+        EnumWindows(
+            Some(enum_modal_window_callback),
+            LPARAM(context_ptr.cast::<c_void>() as isize),
+        )
+    };
+    if context.callback_panicked {
+        return Err(UiError::new(
+            UiErrorKind::UnsupportedCapability,
+            "windows_enumeration_callback",
+        ));
+    }
+    result.map_err(|error| map_windows_error(error, "windows_enumeration"))?;
+    if context.query_uncertain {
+        return Err(stale_window_error());
+    }
+
+    revalidate_window(selected_hwnd, selected_pid)?;
+    if query_root_owner(selected_hwnd) != Some(context.selected.root_owner) {
+        return Err(stale_window_error());
+    }
+    Ok(context.modal_present || !window_enabled(selected_hwnd)?)
+}
+
+unsafe extern "system" fn enum_modal_window_callback(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let context_ptr = lparam.0 as *mut ModalEnumContext;
+    if context_ptr.is_null() {
+        return BOOL(0);
+    }
+
+    let callback_result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: see `process_modal_present`; EnumWindows is synchronous and
+        // does not invoke this callback concurrently.
+        let context = unsafe { &mut *context_ptr };
+        if context.modal_present
+            || context.query_uncertain
+            || hwnd.0 as usize == context.selected.hwnd
+        {
+            return;
+        }
+
+        let mut candidate_pid = 0_u32;
+        let thread_id =
+            unsafe { GetWindowThreadProcessId(hwnd, Some(ptr::from_mut(&mut candidate_pid))) };
+        if thread_id == 0 || candidate_pid == 0 || candidate_pid != context.selected.pid {
+            return;
+        }
+        let candidate_visible = unsafe { IsWindowVisible(hwnd).as_bool() };
+        if !candidate_visible {
+            return;
+        }
+
+        let candidate_owner = match query_window_owner(hwnd) {
+            Ok(owner) => owner,
+            Err(()) => {
+                context.query_uncertain = true;
+                return;
+            }
+        };
+        let candidate_root_owner = candidate_owner.and_then(|_| query_root_owner(hwnd));
+
+        // Revalidate the candidate after walking its owner chain. A vanished
+        // or recycled HWND is no longer present evidence and is ignored.
+        let mut revalidated_pid = 0_u32;
+        let thread_id =
+            unsafe { GetWindowThreadProcessId(hwnd, Some(ptr::from_mut(&mut revalidated_pid))) };
+        if thread_id == 0
+            || revalidated_pid != candidate_pid
+            || !unsafe { IsWindowVisible(hwnd).as_bool() }
+        {
+            return;
+        }
+        let revalidated_owner = match query_window_owner(hwnd) {
+            Ok(owner) => owner,
+            Err(()) => {
+                context.query_uncertain = true;
+                return;
+            }
+        };
+        if revalidated_owner != candidate_owner {
+            context.query_uncertain = true;
+            return;
+        }
+        let Some(candidate_owner) = revalidated_owner else {
+            return;
+        };
+        let revalidated_root_owner = query_root_owner(hwnd);
+        if revalidated_root_owner != candidate_root_owner {
+            context.query_uncertain = true;
+            return;
+        }
+
+        match owned_popup_blocks_selected(
+            context.selected,
+            OwnedPopupObservation {
+                hwnd: hwnd.0 as usize,
+                pid: candidate_pid,
+                visible: candidate_visible,
+                owner: Some(candidate_owner),
+                root_owner: revalidated_root_owner,
+            },
+        ) {
+            Ok(true) => context.modal_present = true,
+            Ok(false) => {}
+            Err(()) => context.query_uncertain = true,
+        }
+    }));
+
+    if callback_result.is_err() {
+        // SAFETY: same exclusive callback context invariant as above.
+        unsafe { (*context_ptr).callback_panicked = true };
+        BOOL(0)
+    } else {
+        BOOL(1)
+    }
+}
+
 fn window_has_exact_class(hwnd: HWND) -> bool {
     let mut buffer = [0_u16; CLASS_BUFFER_UNITS];
     // SAFETY: `buffer` is writable for its full reported length. HWND is a
@@ -244,9 +459,18 @@ fn inspect_unique_window(
         (Some(caller), Some(target)) if caller >= target
     );
 
+    // Do not enumerate another process's owned-window relationships until the
+    // selected executable has passed the existing exact executable-name gate.
+    let modal_present = if executable_verified {
+        process_modal_present(hwnd, pid, enabled)?
+    } else {
+        false
+    };
+
     let profile = executable_verified.then(|| profile_for(version)).flatten();
     let composer = if let Some(profile) = profile {
-        if visible && enabled && interactive_session_match && integrity_compatible {
+        if visible && enabled && !modal_present && interactive_session_match && integrity_compatible
+        {
             discover_composer(hwnd, pid, fingerprints, profile)?
         } else {
             ComposerDiscovery::NotInspected
@@ -261,6 +485,7 @@ fn inspect_unique_window(
         fingerprint: fingerprints.window(hwnd.0 as usize, pid),
         visible,
         enabled,
+        modal_present,
         process: NativeProcess {
             pid,
             executable_fingerprint,
@@ -939,13 +1164,7 @@ impl<'operation> NativeMutationPort<'operation> {
         if windows.len() != 1 || windows[0] != identity.hwnd {
             return Err(stale_window_error());
         }
-        revalidate_window(identity.hwnd, identity.pid)?;
-        if !unsafe { IsWindowVisible(identity.hwnd).as_bool() } || !window_enabled(identity.hwnd)? {
-            return Err(UiError::new(
-                UiErrorKind::TargetNotFound,
-                "windows_mutation_window_state",
-            ));
-        }
+        ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
         if foreground_indicates_user_activity(identity.hwnd, identity.pid)? {
             return Err(UiError::new(
                 UiErrorKind::UserActive,
@@ -1092,6 +1311,7 @@ impl MutationPort for NativeMutationPort<'_> {
             fingerprint,
             visible,
             enabled,
+            modal_present,
             process,
             composer,
         } = inspect_unique_window(hwnd, self.fingerprints)?;
@@ -1109,10 +1329,13 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.known_ui_profile = profile.is_some();
         fresh.window_visible = visible;
         fresh.window_enabled = enabled;
-        fresh.modal_present = !enabled;
+        fresh.modal_present = modal_present;
         fresh.window_fingerprint = Some(fingerprint);
-        fresh.user_active = foreground_indicates_user_activity(hwnd, process.pid)?;
         fresh.selector_profile_id = profile.map(|profile| profile.id.to_string());
+        if modal_present {
+            return Ok(fresh);
+        }
+        fresh.user_active = foreground_indicates_user_activity(hwnd, process.pid)?;
 
         match composer {
             ComposerDiscovery::NotInspected | ComposerDiscovery::Absent => return Ok(fresh),
@@ -1230,7 +1453,14 @@ impl MutationPort for NativeMutationPort<'_> {
                 "windows_mutation_value_pattern_missing",
             )
         })?;
+        let identity = self.identity.as_ref().ok_or_else(|| {
+            UiError::new(
+                UiErrorKind::StaleSnapshot,
+                "windows_mutation_identity_missing",
+            )
+        })?;
         let value = ScrubbedBstr::from_wide(value_utf16);
+        ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
         ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         // SAFETY: the exact writable ValuePattern was freshly revalidated in
         // this MTA apartment while the named mutex is held. The BSTR remains
@@ -1266,6 +1496,13 @@ impl MutationPort for NativeMutationPort<'_> {
                 "windows_commit_selector_unconfigured",
             )
         })?;
+        let identity = self.identity.as_ref().ok_or_else(|| {
+            UiError::new(
+                UiErrorKind::StaleSnapshot,
+                "windows_mutation_identity_missing",
+            )
+        })?;
+        ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
         ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         // SAFETY: this interface can only be stored after an exact, unique,
         // profile-bound send selector and InvokePattern are verified. The
@@ -1273,6 +1510,32 @@ impl MutationPort for NativeMutationPort<'_> {
         unsafe { pattern.Invoke() }
             .map_err(|error| map_windows_error(error, "windows_commit_invoke"))
     }
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn ensure_mutation_modal_clear(hwnd: HWND, expected_pid: u32) -> Result<(), UiError> {
+    revalidate_window(hwnd, expected_pid)?;
+    if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+        return Err(UiError::new(
+            UiErrorKind::TargetNotFound,
+            "windows_mutation_window_state",
+        ));
+    }
+
+    let enabled = window_enabled(hwnd)?;
+    if process_modal_present(hwnd, expected_pid, enabled)? {
+        return Err(UiError::new(
+            UiErrorKind::ModalPresent,
+            "windows_mutation_modal",
+        ));
+    }
+    if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+        return Err(UiError::new(
+            UiErrorKind::TargetNotFound,
+            "windows_mutation_window_state",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(any(feature = "windows-ui-write", test))]
@@ -1664,6 +1927,74 @@ mod tests {
         assert!(classify_foreground_activity(10, 10, None, 42));
         assert!(classify_foreground_activity(10, 11, Some(42), 42));
         assert!(!classify_foreground_activity(10, 11, Some(99), 42));
+    }
+
+    #[test]
+    fn only_visible_owned_popups_in_the_selected_owner_group_block() {
+        let selected = WindowOwnerGroup {
+            hwnd: 10,
+            pid: 42,
+            root_owner: 10,
+        };
+        let classify = |candidate_hwnd, candidate_pid, visible, owner, root_owner| {
+            owned_popup_blocks_selected(
+                selected,
+                OwnedPopupObservation {
+                    hwnd: candidate_hwnd,
+                    pid: candidate_pid,
+                    visible,
+                    owner,
+                    root_owner,
+                },
+            )
+        };
+
+        assert_eq!(classify(10, 42, true, Some(10), Some(10)), Ok(false));
+        assert_eq!(classify(11, 99, true, Some(10), Some(10)), Ok(false));
+        assert_eq!(classify(11, 42, false, Some(10), Some(10)), Ok(false));
+        assert_eq!(classify(11, 42, true, None, Some(11)), Ok(false));
+        assert_eq!(classify(11, 42, true, Some(0), Some(11)), Ok(false));
+        assert_eq!(classify(11, 42, true, Some(10), Some(20)), Ok(false));
+        assert_eq!(classify(11, 42, true, Some(10), Some(10)), Ok(true));
+        assert_eq!(classify(11, 42, true, Some(10), None), Err(()));
+        assert_eq!(classify(11, 42, true, Some(10), Some(0)), Err(()));
+        assert_eq!(
+            owned_popup_blocks_selected(
+                WindowOwnerGroup {
+                    hwnd: 0,
+                    ..selected
+                },
+                OwnedPopupObservation {
+                    hwnd: 11,
+                    pid: 42,
+                    visible: true,
+                    owner: Some(10),
+                    root_owner: Some(10),
+                }
+            ),
+            Err(())
+        );
+        for invalid in [
+            WindowOwnerGroup { pid: 0, ..selected },
+            WindowOwnerGroup {
+                root_owner: 0,
+                ..selected
+            },
+        ] {
+            assert_eq!(
+                owned_popup_blocks_selected(
+                    invalid,
+                    OwnedPopupObservation {
+                        hwnd: 11,
+                        pid: 42,
+                        visible: true,
+                        owner: Some(10),
+                        root_owner: Some(10),
+                    }
+                ),
+                Err(())
+            );
+        }
     }
 
     #[test]

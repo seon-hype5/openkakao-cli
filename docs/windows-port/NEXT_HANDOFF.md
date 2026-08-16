@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`36cc84723f9aa6ba4c8e806b5aef57b405a9e494`. The commit containing this
+`e94801fa9f181e95fc44505ba374b80be3e5ace2`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -51,7 +51,9 @@ concurrency limit.
 - approval-owned native target verification through fresh/final preflight:
   `7dfbf0d3b55a9d6b16d690092beac48ebc9993ad`; and
 - closed native target-observation state:
-  `36cc84723f9aa6ba4c8e806b5aef57b405a9e494`.
+  `36cc84723f9aa6ba4c8e806b5aef57b405a9e494`; and
+- approval-owned process-local monotonic lifetime enforcement:
+  `e94801fa9f181e95fc44505ba374b80be3e5ace2`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -182,6 +184,18 @@ every observation, final revalidation, and each actual Value/Invoke call.
 Synthetic future instants and a pure two-clock truth table prove rollback
 cannot extend approval lifetime without sleeping or changing system time.
 
+The current offline successor expands conventional modal evidence beyond the
+selected window's enabled style. After exact executable-name verification, a
+disabled selected window or a visible same-process owned top-level popup in
+its root-owner group is blocking; hidden, foreign-process, unowned, and
+different-group windows are not. The metadata-only callback retains no
+candidate list or text, uncertainty fails closed, and any positive result
+suppresses composer identity/input-availability evidence. Fresh observation,
+final preflight, and each actual Value/Invoke boundary repeat the scan. Pure
+classification and mapping tests call no desktop API. Generic owner chains
+still cannot identify an unowned custom dialog or an in-window overlay, so
+future negative live measurement remains required.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -194,6 +208,9 @@ cannot extend approval lifetime without sleeping or changing system time.
   is non-retryable.
 - Inspection is metadata-only and redacted. It does not read titles, UIA
   Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
+- Modal evidence covers a disabled selected window plus visible same-process
+  owned popups in its root-owner group. Positive evidence prevents composer
+  traversal and is rechecked at final and actual mutation boundaries.
 - Windows CLI provides `doctor --ui` and stdin-only/opened-only `local-send`,
   with generic parse failures that cannot echo a rejected positional message.
 - Input stops at 4,001 raw bytes, accepts at most 4,000 valid UTF-8 bytes and
@@ -269,8 +286,8 @@ All recorded final-matrix Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 181 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 105 passed |
+| `cargo test --locked --lib` | 183 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 107 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -285,9 +302,9 @@ All recorded final-matrix Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 105 passed |
+| release all-feature Windows synthetic tests | 107 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 43 files, 49 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 44 files, 51 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -364,7 +381,10 @@ implementation; it likewise authorizes no probe or production wiring.
   Shell-output release counts without resolving a known folder.
   Reviewed Kakao signer/root values, a second independent fixture/root unsafe
   review, and production wiring remain absent and fail closed.
-- Expand modal evidence beyond the current conservative window state.
+- Generic Win32 owner-chain modal evidence cannot identify an unowned custom
+  dialog or an overlay drawn inside the selected window. Future activation
+  needs negative live measurements and a reviewed version-specific rule if
+  either shape exists.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
   worker can block further probes until it returns or the process exits.
@@ -383,11 +403,13 @@ repository-owned signed fixture with bounded structural/SPKI and offline
 VERIFY/CLOSE tests, guarded root derivation, and exact Shell allocation-lifetime
 tests, approval-owned native target-permit plumbing, a closed native
 target-observation state, and an approval-owned monotonic deadline are
-implemented and pass the full safe regression matrix. The next safe work is a
-second independent unsafe review and a clean pinned-Windows CI reproduction,
-followed separately by reviewed production signer/root provenance. None of
-these tasks requires or authorizes a real KakaoTalk path or signature, a live
-label probe, or a trust-store change.
+implemented. Conventional same-process owner-group popup evidence and repeated
+mutation-boundary modal checks are now implemented as well, and all pass the
+full safe regression matrix. The next safe work is a second independent unsafe
+review and a clean pinned-Windows CI reproduction, followed separately by
+reviewed production signer/root provenance. None of these tasks requires or
+authorizes a real KakaoTalk path or signature, a live label probe, or a
+trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

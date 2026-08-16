@@ -53,6 +53,9 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;
   session/integrity mismatch; and ambiguous windows/composers are refusals.
+- Modal evidence includes both a disabled selected window and every visible
+  same-process owned top-level popup in its root-owner group. Owner-query
+  uncertainty refuses; visible modeless owned popups may conservatively block.
 - Snapshot validity uses two half-open intervals: equality with either the
   wall-clock expiry or approval-owned monotonic deadline is stale. A clock
   rollback cannot extend the original remaining lifetime; a forward jump can
@@ -88,6 +91,12 @@ operation strings are replaced with `redacted_operation` in both streams.
 A rejected legacy positional message is handled by generic parse output so
 clap cannot echo it.
 
+The modal scan begins only after exact executable-name verification and reads
+only HWND/PID, visibility, owner, and root-owner relationships. Its callback
+retains no candidate list, title, class, or UIA property and publishes only the
+final boolean. Positive modal evidence also suppresses composer identity and
+input-availability evidence.
+
 The offline target-binding contract uses a new random HMAC-SHA-256 key for
 each policy inspection. It streams the configured label through UTF-16 without
 allocating a second label buffer. Returned proof bytes have no public accessor,
@@ -117,6 +126,14 @@ The Windows named mutex is held across observation, final validation, write,
 readback, restore, or Invoke. Abandoned ownership is a refusal, not permission
 to continue. Native UI work stays synchronous so neither the approval lease
 nor mutex outlives the transaction invisibly.
+
+Owner-group modal evidence is refreshed during observation, final preflight,
+and immediately before each actual Value/Invoke call. A positive result is a
+fixed `ModalPresent` refusal before the execution claim. Once a Value/Invoke
+method has been entered after the claim, the existing conservative
+`SubmissionUncertain` normalization applies even when this final gate refuses
+before the OS call. A failed relevant relationship query is never proof of
+absence.
 
 ## Remaining security blockers
 
@@ -153,7 +170,9 @@ or write authority.
   review, production wiring, and real application observations remain absent.
   Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
-- Modal evidence remains narrower than a full application-wide model.
+- Generic owner-chain evidence does not detect an unowned custom dialog or an
+  overlay drawn inside the selected window. Activation needs negative live
+  measurements and a reviewed version-specific rule if either shape exists.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.
   Read-only discovery is process-wide single-flight, so one timed-out worker
   blocks later probes instead of allowing retained workers to accumulate.

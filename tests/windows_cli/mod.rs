@@ -510,6 +510,13 @@ fn error_operation_is_closed_and_unknown_values_are_redacted() {
     );
     assert!(known.stdout.contains("policy_validate_message"));
     assert!(known.stderr.contains("policy_validate_message"));
+
+    let modal = render_error(
+        &UiError::new(UiErrorKind::ModalPresent, "windows_mutation_modal"),
+        OutputMode::Json,
+    );
+    assert!(modal.stdout.contains("windows_mutation_modal"));
+    assert!(modal.stderr.contains("windows_mutation_modal"));
 }
 
 #[test]
