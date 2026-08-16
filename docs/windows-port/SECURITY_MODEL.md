@@ -121,9 +121,12 @@ or write authority.
   runtime SPKI/path observations from becoming expected pins by accident, and
   provider extraction exact-checks the owned
   WinTrust state/pointer links and verified primary index. No production path
-  constructs the process/HWND-bound adapter, tests never construct that full
-  adapter, and it deliberately emits no installation-root digest. A focused
-  source/API audit added retained
+  constructs the process/HWND-bound adapter, and tests never construct that
+  full adapter. Generic runtime root derivation now receives only the
+  source-static root kind, retains the exact known-folder and ancestor handles,
+  and emits only an evidence digest from bounded relative components; observed
+  paths/components cannot construct a reviewed profile. A focused source/API
+  audit added retained
   read-share-only canonical file and parent guards around the path-only version
   query, VERIFY/CLOSE, and final reopen. A repository-owned self-signed fixture
   now binds its build/source/artifact/certificate/SPKI hashes, checks one
@@ -131,8 +134,8 @@ or write authority.
   cache-only/noninteractive VERIFY/CLOSE lifetime. That call exposed and fixed
   an over-strict invariant: documented `WSS_OUT_*` result bits may be added to
   the exact input flags, while changed input or unknown bits still refuse.
-  Reviewed Kakao signer/root provenance, a second independent unsafe review,
-  runtime root derivation, and real application observations remain absent.
+  Reviewed Kakao signer/root provenance, a second independent unsafe/root
+  review, production wiring, and real application observations remain absent.
   Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
 - Modal evidence remains narrower than a full application-wide model.

@@ -60,6 +60,9 @@ performs no UI mutation, and cannot read user or application state.
   guards and calls WinTrust with `WTD_CACHE_ONLY_URL_RETRIEVAL`, `WTD_UI_NONE`,
   and the noninteractive HWND. It accepts trust or refusal, closes state once,
   performs no trust-store change, and has no network/UI fallback.
+- Installation-root tests use only synthetic volume-GUID `PathBuf` values and
+  exact GUID constants. They never construct the process-bound adapter or call
+  `SHGetKnownFolderPath`.
 - Stage and commit are exercised only as policy/fake states with mutation
   counters fixed at zero, plus a synthetic in-memory transaction port. The
   production backend contract test never calls either mutation method.
@@ -79,7 +82,9 @@ verification; current production trust returns
 `windows_executable_trust_unavailable`, so CI never resolves LocalAppData or
 opens the real DPAPI/ACL store. The repository fixture reaches only the
 disconnected WinTrust state seam and cannot supply a production root digest or
-caller. Synthetic contracts retain closed unavailable/uncertain-ledger
+caller. Generic root derivation is likewise compiled and tested only with
+synthetic paths; no executable-trust known folder is resolved. Synthetic
+contracts retain closed unavailable/uncertain-ledger
 coverage.
 All-feature CI is compile and synthetic behavior coverage only; it must never
 be interpreted as permission to run a live UI command.

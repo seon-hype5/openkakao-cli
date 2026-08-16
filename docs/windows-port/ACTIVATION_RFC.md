@@ -254,7 +254,9 @@ Windows adapter retains stable boxed WinTrust state, binds three file identity
 observations to process creation time, validates no-follow fixed-volume paths,
 retains the canonical file and parent directories under read-only sharing to
 exclude version/path write-delete ABA races, and hashes bounded DER-encoded
-leaf SPKI. Post-VERIFY extraction now exact-
+leaf SPKI. It also resolves only the profile's source-static known-folder kind,
+retains the canonical root/ancestor handles, and hashes only a bounded
+same-volume relative relation. Post-VERIFY extraction now exact-
 checks every caller-owned policy/pointer field, the provider's data/action/
 signature-settings links, and primary verified-signature index zero.
 
@@ -266,11 +268,11 @@ reserved DOS device names, and absolute prefixes; ASCII case is folded before a
 length-delimited,
 domain-separated SHA-256 digest. `ExecutableTrustProfile` accepts only this
 typed root digest and a `ReviewedSignerDigest` constructed from source-embedded
-static bytes; runtime SPKI observations remain the unreviewed evidence type and
-cannot be passed as the expected signer by accident. No root kind/path or
-signer value is configured, the native
-adapter deliberately supplies no observed installation-root digest, and it
-has zero production references. Production therefore remains
+static bytes; runtime SPKI/root observations remain unreviewed evidence types
+and cannot be passed as expected pins by accident. Generic runtime root
+derivation is implemented, but no production root kind/components or signer
+value is configured and the native adapter has zero production references.
+Production therefore remains
 `UnavailableExecutableTrust`.
 
 [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md) now freezes the evidence bundle,
@@ -290,8 +292,8 @@ authorization.
    side-effect-free lazy factory strictly after executable-trust verification;
    current unavailable trust makes its production initialization unreachable.
    The native executable API adapter remains disconnected. Repository-owned
-   signed-fixture evidence now exists, while independent unsafe review,
-   signer/root provenance, runtime root derivation, and the trust
+   signed-fixture evidence and generic runtime root derivation now exist, while
+   independent unsafe/root review, signer/root provenance, and the trust
    production-wiring decision remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.

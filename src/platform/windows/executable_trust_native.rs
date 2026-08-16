@@ -2,11 +2,12 @@
 //!
 //! The orchestration freezes the exact offline WinTrust policy plus
 //! VERIFY/extract/CLOSE lifetime. A native adapter now implements the process,
-//! file-identity, provider-chain, and SPKI boundary, but no production path
-//! constructs it and automated tests never call it. A reviewed signer pin and
-//! canonical installation-root rule remain mandatory before wiring. The
-//! stable WinTrust state is revalidated after VERIFY, including exact provider
-//! pointer linkage and the primary verified-signature index.
+//! file-identity, known-folder-relative root, provider-chain, and SPKI
+//! boundary, but no production path constructs the full process-bound adapter
+//! and automated tests never call it. Reviewed signer/root values remain
+//! mandatory before wiring. The stable WinTrust state is revalidated after
+//! VERIFY, including exact provider pointer linkage and the primary
+//! verified-signature index.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -19,7 +20,7 @@ use std::path::{Component, Path, PathBuf};
 use std::ptr;
 
 use sha2::{Digest, Sha256};
-use windows::core::{w, GUID, PCWSTR, PWSTR};
+use windows::core::{w, GUID, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, FILETIME, GENERIC_READ, HANDLE, HWND,
     INVALID_HANDLE_VALUE,
@@ -53,9 +54,13 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, GETFINALPATHNAMEBYHANDLE_FLAGS,
     OPEN_EXISTING, VOLUME_NAME_GUID, VS_FIXEDFILEINFO,
 };
+use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetProcessId, GetProcessTimes, QueryFullProcessImageNameW,
     PROCESS_NAME_WIN32,
+};
+use windows::Win32::UI::Shell::{
+    FOLDERID_LocalAppData, FOLDERID_ProgramFilesX64, FOLDERID_ProgramFilesX86, KF_FLAG_DEFAULT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindow};
 use zeroize::Zeroizing;
@@ -63,11 +68,13 @@ use zeroize::Zeroizing;
 use crate::platform::{UiError, UiErrorKind};
 
 use super::executable_trust::{
-    verify_executable_trust, AuthenticodeStatus, ExecutableTrustBoundary, ExecutableTrustEvidence,
-    ExecutableTrustProfile, FileIdentity, FinalPathSource, ReparseState, TrustDigest, VolumeKind,
+    observed_install_root_digest, verify_executable_trust, AuthenticodeStatus,
+    ExecutableTrustBoundary, ExecutableTrustEvidence, ExecutableTrustProfile, FileIdentity,
+    FinalPathSource, InstallRootKind, ReparseState, TrustDigest, VolumeKind,
+    MAX_INSTALL_ROOT_COMPONENTS, MAX_INSTALL_ROOT_COMPONENT_BYTES, MAX_INSTALL_ROOT_RELATION_BYTES,
 };
 #[cfg(test)]
-use super::executable_trust::{InstallRootDigest, InstallRootKind, ReviewedSignerDigest};
+use super::executable_trust::{InstallRootDigest, ReviewedSignerDigest};
 use super::FileVersion;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,6 +258,7 @@ trait NativeExecutableTrustApi {
 
     fn observe_path(
         &mut self,
+        install_root_kind: InstallRootKind,
     ) -> Result<(Self::PathState, NativePathObservation), NativeTrustFailure>;
 
     fn begin_authenticode(
@@ -305,7 +313,8 @@ fn observe_and_verify<A: NativeExecutableTrustApi>(
     profile: &ExecutableTrustProfile,
     api: &mut A,
 ) -> Result<(), UiError> {
-    let (path_state, path) = catch_unwind(AssertUnwindSafe(|| api.observe_path()))
+    let install_root_kind = profile.install_root_kind();
+    let (path_state, path) = catch_unwind(AssertUnwindSafe(|| api.observe_path(install_root_kind)))
         .map_err(|_| NativeTrustFailure::PathObservation.into_ui_error())?
         .map_err(NativeTrustFailure::into_ui_error)?;
 
@@ -377,6 +386,20 @@ const DRIVE_FIXED_VALUE: u32 = 3;
 const FIXED_FILE_INFO_SIGNATURE: u32 = 0xFEEF_04BD;
 const FILE_ID_DOMAIN: &[u8] = b"openkakao.windows.executable-file-id.v1\0";
 
+// The generated windows-rs wrapper discards a non-null output pointer when
+// HRESULT is failure. This narrow declaration preserves ownership so every
+// Shell allocation can be released on both success and failure paths.
+#[link(name = "shell32")]
+extern "system" {
+    #[link_name = "SHGetKnownFolderPath"]
+    fn sh_get_known_folder_path_for_trust(
+        rfid: *const GUID,
+        flags: u32,
+        token: HANDLE,
+        path: *mut PWSTR,
+    ) -> HRESULT;
+}
+
 /// Owned Win32 handle used only by the disconnected executable-trust adapter.
 /// It is intentionally separate from the mutation backend's handle wrapper so
 /// no production path can construct this adapter accidentally.
@@ -433,7 +456,12 @@ struct WindowsPathState {
     /// This closes path-component rename/reparse ABA races around the
     /// path-only version API.
     _canonical_parent_guards: Vec<OwnedNativeHandle>,
+    /// Retains the separately resolved known-folder root and its canonical
+    /// ancestors with write/delete sharing excluded for the same lifetime.
+    known_folder_root: OwnedNativeHandle,
+    _known_folder_parent_guards: Vec<OwnedNativeHandle>,
     canonical_path: Zeroizing<Vec<u16>>,
+    canonical_known_folder: Zeroizing<Vec<u16>>,
     identity: FileIdentity,
 }
 
@@ -494,6 +522,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
 
     fn observe_path(
         &mut self,
+        install_root_kind: InstallRootKind,
     ) -> Result<(Self::PathState, NativePathObservation), NativeTrustFailure> {
         self.validate_process_binding()?;
         let source_path = query_process_image_path(self.process.raw())?;
@@ -519,6 +548,27 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         if canonical_file_path(&verification_file)? != canonical_path {
             return Err(NativeTrustFailure::PathObservation);
         }
+
+        let known_folder_source = resolve_known_folder_path(install_root_kind)?;
+        let _known_folder_source_parent_guards =
+            open_reparse_free_parent_chain(&known_folder_source)?;
+        let known_folder_source_handle = open_directory_no_follow(&known_folder_source)?;
+        validate_directory_handle(&known_folder_source_handle)?;
+        let canonical_known_folder = canonical_file_path(&known_folder_source_handle)?;
+        if !is_fixed_local_volume(&canonical_known_folder)? {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let known_folder_parent_guards = open_reparse_free_parent_chain(&canonical_known_folder)?;
+        let known_folder_root = open_directory_no_follow(&canonical_known_folder)?;
+        validate_directory_handle(&known_folder_root)?;
+        if canonical_file_path(&known_folder_root)? != canonical_known_folder {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let install_root_digest = derive_install_root_digest(
+            install_root_kind,
+            &canonical_known_folder,
+            &canonical_path,
+        )?;
 
         let process_identity =
             file_identity(&process_image_file, self.expected_creation_time_100ns)?;
@@ -546,7 +596,10 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             process_image_file,
             verification_file,
             _canonical_parent_guards: canonical_parent_guards,
+            known_folder_root,
+            _known_folder_parent_guards: known_folder_parent_guards,
             canonical_path: Zeroizing::new(canonical_path),
+            canonical_known_folder: Zeroizing::new(wide_path(&canonical_known_folder)?),
             identity: verified_identity,
         };
         let observation = NativePathObservation {
@@ -559,9 +612,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             process_file_identity: Some(process_identity),
             verified_file_identity: Some(verified_identity),
             version,
-            // The native path/signature adapter deliberately cannot invent an
-            // installation-root pin from this machine's current installation.
-            install_root_digest: None,
+            install_root_digest: Some(install_root_digest),
         };
         Ok((state, observation))
     }
@@ -577,6 +628,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         self.validate_process_binding()?;
         validate_regular_file_handle(&path.process_image_file)?;
         validate_regular_file_handle(&path.verification_file)?;
+        validate_known_folder_binding(path)?;
         if file_identity(&path.verification_file, self.expected_creation_time_100ns)?
             != path.identity
         {
@@ -609,6 +661,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
     ) -> Result<Option<FileIdentity>, NativeTrustFailure> {
         self.validate_process_binding()
             .map_err(|_| NativeTrustFailure::ReopenedIdentity)?;
+        validate_known_folder_binding(path).map_err(|_| NativeTrustFailure::ReopenedIdentity)?;
         let reopened = open_regular_file_no_follow_wide(&path.canonical_path)
             .map_err(|_| NativeTrustFailure::ReopenedIdentity)?;
         validate_regular_file_handle(&reopened)
@@ -626,6 +679,146 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             .map_err(|_| NativeTrustFailure::ReopenedIdentity)?;
         Ok(Some(identity))
     }
+}
+
+fn validate_known_folder_binding(path: &WindowsPathState) -> Result<(), NativeTrustFailure> {
+    validate_directory_handle(&path.known_folder_root)?;
+    let expected = path_from_wide(&path.canonical_known_folder)?;
+    if canonical_file_path(&path.known_folder_root)? != expected {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+    Ok(())
+}
+
+fn known_folder_id(kind: InstallRootKind) -> &'static GUID {
+    match kind {
+        InstallRootKind::ProgramFilesX86 => &FOLDERID_ProgramFilesX86,
+        InstallRootKind::ProgramFiles64 => &FOLDERID_ProgramFilesX64,
+        InstallRootKind::CurrentUserLocalAppData => &FOLDERID_LocalAppData,
+    }
+}
+
+fn resolve_known_folder_path(kind: InstallRootKind) -> Result<PathBuf, NativeTrustFailure> {
+    let mut raw_path = PWSTR::null();
+    // SAFETY: the selected source-static GUID and writable output pointer live
+    // through the synchronous call; a null token selects the current user.
+    // Any non-null output is owned before the HRESULT is interpreted.
+    let status = unsafe {
+        sh_get_known_folder_path_for_trust(
+            ptr::from_ref(known_folder_id(kind)),
+            KF_FLAG_DEFAULT.0 as u32,
+            HANDLE::default(),
+            ptr::from_mut(&mut raw_path),
+        )
+    };
+    let owned_path = if raw_path.0.is_null() {
+        None
+    } else {
+        Some(OwnedTrustKnownFolderPath(raw_path))
+    };
+    if status.is_err() {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+    let path = owned_path
+        .as_ref()
+        .ok_or(NativeTrustFailure::PathObservation)?
+        .to_path_buf()?;
+    validate_absolute_path(&path)?;
+    Ok(path)
+}
+
+struct OwnedTrustKnownFolderPath(PWSTR);
+
+impl OwnedTrustKnownFolderPath {
+    fn to_path_buf(&self) -> Result<PathBuf, NativeTrustFailure> {
+        if self.0 .0.is_null() {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let mut length = 0_usize;
+        // SAFETY: SHGetKnownFolderPath returns a caller-owned NUL-terminated
+        // UTF-16 allocation. The explicit cap bounds the terminator scan.
+        unsafe {
+            while length < MAX_NATIVE_PATH_UNITS && *self.0 .0.add(length) != 0 {
+                length += 1;
+            }
+        }
+        if length == 0 || length == MAX_NATIVE_PATH_UNITS {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        // SAFETY: the bounded scan established this initialized live span.
+        let units = unsafe { std::slice::from_raw_parts(self.0 .0, length) };
+        Ok(PathBuf::from(OsString::from_wide(units)))
+    }
+}
+
+impl Drop for OwnedTrustKnownFolderPath {
+    fn drop(&mut self) {
+        if !self.0 .0.is_null() {
+            // SAFETY: this is the exact Shell allocation returned by
+            // SHGetKnownFolderPath and is released exactly once.
+            unsafe { CoTaskMemFree(Some(self.0 .0.cast_const().cast::<c_void>())) };
+            self.0 = PWSTR::null();
+        }
+    }
+}
+
+fn derive_install_root_digest(
+    kind: InstallRootKind,
+    known_folder: &Path,
+    executable: &Path,
+) -> Result<TrustDigest, NativeTrustFailure> {
+    validate_absolute_path(known_folder)?;
+    validate_absolute_path(executable)?;
+    let mut known_units = Zeroizing::new(wide_path(known_folder)?);
+    let mut executable_units = Zeroizing::new(wide_path(executable)?);
+    if known_units.pop() != Some(0) || executable_units.pop() != Some(0) {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+
+    let known_volume = volume_guid_root(&known_units).ok_or(NativeTrustFailure::PathObservation)?;
+    let executable_volume =
+        volume_guid_root(&executable_units).ok_or(NativeTrustFailure::PathObservation)?;
+    if !ascii_units_equal(known_volume, executable_volume)
+        || known_units.len() <= known_volume.len()
+        || known_units.last() == Some(&u16::from(b'\\'))
+        || executable_units.len() <= known_units.len()
+        || !ascii_units_equal(&executable_units[..known_units.len()], &known_units)
+        || executable_units.get(known_units.len()) != Some(&u16::from(b'\\'))
+    {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+
+    let relative = &executable_units[known_units.len() + 1..];
+    let mut relation_bytes = 0_usize;
+    let mut components: Vec<Zeroizing<Vec<u8>>> = Vec::new();
+    for units in relative.split(|unit| *unit == u16::from(b'\\')) {
+        if units.is_empty()
+            || units.len() > MAX_INSTALL_ROOT_COMPONENT_BYTES
+            || components.len() == MAX_INSTALL_ROOT_COMPONENTS
+        {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        relation_bytes = relation_bytes
+            .checked_add(units.len())
+            .ok_or(NativeTrustFailure::PathObservation)?;
+        if relation_bytes > MAX_INSTALL_ROOT_RELATION_BYTES {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let mut bytes = Zeroizing::new(Vec::with_capacity(units.len()));
+        for unit in units {
+            if *unit > 0x7f {
+                return Err(NativeTrustFailure::PathObservation);
+            }
+            bytes.push(*unit as u8);
+        }
+        components.push(bytes);
+    }
+    let component_refs: Vec<&[u8]> = components
+        .iter()
+        .map(|component| component.as_slice())
+        .collect();
+    observed_install_root_digest(kind, &component_refs)
+        .map_err(|_| NativeTrustFailure::PathObservation)
 }
 
 struct WindowsTrustState {
@@ -1630,13 +1823,22 @@ mod tests {
 
         let identity = file_identity(&verification_file, 1).unwrap();
         assert_eq!(file_identity(&process_image_file, 1).unwrap(), identity);
+        let fixture_parent = canonical_path.parent().unwrap();
+        let known_folder_parent_guards = open_reparse_free_parent_chain(fixture_parent).unwrap();
+        let known_folder_root = open_directory_no_follow(fixture_parent).unwrap();
+        validate_directory_handle(&known_folder_root).unwrap();
+        let canonical_known_folder = canonical_file_path(&known_folder_root).unwrap();
         let path_state = WindowsPathState {
             process_image_file,
             verification_file,
             _canonical_parent_guards: canonical_parent_guards,
+            known_folder_root,
+            _known_folder_parent_guards: known_folder_parent_guards,
             canonical_path: Zeroizing::new(wide_path(&canonical_path).unwrap()),
+            canonical_known_folder: Zeroizing::new(wide_path(&canonical_known_folder).unwrap()),
             identity,
         };
+        validate_known_folder_binding(&path_state).unwrap();
 
         let policy = WinTrustCallPolicy::offline_embedded();
         assert!(policy.is_exact());
@@ -1692,6 +1894,7 @@ mod tests {
         panic_at: Option<PanicAt>,
         calls: Vec<&'static str>,
         policy: Option<WinTrustCallPolicy>,
+        root_kind: Option<InstallRootKind>,
         closes: usize,
     }
 
@@ -1701,8 +1904,10 @@ mod tests {
 
         fn observe_path(
             &mut self,
+            install_root_kind: InstallRootKind,
         ) -> Result<(Self::PathState, NativePathObservation), NativeTrustFailure> {
             self.calls.push("observe");
+            self.root_kind = Some(install_root_kind);
             if self.panic_at == Some(PanicAt::Observe) {
                 panic!("synthetic observe panic");
             }
@@ -1827,6 +2032,7 @@ mod tests {
             panic_at: None,
             calls: Vec::new(),
             policy: None,
+            root_kind: None,
             closes: 0,
         }
     }
@@ -1884,6 +2090,7 @@ mod tests {
         );
         assert_eq!(api.closes, 1);
         assert!(api.policy.unwrap().is_exact());
+        assert_eq!(api.root_kind, Some(InstallRootKind::ProgramFilesX86));
     }
 
     #[test]
@@ -2183,6 +2390,84 @@ mod tests {
         ] {
             assert!(volume_guid_root(&malformed.encode_utf16().collect::<Vec<_>>()).is_none());
         }
+    }
+
+    #[test]
+    fn reviewed_root_kind_maps_only_to_exact_known_folder_ids() {
+        assert_eq!(
+            *known_folder_id(InstallRootKind::ProgramFilesX86),
+            FOLDERID_ProgramFilesX86
+        );
+        assert_eq!(
+            *known_folder_id(InstallRootKind::ProgramFiles64),
+            FOLDERID_ProgramFilesX64
+        );
+        assert_eq!(
+            *known_folder_id(InstallRootKind::CurrentUserLocalAppData),
+            FOLDERID_LocalAppData
+        );
+    }
+
+    #[test]
+    fn canonical_relative_root_matches_the_reviewed_digest_without_observed_promotion() {
+        let known_folder =
+            PathBuf::from(r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\PROGRAM FILES (X86)");
+        let executable = PathBuf::from(
+            r"\\?\Volume{01234567-89ab-CDEF-0123-456789abcdef}\Program Files (x86)\SyntheticVendor\SyntheticApp\Synthetic.exe",
+        );
+        let observed = derive_install_root_digest(
+            InstallRootKind::ProgramFilesX86,
+            &known_folder,
+            &executable,
+        )
+        .unwrap();
+        assert_eq!(observed, root_digest().trust_digest());
+        assert_ne!(
+            observed,
+            derive_install_root_digest(
+                InstallRootKind::ProgramFiles64,
+                &known_folder,
+                &executable,
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn canonical_relative_root_rejects_escape_ambiguity_and_nonportable_components() {
+        let root =
+            PathBuf::from(r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\Program Files (x86)");
+        let invalid = [
+            PathBuf::from(
+                r"\\?\Volume{11234567-89ab-cdef-0123-456789abcdef}\Program Files (x86)\Vendor\App.exe",
+            ),
+            PathBuf::from(
+                r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\Program Files (x86)-other\Vendor\App.exe",
+            ),
+            root.clone(),
+            root.join(r"Vendor\bad:name\App.exe"),
+            root.join(r"Vendor\CON\App.exe"),
+            root.join(r"Vendor\비공개\App.exe"),
+            root.join("x".repeat(MAX_INSTALL_ROOT_COMPONENT_BYTES + 1)),
+            root.join(r"a\b\c\d\e\f\g\h\i"),
+        ];
+        for executable in invalid {
+            assert_eq!(
+                derive_install_root_digest(InstallRootKind::ProgramFilesX86, &root, &executable,),
+                Err(NativeTrustFailure::PathObservation)
+            );
+        }
+
+        let trailing_root =
+            PathBuf::from(r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\Program Files (x86)\");
+        assert_eq!(
+            derive_install_root_digest(
+                InstallRootKind::ProgramFilesX86,
+                &trailing_root,
+                &root.join(r"Vendor\App.exe"),
+            ),
+            Err(NativeTrustFailure::PathObservation)
+        );
     }
 
     #[test]

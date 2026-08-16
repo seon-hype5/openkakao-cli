@@ -339,3 +339,28 @@ and reject every changed input or unknown bit. The fixture call demonstrated
 that byte-for-byte flag equality incorrectly rejects real WinTrust output.
 This decision changes no production reference, root digest, selector, or
 capability.
+
+## ADR-031: Derive observed roots from a source-static known-folder kind
+
+Retain the reviewed root kind inside `ExecutableTrustProfile` while keeping its
+expected component list and digest private to the pure verifier. Pass only that
+kind to the disconnected native observer. Map it exactly to
+`FOLDERID_ProgramFilesX86`, `FOLDERID_ProgramFilesX64`, or
+`FOLDERID_LocalAppData`; never use an environment variable, registry guess, or
+path learned from the current executable as the authority.
+
+Own and free every non-null Shell path allocation even on HRESULT failure.
+Open the selected source/canonical root and all ancestors without following
+reparse points and retain canonical read-share-only handles through executable
+version lookup, WinTrust VERIFY/extract/CLOSE, root revalidation, and the final
+executable reopen. Require both handle-derived paths to use the same fixed
+volume-GUID root and require the executable to be a strict descendant at an
+exact component boundary.
+
+Reduce only one to eight bounded portable ASCII relative components in
+zeroizing temporary buffers through the existing version-1 codec. Runtime code
+receives only an evidence `TrustDigest`; it cannot construct the distinct
+reviewed root type. This supersedes the deliberately absent-root portion of
+ADRs 025 and 029, but supplies no production kind, components, signer, adapter
+caller, selector, or capability activation. No test or production path resolves
+a real executable-trust known folder in this change.

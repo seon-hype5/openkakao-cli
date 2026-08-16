@@ -44,3 +44,7 @@ guards, and the still-missing signed-fixture and independent-review evidence.
 self-signed fixture, its structural/SPKI and offline VERIFY/CLOSE tests, the
 WinTrust in/out-flag correction, and the still-missing independent review and
 production provenance.
+[`root-native-root-relation.md`](root-native-root-relation.md) records the
+source-static known-folder-kind routing, retained canonical root guards,
+evidence-only relative digest, and the still-missing independent review and
+production values/wiring.

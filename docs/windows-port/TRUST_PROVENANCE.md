@@ -77,6 +77,19 @@ The expected relation is source-static. The observed relation is runtime
 evidence. There is no API that can promote an observed absolute path into the
 expected profile.
 
+The generic runtime derivation is now implemented in the disconnected native
+adapter. A profile supplies only its reviewed root kind. The adapter resolves
+that exact Windows known-folder ID, retains no-follow read-share-only canonical
+root and ancestor handles alongside the executable guards, requires a strict
+same-volume descendant relation, and converts only bounded portable relative
+components into temporary zeroizing ASCII buffers. The existing version-1
+codec returns an evidence-only digest; no absolute path or observed component
+can construct the reviewed profile type.
+
+No production kind, component list, signer, or caller is configured. Automated
+tests cover only synthetic volume-GUID paths and never call the full
+process-bound adapter or resolve a real known folder for executable trust.
+
 ## Repository-owned signed fixture
 
 The repository now contains a synthetic fixture for bounded PE/signature
@@ -150,7 +163,7 @@ The following remain separate decisions:
    clean pinned-Windows tests;
 2. independently audit the fixture-backed native pointer/lifetime path;
 3. accept a Kakao release provenance bundle;
-4. implement and audit runtime root-relation derivation;
+4. independently audit the implemented runtime root-relation derivation;
 5. connect the native observer while capability remains false;
 6. complete target and submit-selector measurements under their own approvals;
 7. only then consider capability activation.

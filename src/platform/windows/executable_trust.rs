@@ -1,7 +1,7 @@
 //! Pure executable-trust decision seam for guarded Windows mutations.
 //!
 //! Native path, file-handle, and Authenticode APIs are intentionally absent
-//! here. A future native observer must reduce those results to this fixed,
+//! here. The disconnected native observer reduces its results to this fixed,
 //! content-free evidence shape. Installation-root pins can be constructed only
 //! from the versioned reviewed root-relation codec below, never an observed
 //! absolute path. Production remains wired to [`UnavailableExecutableTrust`]
@@ -66,9 +66,9 @@ impl fmt::Debug for ReviewedSignerDigest {
 }
 
 const INSTALL_ROOT_RELATION_DOMAIN: &[u8] = b"openkakao.windows.install-root-relation.v1\0";
-const MAX_INSTALL_ROOT_COMPONENTS: usize = 8;
-const MAX_INSTALL_ROOT_COMPONENT_BYTES: usize = 64;
-const MAX_INSTALL_ROOT_RELATION_BYTES: usize = 512;
+pub(super) const MAX_INSTALL_ROOT_COMPONENTS: usize = 8;
+pub(super) const MAX_INSTALL_ROOT_COMPONENT_BYTES: usize = 64;
+pub(super) const MAX_INSTALL_ROOT_RELATION_BYTES: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum InstallRootKind {
@@ -88,7 +88,10 @@ impl InstallRootKind {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) struct InstallRootDigest(TrustDigest);
+pub(super) struct InstallRootDigest {
+    kind: InstallRootKind,
+    digest: TrustDigest,
+}
 
 impl InstallRootDigest {
     /// Reduces a reviewed root kind and exact relative path to a stable,
@@ -106,38 +109,59 @@ impl InstallRootDigest {
         kind: InstallRootKind,
         components: &[&str],
     ) -> Result<Self, UiError> {
-        if components.is_empty() || components.len() > MAX_INSTALL_ROOT_COMPONENTS {
-            return Err(invalid_trust_profile());
-        }
-
-        let mut relation_len = 0_usize;
-        let mut hasher = Sha256::new();
-        hasher.update(INSTALL_ROOT_RELATION_DOMAIN);
-        hasher.update([kind.domain_tag()]);
-        hasher.update([components.len() as u8]);
-        for component in components {
-            let bytes = component.as_bytes();
-            if !valid_install_root_component(bytes) {
-                return Err(invalid_trust_profile());
-            }
-            relation_len = relation_len
-                .checked_add(bytes.len())
-                .ok_or_else(invalid_trust_profile)?;
-            if relation_len > MAX_INSTALL_ROOT_RELATION_BYTES {
-                return Err(invalid_trust_profile());
-            }
-            hasher.update((bytes.len() as u16).to_le_bytes());
-            for byte in bytes {
-                hasher.update([byte.to_ascii_lowercase()]);
-            }
-        }
-        let digest: [u8; 32] = hasher.finalize().into();
-        TrustDigest::from_bytes(digest).map(Self)
+        let component_bytes: Vec<&[u8]> = components
+            .iter()
+            .map(|component| component.as_bytes())
+            .collect();
+        install_root_relation_digest(kind, &component_bytes).map(|digest| Self { kind, digest })
     }
 
     pub(super) fn trust_digest(self) -> TrustDigest {
-        self.0
+        self.digest
     }
+
+    fn kind(self) -> InstallRootKind {
+        self.kind
+    }
+}
+
+pub(super) fn observed_install_root_digest(
+    kind: InstallRootKind,
+    components: &[&[u8]],
+) -> Result<TrustDigest, UiError> {
+    install_root_relation_digest(kind, components)
+}
+
+fn install_root_relation_digest(
+    kind: InstallRootKind,
+    components: &[&[u8]],
+) -> Result<TrustDigest, UiError> {
+    if components.is_empty() || components.len() > MAX_INSTALL_ROOT_COMPONENTS {
+        return Err(invalid_trust_profile());
+    }
+
+    let mut relation_len = 0_usize;
+    let mut hasher = Sha256::new();
+    hasher.update(INSTALL_ROOT_RELATION_DOMAIN);
+    hasher.update([kind.domain_tag()]);
+    hasher.update([components.len() as u8]);
+    for bytes in components {
+        if !valid_install_root_component(bytes) {
+            return Err(invalid_trust_profile());
+        }
+        relation_len = relation_len
+            .checked_add(bytes.len())
+            .ok_or_else(invalid_trust_profile)?;
+        if relation_len > MAX_INSTALL_ROOT_RELATION_BYTES {
+            return Err(invalid_trust_profile());
+        }
+        hasher.update((bytes.len() as u16).to_le_bytes());
+        for byte in *bytes {
+            hasher.update([byte.to_ascii_lowercase()]);
+        }
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    TrustDigest::from_bytes(digest)
 }
 
 impl fmt::Debug for InstallRootDigest {
@@ -247,6 +271,7 @@ pub(super) enum AuthenticodeStatus {
 pub(super) struct ExecutableTrustProfile {
     version: FileVersion,
     signer_digest: TrustDigest,
+    install_root_kind: InstallRootKind,
     install_root_digest: TrustDigest,
 }
 
@@ -257,6 +282,7 @@ impl ExecutableTrustProfile {
         install_root_digest: InstallRootDigest,
     ) -> Result<Self, UiError> {
         let signer_digest = signer_digest.trust_digest();
+        let install_root_kind = install_root_digest.kind();
         let install_root_digest = install_root_digest.trust_digest();
         if version != FileVersion::KNOWN || signer_digest == install_root_digest {
             return Err(invalid_trust_profile());
@@ -264,8 +290,13 @@ impl ExecutableTrustProfile {
         Ok(Self {
             version,
             signer_digest,
+            install_root_kind,
             install_root_digest,
         })
+    }
+
+    pub(super) fn install_root_kind(&self) -> InstallRootKind {
+        self.install_root_kind
     }
 }
 

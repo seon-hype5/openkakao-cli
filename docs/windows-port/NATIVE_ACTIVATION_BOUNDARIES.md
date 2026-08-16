@@ -34,7 +34,7 @@ The repository already enables `Win32_Foundation`, `Win32_Security`,
 | `Win32_Security_Cryptography_Sip` | generated `windows` 0.62.2 gate on WinTrust provider-data helpers |
 | `Win32_Security_WinTrust` | `WinVerifyTrust`, state/provider/signature structures |
 | `Win32_System_IO` | synchronous `ReadFile` and `WriteFile` bindings |
-| `Win32_UI_Shell` | `FOLDERID_LocalAppData` and `SHGetKnownFolderPath` |
+| `Win32_UI_Shell` | `FOLDERID_LocalAppData`, `FOLDERID_ProgramFilesX86`, `FOLDERID_ProgramFilesX64`, and `SHGetKnownFolderPath` |
 
 No new crate is required. `sha2`, `rand`, and `zeroize` are already direct
 dependencies. `Win32_Security_Cryptography_UI` is deliberately excluded. No
@@ -190,11 +190,14 @@ and automated tests never invoke the production observer or open an installed
 executable. A bounded repository-fixture test now invokes WinTrust only with
 the frozen cache-only/noninteractive policy and closes its state exactly once;
 a separate in-memory test validates PE structure, certificate DER, and SPKI.
-The adapter intentionally emits no installation-root digest, so even direct
-construction cannot satisfy the pure trust verifier. Reviewed signer and root
-profile material, independent fixture-backed unsafe review, and production
-wiring remain activation blockers. Native code avoids dynamic panic payloads
-because `catch_unwind` does not suppress the process-wide panic hook.
+The adapter now also resolves only the source-static profile root kind through
+the known-folder API, retains canonical no-follow root/ancestor handles, and
+reduces the handle-derived relative executable relation to the existing digest.
+It receives no expected component text and cannot promote an observation into
+a reviewed profile. Reviewed signer/root values, independent fixture-backed
+unsafe review, and production wiring remain activation blockers. Native code
+avoids dynamic panic payloads because `catch_unwind` does not suppress the
+process-wide panic hook.
 
 A focused successor audit found that identity comparisons alone did not close
 an ABA race around the path-only Windows version API. Discovery remains
@@ -302,6 +305,24 @@ domain-separated SHA-256. The runtime digest must use the same canonical final
 handle-derived relation, never a user-specific absolute prefix or text learned
 from the current installation.
 
+The disconnected adapter now implements that runtime half. The profile exposes
+only its reviewed `InstallRootKind`; it never exposes expected components to the
+observer. The adapter maps the kind exactly to `FOLDERID_ProgramFilesX86`,
+`FOLDERID_ProgramFilesX64`, or `FOLDERID_LocalAppData`, owns and frees every
+Shell path allocation, and opens the source and canonical known-folder chains
+without following reparse points. The canonical root handle and all ancestors
+remain read-share-only through VERIFY, CLOSE, root revalidation, and executable
+reopen.
+
+Both root and executable must be normalized volume-GUID paths on the same fixed
+local volume. Their handle-derived prefix is compared with ASCII-only case
+folding and exact non-ASCII units; the executable must be a strict descendant
+at a component boundary. Only one to eight relative components enter temporary
+zeroizing ASCII buffers. The existing codec rejects separators, ADS syntax,
+dot/space ambiguity, reserved devices, nonportable bytes, and size overflow,
+then emits only an evidence `TrustDigest`. Absolute/root/component text never
+enters evidence, errors, formatting, or the reviewed profile type.
+
 No implementation may inspect the current KakaoTalk installation and then
 declare that observed value trusted. Until an independently reviewed signer
 SPKI digest and root-relation digest exist, production continues to use
@@ -312,6 +333,8 @@ SPKI digest and root-relation digest exist, production continues to use
 - Existing process/file APIs plus `CreateFileW`,
   `GetFinalPathNameByHandleW`, `GetFileInformationByHandleEx`,
   `GetVolumePathNameW`, and `GetDriveTypeW`.
+- `SHGetKnownFolderPath` with the three exact folder IDs above and
+  `CoTaskMemFree` for every non-null returned allocation.
 - `WinVerifyTrust`, `WINTRUST_DATA`, `WINTRUST_FILE_INFO`,
   `WINTRUST_SIGNATURE_SETTINGS`, `WTHelperProvDataFromStateData`,
   `WTHelperGetProvSignerFromChain`, and `WTHelperGetProvCertFromChain`.
@@ -370,6 +393,9 @@ open the installed KakaoTalk binary.
   delete, and rename sharing; and
 - root-relation kind/component/order/case domain separation plus every
   ambiguous, nonportable, oversized, or absolute-like component refusal; and
+- exact known-folder GUID routing, same-volume strict-descendant derivation,
+  sibling-prefix/volume/ADS/device/non-ASCII/depth refusal, and equality with
+  the source-static reviewed relation digest without observed-value promotion;
 - canaries absent from `Debug`, stdout, stderr, JSON, test names, and failure
   messages.
 
@@ -399,8 +425,9 @@ all later gates still require a fresh, explicitly named approval.
    material. The fixture, reproducible build record, structural/SPKI test, and
    cache-only VERIFY/CLOSE test now exist as described in
    [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md). Independent review, production
-   provenance, root derivation, and every production value remain absent; the
-   current adapter deliberately returns no root digest.
+   provenance, and every production value remain absent. Generic runtime root
+   derivation is complete but the full adapter remains disconnected and has
+   never resolved a real application root.
 7. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 
