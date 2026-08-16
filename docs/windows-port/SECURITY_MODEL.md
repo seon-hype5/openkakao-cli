@@ -103,10 +103,14 @@ or write authority.
   configured.
 - A pure signing/canonical-root decision seam, fakeable VERIFY/extract/CLOSE
   orchestration, and a disconnected native process/file/WinTrust/SPKI adapter
-  exist. No production path constructs the adapter, tests never call it, and
-  it deliberately emits no installation-root digest. Reviewed signer/root
-  provenance, signed-fixture evidence, independent unsafe review, and real
-  native observations remain absent. Production refuses at
+  exist. Distinct source-static signer and root-relation profile types prevent
+  runtime SPKI/path observations from becoming expected pins by accident, and
+  provider extraction exact-checks the owned
+  WinTrust state/pointer links and verified primary index. No production path
+  constructs the adapter, tests never call it, and it deliberately emits no
+  installation-root digest. Reviewed signer/root provenance, signed-fixture
+  evidence, independent unsafe review, and real native observations remain
+  absent. Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
 - Modal evidence remains narrower than a full application-wide model.
 - A blocked third-party UIA provider cannot be safely cancelled in-process.

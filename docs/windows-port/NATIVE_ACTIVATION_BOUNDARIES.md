@@ -251,6 +251,18 @@ after close. DER-encode the leaf `SubjectPublicKeyInfo` with a bounded two-call
 exact returned byte count with SHA-256, and reduce it to `TrustDigest`. Do not
 hash a display name or print certificate metadata.
 
+The expected profile signer uses a distinct `ReviewedSignerDigest` constructor
+that accepts only a source-embedded static 32-byte array. Runtime certificate
+extraction produces only `TrustDigest`; it cannot be promoted to the expected
+profile signer without an explicit source change and review.
+
+Before consuming provider pointers, exact-check the still-live caller-owned
+action, `WINTRUST_DATA`, file info, signature settings, policy flags, union,
+file/path/settings pointers, and null-reserved fields. Provider
+`pWintrustData`, `pgActionID`, and `pSigSettings` must point to those exact
+allocations. With zero secondary signatures, `dwVerifiedSigIndex` must be zero.
+Any drift is provider uncertainty and refuses before certificate extraction.
+
 Every `WTD_STATEACTION_VERIFY` attempt that produced state is paired with
 exactly one `WTD_STATEACTION_CLOSE`, including trust failure, extraction
 failure, and unwind. The close result cannot turn an earlier refusal into
@@ -258,11 +270,18 @@ success; a close failure is itself a refusal.
 
 ### Canonical installation-root pin
 
-The profile must define a signed-release-provenance root kind and exact
-relative directory before any digest is populated. The runtime digest is
-domain-separated and based on the canonical final handle-derived root
-relation, not a user-specific absolute prefix and not text from the current
-installation. Case/normalization rules must be fixed by the profile version.
+The profile must define a source-embedded signed-release-provenance root kind and exact
+relative directory before any digest is populated. Version 1 admits only
+`ProgramFilesX86`, `ProgramFiles64`, or `CurrentUserLocalAppData`, followed by
+one to eight relative printable-ASCII components of at most 64 bytes each and
+512 bytes total. Components reject slash/backslash, colon/ADS, Windows-reserved
+punctuation, leading/trailing dot or space, dot segments, controls, and
+reserved DOS device names (including names with extensions), and non-ASCII.
+The public profile constructor accepts only static source components. ASCII
+case is folded and every component is length-delimited before
+domain-separated SHA-256. The runtime digest must use the same canonical final
+handle-derived relation, never a user-specific absolute prefix or text learned
+from the current installation.
 
 No implementation may inspect the current KakaoTalk installation and then
 declare that observed value trusted. Until an independently reviewed signer
@@ -323,6 +342,8 @@ open the installed KakaoTalk binary.
   checks through a fake native adapter;
 - signer/root/profile mismatch and identity/path replacement with zero UI
   calls and zero execution claims; and
+- root-relation kind/component/order/case domain separation plus every
+  ambiguous, nonportable, oversized, or absolute-like component refusal; and
 - canaries absent from `Debug`, stdout, stderr, JSON, test names, and failure
   messages.
 

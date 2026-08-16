@@ -32,3 +32,5 @@ root provenance and production reference.
 [`root-production-ledger-wiring.md`](root-production-ledger-wiring.md) records
 the later trust-ordered lazy production-ledger composition and why no real
 LocalAppData call becomes reachable.
+[`root-native-trust-hardening.md`](root-native-trust-hardening.md) records the
+strict WinTrust state-link checks and typed installation-root relation codec.

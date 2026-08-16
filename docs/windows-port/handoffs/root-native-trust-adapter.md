@@ -1,5 +1,9 @@
 # Root handoff: disconnected native executable-trust adapter
 
+Successor note: [`root-native-trust-hardening.md`](root-native-trust-hardening.md)
+adds strict post-VERIFY state-link/index checks and a typed relative-root
+profile codec. This handoff otherwise describes the initial adapter phase.
+
 Date: 2026-08-16 KST
 
 ## Status

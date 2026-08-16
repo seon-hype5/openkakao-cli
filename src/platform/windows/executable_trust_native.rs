@@ -4,7 +4,9 @@
 //! VERIFY/extract/CLOSE lifetime. A native adapter now implements the process,
 //! file-identity, provider-chain, and SPKI boundary, but no production path
 //! constructs it and automated tests never call it. A reviewed signer pin and
-//! canonical installation-root rule remain mandatory before wiring.
+//! canonical installation-root rule remain mandatory before wiring. The
+//! stable WinTrust state is revalidated after VERIFY, including exact provider
+//! pointer linkage and the primary verified-signature index.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -59,6 +61,8 @@ use super::executable_trust::{
     verify_executable_trust, AuthenticodeStatus, ExecutableTrustBoundary, ExecutableTrustEvidence,
     ExecutableTrustProfile, FileIdentity, FinalPathSource, ReparseState, TrustDigest, VolumeKind,
 };
+#[cfg(test)]
+use super::executable_trust::{InstallRootDigest, InstallRootKind, ReviewedSignerDigest};
 use super::FileVersion;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -722,13 +726,29 @@ impl WindowsTrustState {
         // SAFETY: dwUnionChoice is fixed to WTD_CHOICE_FILE before this union
         // member is read, and the pointer is compared only, never dereferenced.
         let subject = unsafe { self.data.Anonymous.pFile };
-        self.data.dwUnionChoice == WTD_CHOICE_FILE
+        let policy = WinTrustCallPolicy::offline_embedded();
+        *self.action == policy.action
+            && self.data.cbStruct as usize == size_of::<WINTRUST_DATA>()
+            && self.data.pPolicyCallbackData.is_null()
+            && self.data.pSIPClientData.is_null()
+            && self.data.dwUIChoice == policy.ui_choice
+            && self.data.fdwRevocationChecks == policy.revocation_checks
+            && self.data.dwUnionChoice == policy.union_choice
             && subject == ptr::from_ref(&*self.file_info).cast_mut()
+            && self.data.dwStateAction == policy.verify_action
+            && self.data.pwszURLReference.is_null()
+            && self.data.dwProvFlags == policy.provider_flags
+            && self.data.dwUIContext == policy.ui_context
+            && self.data.pSignatureSettings == ptr::from_ref(&*self.signature_settings).cast_mut()
             && self.file_path.last() == Some(&0)
+            && self.file_info.cbStruct as usize == size_of::<WINTRUST_FILE_INFO>()
             && self.file_info.pcwszFilePath.0 == self.file_path.as_ptr()
             && self.file_info.hFile == self.file_handle.raw()
-            && self.data.pSignatureSettings == ptr::from_ref(&*self.signature_settings).cast_mut()
-            && self.data.cbStruct as usize == size_of::<WINTRUST_DATA>()
+            && self.file_info.pgKnownSubject.is_null()
+            && self.signature_settings.cbStruct as usize == size_of::<WINTRUST_SIGNATURE_SETTINGS>()
+            && self.signature_settings.dwIndex == 0
+            && self.signature_settings.dwFlags == policy.signature_flags
+            && self.signature_settings.pCryptoPolicy.is_null()
     }
 }
 
@@ -752,6 +772,9 @@ fn extract_windows_authenticode(
     }
     let secondary_signature_count = usize::try_from(state.signature_settings.cSecondarySigs)
         .map_err(|_| NativeTrustFailure::ProviderExtraction)?;
+    if secondary_signature_count == 0 && state.signature_settings.dwVerifiedSigIndex != 0 {
+        return Err(NativeTrustFailure::ProviderExtraction);
+    }
     let catalog_choice_used = state.data.dwUnionChoice != WTD_CHOICE_FILE;
     let base = NativeAuthenticodeObservation {
         winverifytrust_status: state.verify_status,
@@ -778,8 +801,7 @@ fn extract_windows_authenticode(
     let provider = unsafe { checked_provider(state, provider_pointer) }?;
     if provider.pWintrustData != ptr::from_ref(&*state.data).cast_mut()
         || provider.pgActionID != ptr::from_ref(&*state.action).cast_mut()
-        || (!provider.pSigSettings.is_null()
-            && provider.pSigSettings != ptr::from_ref(&*state.signature_settings).cast_mut())
+        || provider.pSigSettings != ptr::from_ref(&*state.signature_settings).cast_mut()
     {
         return Err(NativeTrustFailure::ProviderExtraction);
     }
@@ -1325,6 +1347,9 @@ fn query_file_version(path: &Path) -> Option<FileVersion> {
 mod tests {
     use super::*;
 
+    static SYNTHETIC_SIGNER_BYTES: [u8; 32] = [1; 32];
+    static SYNTHETIC_ROOT_RELATION: &[&str] = &["SyntheticVendor", "SyntheticApp", "Synthetic.exe"];
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum PanicAt {
         Observe,
@@ -1428,7 +1453,19 @@ mod tests {
     }
 
     fn profile() -> ExecutableTrustProfile {
-        ExecutableTrustProfile::new(FileVersion::KNOWN, digest(1), digest(2)).unwrap()
+        ExecutableTrustProfile::new(FileVersion::KNOWN, reviewed_signer(), root_digest()).unwrap()
+    }
+
+    fn reviewed_signer() -> ReviewedSignerDigest {
+        ReviewedSignerDigest::from_static_reviewed_bytes(&SYNTHETIC_SIGNER_BYTES).unwrap()
+    }
+
+    fn root_digest() -> InstallRootDigest {
+        InstallRootDigest::from_static_reviewed_relation(
+            InstallRootKind::ProgramFilesX86,
+            SYNTHETIC_ROOT_RELATION,
+        )
+        .unwrap()
     }
 
     fn path() -> NativePathObservation {
@@ -1442,7 +1479,7 @@ mod tests {
             process_file_identity: Some(identity(3)),
             verified_file_identity: Some(identity(3)),
             version: Some(FileVersion::KNOWN),
-            install_root_digest: Some(digest(2)),
+            install_root_digest: Some(root_digest().trust_digest()),
         }
     }
 
@@ -1489,10 +1526,17 @@ mod tests {
         signature_settings.dwFlags = WSS_GET_SECONDARY_SIG_COUNT;
         let mut data = Box::new(WINTRUST_DATA::default());
         data.cbStruct = size_of::<WINTRUST_DATA>() as u32;
+        data.dwUIChoice = WTD_UI_NONE;
+        data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
         data.dwUnionChoice = WTD_CHOICE_FILE;
         data.Anonymous = WINTRUST_DATA_0 {
             pFile: ptr::from_mut(&mut *file_info),
         };
+        data.dwStateAction = WTD_STATEACTION_VERIFY;
+        data.dwProvFlags = WTD_CACHE_ONLY_URL_RETRIEVAL
+            | WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT
+            | WTD_DISABLE_MD2_MD4;
+        data.dwUIContext = WTD_UICONTEXT_EXECUTE;
         data.pSignatureSettings = ptr::from_mut(&mut *signature_settings);
         WindowsTrustState {
             action: Box::new(WINTRUST_ACTION_GENERIC_VERIFY_V2),
@@ -1727,6 +1771,49 @@ mod tests {
         assert!(unsafe { checked_provider(&state, unaligned_pointer) }.is_err());
         assert!(unsafe { checked_certificate_context(&state, ptr::null()) }.is_err());
         assert!(unsafe { checked_certificate_info(&state, ptr::null_mut()) }.is_err());
+    }
+
+    #[test]
+    fn stable_wintrust_state_rejects_every_mutable_policy_or_pointer_drift() {
+        let mut state = inert_windows_state();
+        assert!(state.debug_invariants());
+
+        state.data.pSignatureSettings = ptr::null_mut();
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.file_info.cbStruct -= 1;
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.signature_settings.dwIndex = 1;
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.signature_settings.dwFlags = WINTRUST_SIGNATURE_SETTINGS_FLAGS(0);
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.data.dwProvFlags = WINTRUST_DATA_PROVIDER_FLAGS(0);
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.data.dwStateAction = WTD_STATEACTION_CLOSE;
+        assert!(!state.debug_invariants());
+    }
+
+    #[test]
+    fn zero_secondary_signatures_require_primary_verified_index_zero() {
+        let mut state = inert_windows_state();
+        state.verify_attempted = true;
+        state.verify_status = 0;
+        state.signature_settings.cSecondarySigs = 0;
+        state.signature_settings.dwVerifiedSigIndex = 1;
+
+        assert!(matches!(
+            extract_windows_authenticode(&state),
+            Err(NativeTrustFailure::ProviderExtraction)
+        ));
     }
 
     #[test]

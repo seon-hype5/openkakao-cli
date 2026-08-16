@@ -239,10 +239,24 @@ errors/panics to closed refusal codes, and rejects catalog/secondary signature
 ambiguity before the existing pure verifier can succeed. Its disconnected
 Windows adapter retains stable boxed WinTrust state, binds three file identity
 observations to process creation time, validates no-follow fixed-volume paths,
-and hashes bounded DER-encoded leaf SPKI. It deliberately supplies no
-installation-root digest, performs no call unless explicitly constructed by a
-future production change, and has zero production references. Production
-therefore remains `UnavailableExecutableTrust`.
+and hashes bounded DER-encoded leaf SPKI. Post-VERIFY extraction now exact-
+checks every caller-owned policy/pointer field, the provider's data/action/
+signature-settings links, and primary verified-signature index zero.
+
+The version-1 installation-root codec accepts only a reviewed root kind
+(`ProgramFilesX86`, `ProgramFiles64`, or `CurrentUserLocalAppData`) plus one to
+eight bounded printable-ASCII relative components. It rejects separators,
+alternate-data-stream syntax, dot/space ambiguity, non-ASCII normalization,
+reserved DOS device names, and absolute prefixes; ASCII case is folded before a
+length-delimited,
+domain-separated SHA-256 digest. `ExecutableTrustProfile` accepts only this
+typed root digest and a `ReviewedSignerDigest` constructed from source-embedded
+static bytes; runtime SPKI observations remain the unreviewed evidence type and
+cannot be passed as the expected signer by accident. No root kind/path or
+signer value is configured, the native
+adapter deliberately supplies no observed installation-root digest, and it
+has zero production references. Production therefore remains
+`UnavailableExecutableTrust`.
 
 ## E. Activation order
 

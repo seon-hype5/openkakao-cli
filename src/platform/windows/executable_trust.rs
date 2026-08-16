@@ -2,9 +2,10 @@
 //!
 //! Native path, file-handle, and Authenticode APIs are intentionally absent
 //! here. A future native observer must reduce those results to this fixed,
-//! content-free evidence shape. Production remains wired to
-//! [`UnavailableExecutableTrust`] until reviewed signer and installation-root
-//! digests plus the native verifier are available.
+//! content-free evidence shape. Installation-root pins can be constructed only
+//! from the versioned reviewed root-relation codec below, never an observed
+//! absolute path. Production remains wired to [`UnavailableExecutableTrust`]
+//! until reviewed signer/root provenance and native wiring are available.
 
 #![cfg_attr(
     not(test),
@@ -13,6 +14,8 @@
 )]
 
 use std::fmt;
+
+use sha2::{Digest, Sha256};
 
 use crate::platform::{UiError, UiErrorKind};
 
@@ -38,6 +41,156 @@ impl fmt::Debug for TrustDigest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("TrustDigest(<redacted>)")
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct ReviewedSignerDigest(TrustDigest);
+
+impl ReviewedSignerDigest {
+    /// Production profile bytes must be source-embedded and independently
+    /// reviewed. Runtime certificate observations produce `TrustDigest`
+    /// directly and cannot satisfy this constructor by accident.
+    pub(super) fn from_static_reviewed_bytes(bytes: &'static [u8; 32]) -> Result<Self, UiError> {
+        TrustDigest::from_bytes(*bytes).map(Self)
+    }
+
+    fn trust_digest(self) -> TrustDigest {
+        self.0
+    }
+}
+
+impl fmt::Debug for ReviewedSignerDigest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ReviewedSignerDigest(<redacted>)")
+    }
+}
+
+const INSTALL_ROOT_RELATION_DOMAIN: &[u8] = b"openkakao.windows.install-root-relation.v1\0";
+const MAX_INSTALL_ROOT_COMPONENTS: usize = 8;
+const MAX_INSTALL_ROOT_COMPONENT_BYTES: usize = 64;
+const MAX_INSTALL_ROOT_RELATION_BYTES: usize = 512;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum InstallRootKind {
+    ProgramFilesX86,
+    ProgramFiles64,
+    CurrentUserLocalAppData,
+}
+
+impl InstallRootKind {
+    fn domain_tag(self) -> u8 {
+        match self {
+            Self::ProgramFilesX86 => 1,
+            Self::ProgramFiles64 => 2,
+            Self::CurrentUserLocalAppData => 3,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct InstallRootDigest(TrustDigest);
+
+impl InstallRootDigest {
+    /// Reduces a reviewed root kind and exact relative path to a stable,
+    /// content-free digest. Version 1 deliberately accepts only portable
+    /// printable ASCII components so Windows Unicode/case normalization can
+    /// never be guessed during activation.
+    pub(super) fn from_static_reviewed_relation(
+        kind: InstallRootKind,
+        components: &'static [&'static str],
+    ) -> Result<Self, UiError> {
+        Self::from_relation_components(kind, components)
+    }
+
+    fn from_relation_components(
+        kind: InstallRootKind,
+        components: &[&str],
+    ) -> Result<Self, UiError> {
+        if components.is_empty() || components.len() > MAX_INSTALL_ROOT_COMPONENTS {
+            return Err(invalid_trust_profile());
+        }
+
+        let mut relation_len = 0_usize;
+        let mut hasher = Sha256::new();
+        hasher.update(INSTALL_ROOT_RELATION_DOMAIN);
+        hasher.update([kind.domain_tag()]);
+        hasher.update([components.len() as u8]);
+        for component in components {
+            let bytes = component.as_bytes();
+            if !valid_install_root_component(bytes) {
+                return Err(invalid_trust_profile());
+            }
+            relation_len = relation_len
+                .checked_add(bytes.len())
+                .ok_or_else(invalid_trust_profile)?;
+            if relation_len > MAX_INSTALL_ROOT_RELATION_BYTES {
+                return Err(invalid_trust_profile());
+            }
+            hasher.update((bytes.len() as u16).to_le_bytes());
+            for byte in bytes {
+                hasher.update([byte.to_ascii_lowercase()]);
+            }
+        }
+        let digest: [u8; 32] = hasher.finalize().into();
+        TrustDigest::from_bytes(digest).map(Self)
+    }
+
+    pub(super) fn trust_digest(self) -> TrustDigest {
+        self.0
+    }
+}
+
+impl fmt::Debug for InstallRootDigest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("InstallRootDigest(<redacted>)")
+    }
+}
+
+fn valid_install_root_component(component: &[u8]) -> bool {
+    if component.is_empty()
+        || component.len() > MAX_INSTALL_ROOT_COMPONENT_BYTES
+        || component
+            .first()
+            .is_some_and(|value| matches!(value, b' ' | b'.'))
+        || component
+            .last()
+            .is_some_and(|value| matches!(value, b' ' | b'.'))
+        || component == b"."
+        || component == b".."
+        || is_reserved_dos_device_name(component)
+    {
+        return false;
+    }
+    component.iter().all(|value| {
+        matches!(value, 0x20..=0x7e)
+            && !matches!(
+                value,
+                b'/' | b'\\' | b':' | b'*' | b'?' | b'"' | b'<' | b'>' | b'|'
+            )
+    })
+}
+
+fn is_reserved_dos_device_name(component: &[u8]) -> bool {
+    let stem = component
+        .split(|value| *value == b'.')
+        .next()
+        .unwrap_or_default();
+    if [b"con".as_slice(), b"prn", b"aux", b"nul"]
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+    {
+        return true;
+    }
+    stem.len() == 4
+        && (stem[..3].eq_ignore_ascii_case(b"com") || stem[..3].eq_ignore_ascii_case(b"lpt"))
+        && matches!(stem[3], b'1'..=b'9')
+}
+
+fn invalid_trust_profile() -> UiError {
+    UiError::new(
+        UiErrorKind::InvalidInput,
+        "windows_executable_trust_profile",
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -100,14 +253,13 @@ pub(super) struct ExecutableTrustProfile {
 impl ExecutableTrustProfile {
     pub(super) fn new(
         version: FileVersion,
-        signer_digest: TrustDigest,
-        install_root_digest: TrustDigest,
+        signer_digest: ReviewedSignerDigest,
+        install_root_digest: InstallRootDigest,
     ) -> Result<Self, UiError> {
+        let signer_digest = signer_digest.trust_digest();
+        let install_root_digest = install_root_digest.trust_digest();
         if version != FileVersion::KNOWN || signer_digest == install_root_digest {
-            return Err(UiError::new(
-                UiErrorKind::InvalidInput,
-                "windows_executable_trust_profile",
-            ));
+            return Err(invalid_trust_profile());
         }
         Ok(Self {
             version,
@@ -304,6 +456,10 @@ impl ExecutableTrustBoundary for UnavailableExecutableTrust {
 mod tests {
     use super::*;
 
+    static SYNTHETIC_SIGNER_BYTES: [u8; 32] = [1; 32];
+    static ZERO_SIGNER_BYTES: [u8; 32] = [0; 32];
+    static SYNTHETIC_ROOT_RELATION: &[&str] = &["SyntheticVendor", "SyntheticApp", "Synthetic.exe"];
+
     fn digest(value: u8) -> TrustDigest {
         TrustDigest::from_bytes([value; 32]).unwrap()
     }
@@ -313,7 +469,19 @@ mod tests {
     }
 
     fn profile() -> ExecutableTrustProfile {
-        ExecutableTrustProfile::new(FileVersion::KNOWN, digest(1), digest(2)).unwrap()
+        ExecutableTrustProfile::new(FileVersion::KNOWN, reviewed_signer(), root_digest()).unwrap()
+    }
+
+    fn reviewed_signer() -> ReviewedSignerDigest {
+        ReviewedSignerDigest::from_static_reviewed_bytes(&SYNTHETIC_SIGNER_BYTES).unwrap()
+    }
+
+    fn root_digest() -> InstallRootDigest {
+        InstallRootDigest::from_static_reviewed_relation(
+            InstallRootKind::ProgramFilesX86,
+            SYNTHETIC_ROOT_RELATION,
+        )
+        .unwrap()
     }
 
     fn evidence() -> ExecutableTrustEvidence {
@@ -334,7 +502,7 @@ mod tests {
             catalog_ambiguous: false,
             signer_count: 1,
             signer_digest: Some(digest(1)),
-            install_root_digest: Some(digest(2)),
+            install_root_digest: Some(root_digest().trust_digest()),
         }
     }
 
@@ -457,7 +625,6 @@ mod tests {
         let rendered = format!("{:?} {:?}", profile(), evidence());
         assert!(rendered.contains("<redacted>"));
         assert!(!rendered.contains("01010101"));
-        assert!(!rendered.contains("02020202"));
         assert!(!rendered.contains("03030303"));
         assert!(!rendered.contains("OPENKAKAO_TRUST_CANARY"));
     }
@@ -465,8 +632,14 @@ mod tests {
     #[test]
     fn invalid_or_colliding_profile_digests_are_refused() {
         assert!(TrustDigest::from_bytes([0; 32]).is_err());
+        assert!(ReviewedSignerDigest::from_static_reviewed_bytes(&ZERO_SIGNER_BYTES).is_err());
         assert!(FileIdentity::from_bytes([0; 32]).is_err());
-        assert!(ExecutableTrustProfile::new(FileVersion::KNOWN, digest(1), digest(1)).is_err());
+        assert!(ExecutableTrustProfile::new(
+            FileVersion::KNOWN,
+            ReviewedSignerDigest(root_digest().trust_digest()),
+            root_digest()
+        )
+        .is_err());
         assert!(ExecutableTrustProfile::new(
             FileVersion {
                 major: 99,
@@ -474,8 +647,80 @@ mod tests {
                 patch: 0,
                 build: 1,
             },
-            digest(1),
-            digest(2),
+            reviewed_signer(),
+            root_digest(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn install_root_relation_is_domain_separated_bounded_and_ascii_case_folded() {
+        let x86 = InstallRootDigest::from_relation_components(
+            InstallRootKind::ProgramFilesX86,
+            &["Vendor", "Product", "Product.exe"],
+        )
+        .unwrap();
+        let case_only = InstallRootDigest::from_relation_components(
+            InstallRootKind::ProgramFilesX86,
+            &["VENDOR", "product", "PRODUCT.EXE"],
+        )
+        .unwrap();
+        assert_eq!(x86, case_only);
+
+        for distinct in [
+            InstallRootDigest::from_relation_components(
+                InstallRootKind::ProgramFiles64,
+                &["Vendor", "Product", "Product.exe"],
+            )
+            .unwrap(),
+            InstallRootDigest::from_relation_components(
+                InstallRootKind::CurrentUserLocalAppData,
+                &["Vendor", "Product", "Product.exe"],
+            )
+            .unwrap(),
+            InstallRootDigest::from_relation_components(
+                InstallRootKind::ProgramFilesX86,
+                &["Vendor", "Other", "Product.exe"],
+            )
+            .unwrap(),
+        ] {
+            assert_ne!(x86, distinct);
+        }
+        assert_eq!(format!("{x86:?}"), "InstallRootDigest(<redacted>)");
+        assert_eq!(
+            format!("{:?}", reviewed_signer()),
+            "ReviewedSignerDigest(<redacted>)"
+        );
+    }
+
+    #[test]
+    fn install_root_relation_rejects_ambiguous_or_nonportable_components() {
+        let long = "x".repeat(MAX_INSTALL_ROOT_COMPONENT_BYTES + 1);
+        for components in [
+            Vec::<&str>::new(),
+            vec!["."],
+            vec![".."],
+            vec![" leading"],
+            vec!["trailing."],
+            vec!["contains\\separator"],
+            vec!["contains:stream"],
+            vec!["CON"],
+            vec!["nul.txt"],
+            vec!["Com1"],
+            vec!["lpt9.log"],
+            vec!["nonascii-한글"],
+            vec![long.as_str()],
+        ] {
+            assert!(InstallRootDigest::from_relation_components(
+                InstallRootKind::ProgramFilesX86,
+                &components
+            )
+            .is_err());
+        }
+        let too_many = vec!["x"; MAX_INSTALL_ROOT_COMPONENTS + 1];
+        assert!(InstallRootDigest::from_relation_components(
+            InstallRootKind::ProgramFilesX86,
+            &too_many
         )
         .is_err());
     }

@@ -251,3 +251,25 @@ or retry it in that transaction object. This closes the production composition
 seam without changing capability, target evidence, submit-selector state, or
 live authorization. ADR-019, ADR-022, and ADR-024 record the intentionally
 earlier disconnected phases; this decision is their reviewed wiring successor.
+
+## ADR-027: Type installation roots as reviewed relative relations
+
+Do not let `ExecutableTrustProfile` accept an arbitrary digest for its
+signer or installation root. Accept the signer only through a distinct wrapper
+constructed from a source-static 32-byte array, while runtime extraction
+produces the evidence-only digest type. Construct the root digest only from a
+source-static versioned root kind and bounded exact relative components.
+Version 1 permits Program Files x86,
+Program Files 64-bit, or current-user LocalAppData as a kind; it accepts only
+portable printable-ASCII components, rejects Windows separator/ADS/dot/space/
+reserved-character and DOS-device-name ambiguity, folds ASCII case,
+length-delimits every
+component, and hashes with a fixed domain.
+
+This codec defines how signed provenance can be represented; it supplies no
+Kakao value and performs no observation. Keep the native adapter's observed
+root absent and production trust unavailable until an independently reviewed
+release source selects the exact kind/components and signer SPKI. Also require
+the live WinTrust provider state to point back to the exact caller-owned
+data/action/signature-settings objects and report primary verified index zero
+when no secondary signature exists.

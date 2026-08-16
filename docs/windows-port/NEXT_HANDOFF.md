@@ -155,8 +155,8 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 161 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 91 passed |
+| `cargo test --locked --lib` | 165 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 95 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 23 passed |
@@ -171,7 +171,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 91 passed |
+| release all-feature Windows synthetic tests | 95 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -229,10 +229,14 @@ implementation; it likewise authorizes no probe or production wiring.
 - Complete executable-signature and canonical-installation-root evidence. The
   content-free decision seam, fakeable offline WinTrust policy, and a
   disconnected native handle/WinVerifyTrust/provider/SPKI adapter now exist.
-  The adapter has zero production references, deliberately returns no
-  install-root digest, and has never been called against KakaoTalk. Reviewed
-  signer/root provenance, signed-fixture evidence, independent unsafe review,
-  and production wiring remain absent and fail closed.
+  Its owned state/provider links and verified primary index are exact-checked.
+  A typed domain-separated root-relation codec now accepts only reviewed root
+  kinds and bounded portable relative components, so an observed absolute path
+  cannot become a pin. The adapter has zero production references,
+  deliberately returns no install-root digest, and has never been called
+  against KakaoTalk. Reviewed signer/root provenance, signed-fixture evidence,
+  independent unsafe review, and production wiring remain absent and fail
+  closed.
 - Expand modal evidence beyond the current conservative window state.
 - A third-party UIA provider can hang; COM calls cannot be safely cancelled in
   process after entry. Single-flight prevents worker accumulation but one hung
