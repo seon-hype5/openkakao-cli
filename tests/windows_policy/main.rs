@@ -583,7 +583,7 @@ fn stage_and_commit_require_yes_and_can_be_represented_without_mutation() {
         let approval = policy
             .authorize(&backend, LABEL, yes)
             .expect("explicit write intent may be represented by policy");
-        assert_eq!(approval.approved().mode(), mode);
+        assert_eq!(approval.mode(), mode);
         assert_eq!(backend.stage_calls(), 0);
         assert_eq!(backend.commit_calls(), 0);
     }
@@ -678,11 +678,7 @@ fn message_label_and_nonce_never_appear_in_formats_or_json() {
             intent(TargetKind::SelfChat, SECRET, SendMode::Commit, true, NONCE),
         )
         .expect("write intent should approve");
-    assert_eq!(approval.approved().nonce(), "<redacted>");
-    for rendered in [
-        format!("{approval:?}"),
-        format!("{:?}", approval.approved()),
-    ] {
+    for rendered in [format!("{approval:?}")] {
         for forbidden in [SECRET, LABEL, NONCE] {
             assert!(!rendered.contains(forbidden));
         }
@@ -885,11 +881,10 @@ fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
             target: TargetKind::SelfChat,
         })
         .expect("synthetic later state");
-    assert_ne!(approval.approved().snapshot(), &later);
-    assert_eq!(approval.approved().snapshot(), &initial);
+    assert_ne!(approval.snapshot(), &later);
+    assert_eq!(approval.snapshot(), &initial);
     assert_ne!(
         approval
-            .approved()
             .snapshot()
             .app
             .process
@@ -904,7 +899,7 @@ fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
 }
 
 #[test]
-fn audit_same_approved_send_can_reach_fake_commit_more_than_once() {
+fn approved_operation_consumes_the_only_public_execution_capability() {
     let probe = ConcurrentProbe::new(safe_snapshot(), true);
     let policy = policy();
     let approval = policy
@@ -922,18 +917,13 @@ fn audit_same_approved_send_can_reach_fake_commit_more_than_once() {
         .expect("synthetic approval should succeed");
     let sender = CountingSender::default();
 
-    let first = sender
-        .commit(approval.approved())
-        .expect("first fake commit result");
-    let second = sender
-        .commit(approval.approved())
-        .expect("second fake commit result");
+    let outcome = approval
+        .execute(&sender)
+        .expect("the consuming fake commit should return its outcome");
 
-    assert_eq!(first, SendOutcome::Indeterminate);
-    assert_eq!(second, SendOutcome::Indeterminate);
-    assert!(!first.retry_safe());
-    assert!(!second.retry_safe());
-    assert_eq!(sender.commit_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(outcome, SendOutcome::Indeterminate);
+    assert!(!outcome.retry_safe());
+    assert_eq!(sender.commit_calls.load(Ordering::SeqCst), 1);
     assert_eq!(sender.stage_calls.load(Ordering::SeqCst), 0);
 }
 
@@ -1028,7 +1018,7 @@ fn concurrent_same_nonce_has_exactly_one_winner() {
                 ),
             ) {
                 Ok(approval) => {
-                    assert_eq!(approval.approved().mode(), SendMode::Commit);
+                    assert_eq!(approval.mode(), SendMode::Commit);
                     Ok(())
                 }
                 Err(error) => Err(error.kind),
@@ -1092,7 +1082,7 @@ fn approval_lease_refuses_distinct_nonce_contention_without_blocking() {
                 "lease-two",
             ),
         );
-        let result = result.map(|approval| approval.approved().mode());
+        let result = result.map(|approval| approval.mode());
         done_tx.send(result).expect("completion signal");
     });
 
@@ -1123,7 +1113,7 @@ fn approval_lease_refuses_distinct_nonce_contention_without_blocking() {
             ),
         )
         .expect("contention refusal must not consume the second nonce");
-    assert_eq!(second.approved().mode(), SendMode::Commit);
+    assert_eq!(second.mode(), SendMode::Commit);
     assert_eq!(probe.inspect_calls(), 2);
 }
 
@@ -1194,8 +1184,8 @@ fn audit_separate_policy_instances_do_not_share_nonce_or_mutex_state() {
         .authorize(&second_probe, LABEL, request())
         .expect("independent policy instance also approves");
 
-    assert_eq!(first.approved().mode(), SendMode::Commit);
-    assert_eq!(second.approved().mode(), SendMode::Commit);
+    assert_eq!(first.mode(), SendMode::Commit);
+    assert_eq!(second.mode(), SendMode::Commit);
     assert_eq!(first_probe.inspect_calls(), 1);
     assert_eq!(second_probe.inspect_calls(), 1);
 }

@@ -17,9 +17,9 @@ use zeroize::Zeroize;
 
 use super::ApprovalToken;
 use crate::platform::{
-    exact_unique_match, ApprovedSend, ExactMatch, InspectRequest, PlatformProbe, SendIntent,
-    SendMode, SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind, UiPlatform,
-    UiSnapshot,
+    exact_unique_match, ApprovedSend, ExactMatch, InspectRequest, MessageSender, PlatformProbe,
+    SendIntent, SendMode, SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind,
+    UiPlatform, UiSnapshot,
 };
 
 /// The only KakaoTalk version accepted by the frozen Windows MVP profile.
@@ -54,6 +54,7 @@ const OP_INSPECT_CAPABILITY: &str = "policy_inspect_capability";
 const OP_SEND_CAPABILITY: &str = "policy_send_capability";
 const OP_DRY_RUN_INSPECT: &str = "policy_dry_run_inspect";
 const OP_AUTHORIZE_INSPECT: &str = "policy_authorize_inspect";
+const OP_EXECUTE_MODE: &str = "policy_execute_mode";
 const OP_APP_SNAPSHOT: &str = "policy_app_snapshot";
 const OP_SNAPSHOT_TIME: &str = "policy_snapshot_time";
 const OP_TARGET_SNAPSHOT: &str = "policy_target_snapshot";
@@ -358,15 +359,44 @@ impl fmt::Debug for DryRunPlan {
 }
 
 /// One in-process approval lease. The private [`MutexGuard`] makes the value
-/// non-`Send`, and `approved()` lends rather than transfers the capability.
+/// non-`Send`, and [`execute`](Self::execute) consumes the capability.
 pub struct ApprovedOperation<'policy> {
     approved: ApprovedSend,
     _lease: MutexGuard<'policy, ApprovalState>,
 }
 
 impl ApprovedOperation<'_> {
-    pub fn approved(&self) -> &ApprovedSend {
-        &self.approved
+    pub fn target(&self) -> TargetKind {
+        self.approved.target()
+    }
+
+    pub fn mode(&self) -> SendMode {
+        self.approved.mode()
+    }
+
+    pub fn snapshot(&self) -> &UiSnapshot {
+        self.approved.snapshot()
+    }
+
+    pub fn approved_at_unix_ms(&self) -> u64 {
+        self.approved.approved_at_unix_ms()
+    }
+
+    /// Dispatches exactly once according to the approved mode while retaining
+    /// the policy lease for the entire backend transaction.
+    ///
+    /// The operation is consumed regardless of success or failure. No public
+    /// API lends the underlying [`ApprovedSend`], so a caller cannot invoke a
+    /// sender twice with the same approval.
+    pub fn execute<S>(self, sender: &S) -> Result<SendOutcome, UiError>
+    where
+        S: MessageSender + ?Sized,
+    {
+        match self.approved.mode() {
+            SendMode::StageOnly => sender.stage(&self.approved),
+            SendMode::Commit => sender.commit(&self.approved),
+            SendMode::DryRun => Err(policy_error(UiErrorKind::InvalidInput, OP_EXECUTE_MODE)),
+        }
     }
 }
 
