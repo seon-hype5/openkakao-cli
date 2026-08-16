@@ -262,6 +262,8 @@ impl PlatformProbe for WindowsBackend {
     }
 }
 
+impl super::contract::message_sender_seal::Sealed for WindowsBackend {}
+
 impl MessageSender for WindowsBackend {
     fn stage(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
         Err(UiError::new(

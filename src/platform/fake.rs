@@ -54,13 +54,27 @@ impl PlatformProbe for FakeBackend {
     }
 }
 
+impl super::contract::message_sender_seal::Sealed for FakeBackend {}
+
 impl MessageSender for FakeBackend {
-    fn stage(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+    fn stage(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+        if approved.mode() != super::SendMode::StageOnly {
+            return Err(UiError::new(
+                super::UiErrorKind::InvalidInput,
+                "fake_stage_mode_mismatch",
+            ));
+        }
         self.stage_calls.set(self.stage_calls.get() + 1);
         Ok(SendOutcome::StagedAndRestored)
     }
 
-    fn commit(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+    fn commit(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+        if approved.mode() != super::SendMode::Commit {
+            return Err(UiError::new(
+                super::UiErrorKind::InvalidInput,
+                "fake_commit_mode_mismatch",
+            ));
+        }
         self.commit_calls.set(self.commit_calls.get() + 1);
         Ok(SendOutcome::CommitIssued)
     }

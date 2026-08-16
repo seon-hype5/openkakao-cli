@@ -382,7 +382,14 @@ pub trait PlatformProbe {
     fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError>;
 }
 
-pub trait MessageSender {
+/// Sealing boundary for mutation implementations. External crates may call a
+/// reviewed sender through [`crate::safety::ApprovedOperation`], but cannot
+/// implement an adapter that reuses or reroutes the borrowed approval.
+pub(crate) mod message_sender_seal {
+    pub trait Sealed {}
+}
+
+pub trait MessageSender: message_sender_seal::Sealed {
     fn stage(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError>;
     fn commit(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError>;
 }

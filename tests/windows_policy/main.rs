@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use openkakao_cli::platform::fake::FakeBackend;
 use openkakao_cli::platform::{
-    AppSnapshot, ApprovedSend, ChatTargetSnapshot, InputSnapshot, InspectRequest, MessageSender,
-    PlatformProbe, ProcessFingerprint, SecretMessage, SendIntent, SendMode, SendOutcome,
-    TargetKind, UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    AppSnapshot, ChatTargetSnapshot, InputSnapshot, InspectRequest, PlatformProbe,
+    ProcessFingerprint, SecretMessage, SendIntent, SendMode, SendOutcome, TargetKind,
+    UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 use openkakao_cli::safety::{
     PolicyClock, WindowsPolicyConfig, WindowsSafetyPolicy, MAX_MESSAGE_SCALARS,
@@ -828,24 +828,6 @@ impl PlatformProbe for SequenceProbe {
     }
 }
 
-#[derive(Default)]
-struct CountingSender {
-    stage_calls: AtomicUsize,
-    commit_calls: AtomicUsize,
-}
-
-impl MessageSender for CountingSender {
-    fn stage(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
-        self.stage_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(SendOutcome::StagedAndRestored)
-    }
-
-    fn commit(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
-        self.commit_calls.fetch_add(1, Ordering::SeqCst);
-        Ok(SendOutcome::Indeterminate)
-    }
-}
-
 #[test]
 fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
     let initial = safe_snapshot();
@@ -900,11 +882,11 @@ fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
 
 #[test]
 fn approved_operation_consumes_the_only_public_execution_capability() {
-    let probe = ConcurrentProbe::new(safe_snapshot(), true);
+    let backend = FakeBackend::new(safe_snapshot());
     let policy = policy();
     let approval = policy
         .authorize(
-            &probe,
+            &backend,
             LABEL,
             intent(
                 TargetKind::SelfChat,
@@ -915,16 +897,15 @@ fn approved_operation_consumes_the_only_public_execution_capability() {
             ),
         )
         .expect("synthetic approval should succeed");
-    let sender = CountingSender::default();
 
     let outcome = approval
-        .execute(&sender)
+        .execute(&backend)
         .expect("the consuming fake commit should return its outcome");
 
-    assert_eq!(outcome, SendOutcome::Indeterminate);
+    assert_eq!(outcome, SendOutcome::CommitIssued);
     assert!(!outcome.retry_safe());
-    assert_eq!(sender.commit_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(sender.stage_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(backend.commit_calls(), 1);
+    assert_eq!(backend.stage_calls(), 0);
 }
 
 #[derive(Clone)]
