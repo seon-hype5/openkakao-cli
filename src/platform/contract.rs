@@ -296,7 +296,10 @@ impl SendOutcome {
     pub const fn retry_safe(self) -> bool {
         !matches!(
             self,
-            Self::CommitIssued | Self::SubmittedUnverified | Self::Indeterminate
+            Self::CommitIssued
+                | Self::EchoConfirmed
+                | Self::SubmittedUnverified
+                | Self::Indeterminate
         )
     }
 }
@@ -488,6 +491,7 @@ mod tests {
     fn uncertain_outcomes_are_never_retry_safe() {
         for outcome in [
             SendOutcome::CommitIssued,
+            SendOutcome::EchoConfirmed,
             SendOutcome::SubmittedUnverified,
             SendOutcome::Indeterminate,
         ] {
