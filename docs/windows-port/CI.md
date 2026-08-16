@@ -68,9 +68,12 @@ authorization switch. Enabling it compiles the reviewed transaction and
 native call sites, but the production profile still advertises
 `send_open_chat=false` because no privacy-safe self-target proof or measured
 send-button selector is configured. Content-free replay and executable-trust
-decision seams are covered synthetically, while production's missing native
-trust observer and DPAPI/ACL store add
-`windows_executable_trust_unavailable`/`windows_ledger_unavailable` refusals.
+decision seams are covered synthetically. The production ledger is composed
+through a side-effect-free lazy factory strictly behind executable-trust
+verification; current production trust returns
+`windows_executable_trust_unavailable`, so CI never resolves LocalAppData or
+opens the real DPAPI/ACL store. Synthetic contracts retain closed
+unavailable/uncertain-ledger coverage.
 All-feature CI is compile and synthetic behavior coverage only; it must never
 be interpreted as permission to run a live UI command.
 

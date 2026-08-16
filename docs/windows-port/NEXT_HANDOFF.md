@@ -6,7 +6,7 @@ Date: 2026-08-16 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`272c8cb70c716066e22b9d5a6cf8e2d8da3a3d43`. The commit containing this
+`f0fe3f2c316166e3abb9c2af9e005f2f4195adc7`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -155,8 +155,8 @@ All Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 155 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 82 passed |
+| `cargo test --locked --lib` | 161 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 91 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 23 passed |
@@ -171,7 +171,7 @@ All Rust commands used the ignored
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 82 passed |
+| release all-feature Windows synthetic tests | 91 passed |
 | Markdown local links and pinned-action policy | passed |
 | final `git diff --check` | passed |
 
@@ -221,9 +221,11 @@ implementation; it likewise authorizes no probe or production wiring.
 - Review and complete the proposed privacy-safe durable replay ledger. Its
   fixed codec/controller/ordering/correlation and an explicit-temporary-base
   Windows DPAPI/protected-ACL/write-through store are synthetically tested.
-  A disconnected LocalAppData/fixed-volume/parent-chain constructor is now
-  compiled and retains its canonical base handle, but native-port wiring
-  remains absent and fail closed.
+  The LocalAppData/fixed-volume/parent-chain constructor is now connected to
+  the native port through a lazy, side-effect-free factory. Executable trust is
+  checked before the first ledger method; current unavailable trust therefore
+  keeps every production locator/store call unreachable. No real LocalAppData
+  path has been resolved or written.
 - Complete executable-signature and canonical-installation-root evidence. The
   content-free decision seam, fakeable offline WinTrust policy, and a
   disconnected native handle/WinVerifyTrust/provider/SPKI adapter now exist.
@@ -243,11 +245,11 @@ implementation; it likewise authorizes no probe or production wiring.
 ## Next permissible step
 
 The offline multiple-window remediation, replay-ledger scaffold,
-explicit-synthetic-base native ledger store, pure executable-trust decision
-seam, disconnected ledger location constructor, disconnected native trust API
-adapter, and native boundary inventory are implemented and must pass the full
-safe regression matrix. The next safe offline work is an independent unsafe
-audit of both disconnected native boundaries, plus a provenance design for a
+explicit-synthetic-base native ledger store, trust-ordered lazy production
+ledger factory, pure executable-trust decision seam, disconnected native trust
+API adapter, and native boundary inventory are implemented and must pass the
+full safe regression matrix. The next safe offline work is an independent
+unsafe audit of the native boundaries, plus a provenance design for a
 repository-owned signed fixture and canonical install-root rule. Neither task
 requires or authorizes a real KakaoTalk path/signature probe.
 The failed L10 result does not authorize another live observation.

@@ -1,5 +1,10 @@
 # Root handoff: disconnected LocalAppData ledger location
 
+Successor note: [`root-production-ledger-wiring.md`](root-production-ledger-wiring.md)
+connects this constructor through a side-effect-free lazy factory strictly
+behind the still-unavailable executable-trust boundary. This historical
+handoff describes the earlier disconnected state.
+
 ## Outcome
 
 This change implements the previously missing current-user LocalAppData,

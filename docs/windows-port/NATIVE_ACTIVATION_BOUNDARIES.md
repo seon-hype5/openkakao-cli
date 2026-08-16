@@ -8,9 +8,9 @@ Applies only behind the default-off `windows-ui-write` feature
 ## Purpose and non-authorization
 
 This document freezes the minimum Windows namespaces, native call ordering,
-ownership rules, and synthetic-test seams for the two production placeholders:
+ownership rules, and synthetic-test seams for the two activation boundaries:
 
-- `UnavailableLedger`; and
+- the trust-ordered lazy production ledger; and
 - `UnavailableExecutableTrust`.
 
 It does not configure a signer or installation-root digest, advertise a send
@@ -48,11 +48,19 @@ This list was checked against the locally resolved generated source for
 
 ## Durable ledger boundary
 
-Offline location status: a disconnected constructor now implements the fixed
-current-user known-folder, source and canonical parent-chain no-reparse,
-volume-GUID/fixed-local, retained-base-handle, and fixed child-directory
-protocol below. No production path references it, and tests never call
+Offline location status: the fixed current-user known-folder, source and
+canonical parent-chain no-reparse, volume-GUID/fixed-local,
+retained-base-handle, and fixed child-directory protocol below is implemented.
+`NativeMutationPort` references it only through a lazy factory. Port
+construction performs no I/O, transaction ordering checks executable trust
+before the first ledger method, and current production trust always refuses.
+Consequently tests and reachable production flows never call
 `SHGetKnownFolderPath` or write real LocalAppData.
+
+The factory is consumed before its first open attempt. An error or unwind can
+never trigger an automatic second attempt in the same transaction object and
+maps to fixed `SubmissionUncertain` / `windows_ledger_state_uncertain` with
+`retry_safe=false`.
 
 ### Fixed location and bounds
 
@@ -292,7 +300,7 @@ overflow, and containing-allocation bounds are validated. Catching an unwind
 does not make leaked native ownership acceptable; each wrapper's `Drop` must
 be independently correct.
 
-## Required offline tests before wiring
+## Required offline tests before activation
 
 Ledger tests use only a newly created synthetic temporary directory and a
 synthetic 48-byte record. Trust tests use fake evidence or a repository-owned
@@ -326,19 +334,21 @@ all later gates still require a fresh, explicitly named approval.
 
 1. Land only the dependency-feature delta and compile checks.
 2. Implement the DPAPI/ACL store behind an internal constructor that accepts
-   an explicit synthetic base directory for tests; keep production wiring on
-   `UnavailableLedger`.
+   an explicit synthetic base directory for tests. Complete.
 3. Complete fault injection and implement the fixed LocalAppData constructor
-   as a separate disconnected change. Both are complete; independent unsafe
-   review and the decision to replace the placeholder remain outstanding.
+   as a separate disconnected change. Both are complete.
 4. Implement the trust observer behind a fakeable native adapter without a
    real KakaoTalk probe; keep production wiring unavailable. The call-policy,
    state-lifetime orchestration, and disconnected native API adapter are
    complete; no real executable was opened or verified.
-5. Obtain signed release provenance, add a repository-owned reviewed fixture,
+5. Wire the production ledger through a side-effect-free lazy factory only
+   after trust verification, with one-shot non-retryable initialization
+   failure. Complete; current trust refusal leaves all native location/file
+   calls unreachable and no live store has been opened.
+6. Obtain signed release provenance, add a repository-owned reviewed fixture,
    independently audit the unsafe adapter, and review signer/root profile
    material. The current adapter deliberately returns no root digest.
-6. Only after every remaining selector and live gate passes may capability
+7. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 
 ## Primary references

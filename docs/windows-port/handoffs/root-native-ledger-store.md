@@ -1,5 +1,9 @@
 # Root handoff: synthetic-base Windows ledger store
 
+Successor note: [`root-production-ledger-wiring.md`](root-production-ledger-wiring.md)
+records the later trust-ordered lazy composition. This handoff otherwise
+describes the earlier disconnected phase.
+
 Successor note: [`root-native-ledger-location.md`](root-native-ledger-location.md)
 adds the separately reviewed, disconnected LocalAppData/fixed-volume location
 constructor. Production wiring remains unavailable.

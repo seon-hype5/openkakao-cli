@@ -81,16 +81,21 @@ non-serializing, zeroizing token; the backend can consume it exactly once into
 the internal record form. An explicit-synthetic-base Windows store now
 implements current-user DPAPI, protected exact-user ACLs, handle/reparse
 checks, bounded exclusive I/O, write-through replacement/tombstones, reload
-verification, and test-only fault injection. It has no production
-`LocalAppData` wiring to the native mutation port. A separately compiled,
-disconnected constructor now resolves the current-user known folder, proves
-both source/canonical parent chains reparse-free, requires an exact fixed
+verification, and test-only fault injection. Its reviewed production
+constructor resolves the current-user known folder, proves both
+source/canonical parent chains reparse-free, requires an exact fixed
 volume-GUID path, retains the canonical base handle, and accepts only the
-fixed protected application directory. Automated tests never call that
-production locator.
-Production therefore still deliberately uses `UnavailableLedger` and refuses
-before UI observation, final native write preflight, claim, or `SetValue`.
-This is an additional activation barrier, not live-write authorization.
+fixed protected application directory.
+
+`NativeMutationPort` now owns a lazy production-ledger factory. Constructing
+the port performs no known-folder or file I/O. The transaction must verify
+executable trust before its first ledger method, and current production trust
+always returns `windows_executable_trust_unavailable`; therefore the lazy
+factory and production locator remain unreachable. Automated tests never call
+that locator or write real LocalAppData. If future trust wiring reaches the
+factory, any open error or unwind is consumed once and becomes fixed,
+non-retryable `windows_ledger_state_uncertain`. This is activation scaffolding,
+not live-write authorization.
 
 ### Threat model
 
@@ -226,8 +231,7 @@ authorized by this proposal.
 The minimum binding feature set, native call order, allocation ownership, and
 offline test boundary are now frozen in
 [`NATIVE_ACTIVATION_BOUNDARIES.md`](NATIVE_ACTIVATION_BOUNDARIES.md). That
-inventory does not wire either production placeholder or authorize a native
-observation.
+inventory does not authorize a native observation or capability activation.
 
 A crate-private fakeable orchestration seam fixes the offline/no-UI WinTrust
 policy, attempts one CLOSE after every returned VERIFY state, maps provider
@@ -247,10 +251,12 @@ therefore remains `UnavailableExecutableTrust`.
    files, fake trust results, and default-off/all-feature CI. The pure ledger
    state machine, policy correlation handoff, pure executable-trust decision
    seam, and a disconnected synthetic-base Windows DPAPI/ACL store are
-   implemented. The disconnected LocalAppData/volume constructor and native
-   executable API adapter are also implemented, while independent unsafe
-   review, signed-fixture evidence, signer/root provenance, and both production
-   wiring decisions remain incomplete.
+   implemented. The LocalAppData/volume constructor is now wired through a
+   side-effect-free lazy factory strictly after executable-trust verification;
+   current unavailable trust makes its production initialization unreachable.
+   The native executable API adapter remains disconnected, while independent
+   unsafe review, signed-fixture evidence, signer/root provenance, and the
+   trust production-wiring decision remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

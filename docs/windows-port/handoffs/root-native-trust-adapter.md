@@ -91,8 +91,9 @@ WinVerifyTrust.
   identity immediately after it, while the held verification handle remains
   authoritative. A malicious same-user process that continuously swaps and
   restores files remains outside the documented threat model.
-- Production ledger wiring, target identity, submit selector, and every live
-  gate remain independent blockers.
+- The production ledger is now wired lazily behind this still-unavailable
+  trust boundary; target identity, submit selector, trust provenance/wiring,
+  and every live gate remain independent blockers.
 
 ## Safety ledger
 

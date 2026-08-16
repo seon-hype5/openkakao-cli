@@ -1,16 +1,17 @@
 //! Windows DPAPI/ACL storage implementation for the durable mutation ledger.
 //!
-//! A disconnected constructor can now consume the separately validated
-//! current-user LocalAppData location. Production deliberately never calls it;
-//! tests create the same store shape only below an explicit synthetic parent.
-//! This keeps native ownership and durability compiled without touching a user
-//! application, the real LocalAppData directory, or the mutation path.
+//! The native mutation port now owns a lazy store factory, but construction is
+//! side-effect free and executable trust is checked before the first ledger
+//! method. Current production trust always refuses, so LocalAppData resolution
+//! remains unreachable. Tests create the store only below an explicit
+//! synthetic parent and never invoke the production factory.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
 use std::ffi::{c_void, OsStr, OsString};
 use std::mem::{size_of, size_of_val};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Component, Path, PathBuf};
 use std::ptr;
 
@@ -50,9 +51,11 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use zeroize::{Zeroize, Zeroizing};
 
+use crate::platform::{UiError, UiErrorKind};
+
 use super::ledger::{
-    decode_record, encode_record, DurableLedgerStore, LedgerRecord, LedgerStoreError,
-    ENCODED_RECORD_LEN,
+    decode_record, encode_record, DurableLedgerStore, LedgerController, LedgerRecord,
+    LedgerStoreError, MutationLedger, RecordCorrelation, ENCODED_RECORD_LEN,
 };
 use super::ledger_location::{resolve_production_ledger_location, ValidatedLedgerLocation};
 
@@ -65,6 +68,117 @@ const MAX_PROTECTED_RECORD_LEN: usize = 64 * 1024;
 const MAX_SECURITY_DESCRIPTOR_LEN: usize = 64 * 1024;
 const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
 const ACCESS_ALLOWED_ACE_TYPE_VALUE: u8 = 0;
+
+trait LedgerStoreFactory {
+    type Store: DurableLedgerStore;
+
+    fn open(&mut self) -> Result<Self::Store, LedgerStoreError>;
+}
+
+struct ProductionLedgerStoreFactory;
+
+impl LedgerStoreFactory for ProductionLedgerStoreFactory {
+    type Store = WindowsLedgerStore;
+
+    fn open(&mut self) -> Result<Self::Store, LedgerStoreError> {
+        WindowsLedgerStore::open_production()
+    }
+}
+
+struct LazyLedger<F: LedgerStoreFactory> {
+    factory: Option<F>,
+    controller: Option<LedgerController<F::Store>>,
+    correlation: RecordCorrelation,
+}
+
+impl<F: LedgerStoreFactory> LazyLedger<F> {
+    fn new(factory: F, correlation: RecordCorrelation) -> Self {
+        Self {
+            factory: Some(factory),
+            controller: None,
+            correlation,
+        }
+    }
+
+    fn controller(&mut self) -> Result<&mut LedgerController<F::Store>, UiError> {
+        if self.controller.is_none() {
+            // Consume the one factory before entry. An error or unwind is a
+            // permanent refusal for this transaction object and is never an
+            // automatic retry signal.
+            let mut factory = self.factory.take().ok_or_else(ledger_open_error)?;
+            let store = catch_unwind(AssertUnwindSafe(|| factory.open()))
+                .map_err(|_| ledger_open_error())?
+                .map_err(|_| ledger_open_error())?;
+            self.controller = Some(LedgerController::new(store, self.correlation));
+        }
+        self.controller.as_mut().ok_or_else(ledger_open_error)
+    }
+}
+
+impl<F: LedgerStoreFactory> MutationLedger for LazyLedger<F> {
+    fn ensure_clear(&mut self) -> Result<(), UiError> {
+        self.controller()?.ensure_clear()
+    }
+
+    fn begin_stage(&mut self) -> Result<LedgerRecord, UiError> {
+        self.controller()?.begin_stage()
+    }
+
+    fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
+        self.controller()?.mark_commit(stage)
+    }
+
+    fn mark_indeterminate(
+        &mut self,
+        correlation: RecordCorrelation,
+    ) -> Result<LedgerRecord, UiError> {
+        self.controller()?.mark_indeterminate(correlation)
+    }
+
+    fn resolve_restored_stage(&mut self, stage: LedgerRecord) -> Result<(), UiError> {
+        self.controller()?.resolve_restored_stage(stage)
+    }
+}
+
+pub(super) struct LazyProductionLedger(LazyLedger<ProductionLedgerStoreFactory>);
+
+impl LazyProductionLedger {
+    pub(super) fn new(correlation: RecordCorrelation) -> Self {
+        Self(LazyLedger::new(ProductionLedgerStoreFactory, correlation))
+    }
+}
+
+impl MutationLedger for LazyProductionLedger {
+    fn ensure_clear(&mut self) -> Result<(), UiError> {
+        self.0.ensure_clear()
+    }
+
+    fn begin_stage(&mut self) -> Result<LedgerRecord, UiError> {
+        self.0.begin_stage()
+    }
+
+    fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
+        self.0.mark_commit(stage)
+    }
+
+    fn mark_indeterminate(
+        &mut self,
+        correlation: RecordCorrelation,
+    ) -> Result<LedgerRecord, UiError> {
+        self.0.mark_indeterminate(correlation)
+    }
+
+    fn resolve_restored_stage(&mut self, stage: LedgerRecord) -> Result<(), UiError> {
+        self.0.resolve_restored_stage(stage)
+    }
+}
+
+fn ledger_open_error() -> UiError {
+    UiError::new(
+        UiErrorKind::SubmissionUncertain,
+        "windows_ledger_state_uncertain",
+    )
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FaultPoint {
@@ -88,10 +202,9 @@ pub(super) struct WindowsLedgerStore {
 }
 
 impl WindowsLedgerStore {
-    /// Deliberately disconnected from `NativeMutationPort`. Merely compiling
-    /// this constructor does not resolve or create the real LocalAppData path.
-    #[allow(dead_code)]
-    fn open_disconnected_production() -> Result<Self, LedgerStoreError> {
+    /// Called only by `LazyProductionLedger` after executable trust succeeds.
+    /// Constructing the lazy ledger itself performs no known-folder or file I/O.
+    fn open_production() -> Result<Self, LedgerStoreError> {
         Self::open_validated(resolve_production_ledger_location()?)
     }
 
@@ -1134,10 +1247,116 @@ const fn directory_ace_flags() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
     use crate::platform::windows::ledger::{LedgerController, MutationLedger, RecordCorrelation};
+
+    #[derive(Default)]
+    struct MemoryStore {
+        record: Option<LedgerRecord>,
+    }
+
+    impl DurableLedgerStore for MemoryStore {
+        fn load(&mut self) -> Result<Option<LedgerRecord>, LedgerStoreError> {
+            Ok(self.record)
+        }
+
+        fn durable_replace(
+            &mut self,
+            expected: Option<LedgerRecord>,
+            next: LedgerRecord,
+        ) -> Result<(), LedgerStoreError> {
+            if self.record != expected {
+                return Err(LedgerStoreError::IoUncertain);
+            }
+            self.record = Some(next);
+            Ok(())
+        }
+
+        fn durable_remove(&mut self, expected: LedgerRecord) -> Result<(), LedgerStoreError> {
+            if self.record != Some(expected) {
+                return Err(LedgerStoreError::IoUncertain);
+            }
+            self.record = None;
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum FactoryOutcome {
+        Open,
+        Error,
+        Panic,
+    }
+
+    struct CountingFactory {
+        opens: Arc<AtomicUsize>,
+        outcome: FactoryOutcome,
+    }
+
+    impl LedgerStoreFactory for CountingFactory {
+        type Store = MemoryStore;
+
+        fn open(&mut self) -> Result<Self::Store, LedgerStoreError> {
+            self.opens.fetch_add(1, Ordering::SeqCst);
+            match self.outcome {
+                FactoryOutcome::Open => Ok(MemoryStore::default()),
+                FactoryOutcome::Error => Err(LedgerStoreError::Unavailable),
+                FactoryOutcome::Panic => panic!("synthetic ledger factory panic"),
+            }
+        }
+    }
 
     fn correlation(value: u8) -> RecordCorrelation {
         RecordCorrelation::from_bytes([value; 16]).unwrap()
+    }
+
+    #[test]
+    fn lazy_ledger_opens_exactly_once_on_first_ledger_operation() {
+        let opens = Arc::new(AtomicUsize::new(0));
+        let factory = CountingFactory {
+            opens: Arc::clone(&opens),
+            outcome: FactoryOutcome::Open,
+        };
+        let mut ledger = LazyLedger::new(factory, correlation(90));
+        assert_eq!(opens.load(Ordering::SeqCst), 0);
+
+        ledger.ensure_clear().unwrap();
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        ledger.ensure_clear().unwrap();
+        let stage = ledger.begin_stage().unwrap();
+        ledger.resolve_restored_stage(stage).unwrap();
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn lazy_ledger_factory_error_or_panic_is_permanent_nonretryable_uncertainty() {
+        for outcome in [FactoryOutcome::Error, FactoryOutcome::Panic] {
+            let opens = Arc::new(AtomicUsize::new(0));
+            let factory = CountingFactory {
+                opens: Arc::clone(&opens),
+                outcome,
+            };
+            let mut ledger = LazyLedger::new(factory, correlation(91));
+            for _ in 0..2 {
+                let error = ledger.ensure_clear().unwrap_err();
+                assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+                assert_eq!(error.operation, "windows_ledger_state_uncertain");
+                assert!(!error.retry_safe);
+            }
+            assert_eq!(opens.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn constructing_production_lazy_ledger_performs_no_native_or_file_call() {
+        let ledger = LazyProductionLedger::new(correlation(92));
+        assert!(ledger.0.controller.is_none());
+        assert!(ledger.0.factory.is_some());
+        drop(ledger);
     }
 
     #[test]

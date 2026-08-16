@@ -25,8 +25,10 @@ explicit-synthetic-base DPAPI/ACL store and why production remains unavailable.
 records the fakeable offline WinTrust policy/state-lifetime seam and its
 missing native adapter/profile.
 [`root-native-ledger-location.md`](root-native-ledger-location.md) records the
-disconnected LocalAppData/fixed-volume/parent-chain constructor and why it is
-still absent from production wiring.
+earlier disconnected LocalAppData/fixed-volume/parent-chain constructor phase.
 [`root-native-trust-adapter.md`](root-native-trust-adapter.md) records the
 disconnected process/file/WinTrust/SPKI adapter and its deliberately missing
 root provenance and production reference.
+[`root-production-ledger-wiring.md`](root-production-ledger-wiring.md) records
+the later trust-ordered lazy production-ledger composition and why no real
+LocalAppData call becomes reachable.

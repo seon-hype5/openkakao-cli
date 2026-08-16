@@ -115,10 +115,12 @@ or write authority.
 - Cross-process exclusion, the pure replay transition protocol, and a
   policy-owned one-use redacted correlation token exist. A current-user
   DPAPI/protected-ACL/write-through store is synthetically tested only under an
-  explicit temporary base. A disconnected LocalAppData/volume-GUID/parent-chain
-  locator also exists but is never called by tests or production. Native-port
-  wiring remains absent, so all-feature production still refuses at
-  `windows_ledger_unavailable` before a UI mutation claim.
+  explicit temporary base. The LocalAppData/volume-GUID/parent-chain locator
+  is wired to the native port through a side-effect-free lazy factory, but
+  transaction ordering verifies executable trust first. Current production
+  trust refuses, so neither tests nor reachable production paths resolve the
+  known folder or open the store. A future ledger-open error or unwind is a
+  permanent non-retryable uncertainty for that transaction object.
 
 These are blockers to enabling production write capability, not reasons to
 weaken the gates.

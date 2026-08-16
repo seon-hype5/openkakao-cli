@@ -236,3 +236,18 @@ the native adapter emits no root digest, has no production reference, and
 therefore cannot satisfy the pure verifier. A reviewed signed fixture,
 signer/root provenance, independent unsafe audit, and a separate wiring
 decision remain mandatory.
+
+## ADR-026: Initialize the production ledger lazily and only after trust
+
+Replace `NativeMutationPort`'s unavailable ledger with a lazy factory for the
+reviewed LocalAppData store, but perform no known-folder or file operation when
+constructing the port. Preserve the transaction's mandatory executable-trust
+check before its first ledger method. Because production continues to use
+`UnavailableExecutableTrust`, the real locator and store remain unreachable.
+
+Consume the factory before its sole open attempt. Map an error or unwind to the
+fixed non-retryable `windows_ledger_state_uncertain` code and do not recreate
+or retry it in that transaction object. This closes the production composition
+seam without changing capability, target evidence, submit-selector state, or
+live authorization. ADR-019, ADR-022, and ADR-024 record the intentionally
+earlier disconnected phases; this decision is their reviewed wiring successor.
