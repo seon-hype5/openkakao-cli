@@ -1,6 +1,7 @@
 use std::fmt;
 
 use serde::Serialize;
+use zeroize::Zeroize;
 
 use crate::safety::ApprovalToken;
 
@@ -132,6 +133,12 @@ impl fmt::Display for SecretMessage {
     }
 }
 
+impl Drop for SecretMessage {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SendMode {
@@ -140,13 +147,25 @@ pub enum SendMode {
     Commit,
 }
 
-#[derive(Debug)]
 pub struct SendIntent {
     pub target: TargetKind,
     pub message: SecretMessage,
     pub mode: SendMode,
     pub explicit_yes: bool,
     pub nonce: String,
+}
+
+impl fmt::Debug for SendIntent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SendIntent")
+            .field("target", &self.target)
+            .field("message", &"<redacted>")
+            .field("mode", &self.mode)
+            .field("explicit_yes", &self.explicit_yes)
+            .field("nonce", &"<redacted>")
+            .finish()
+    }
 }
 
 impl SendIntent {
@@ -227,7 +246,7 @@ impl fmt::Debug for ApprovedSend {
             .field("target", &self.target())
             .field("mode", &self.mode())
             .field("message", &"<redacted>")
-            .field("nonce", &self.nonce())
+            .field("nonce", &"<redacted>")
             .field("snapshot", &self.snapshot)
             .field("approved_at_unix_ms", &self.approved_at_unix_ms)
             .finish()
@@ -432,6 +451,20 @@ mod tests {
         let secret = SecretMessage::new("OPENKAKAO_CANARY");
         assert_eq!(format!("{secret}"), "<redacted>");
         assert_eq!(format!("{secret:?}"), "SecretMessage(<redacted>)");
+    }
+
+    #[test]
+    fn send_intent_debug_redacts_message_and_nonce() {
+        let intent = SendIntent::new(
+            TargetKind::SelfChat,
+            SecretMessage::new("OPENKAKAO_MESSAGE_CANARY"),
+            SendMode::DryRun,
+            false,
+            "OPENKAKAO_NONCE_CANARY",
+        );
+        let rendered = format!("{intent:?}");
+        assert!(!rendered.contains("OPENKAKAO_MESSAGE_CANARY"));
+        assert!(!rendered.contains("OPENKAKAO_NONCE_CANARY"));
     }
 
     #[test]

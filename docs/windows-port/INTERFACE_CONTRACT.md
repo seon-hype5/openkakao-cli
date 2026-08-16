@@ -24,6 +24,13 @@ state. Raw room names, profile names, draft text, and message text are excluded.
 value, room selection, or network change. `inspect_dry_run` accepts only this
 trait.
 
+The Windows implementation additionally does not read window titles, UIA Name
+or Value properties, room/profile names, or draft text. It may return a
+diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
+states; native/COM failures remain `UiError`. Target identity and draft-empty
+claims stay false unless a future, separately approved design can verify them
+without crossing the privacy boundary.
+
 `MessageSender::stage` and `MessageSender::commit` require `&ApprovedSend`.
 Windows Wave 1 returns unsupported for both. The type is not serializable or
 cloneable, formats message text as redacted, and can be created only through
@@ -47,8 +54,17 @@ openkakao-cli local-send SELF_CHAT_NAME --stdin --opened-only [--dry-run] [--jso
 
 Dry-run is the default. `--stage-only` and `--commit` are reserved, mutually
 exclusive write modes and require `--yes`; neither is implemented or executed
-in Wave 1. Stdin is the Windows message path. Existing macOS syntax remains a
-compatibility facade until a later, separately reviewed migration.
+in Wave 1. They are refused before stdin or UI inspection. Stdin is the only
+Windows message path and is capped at 4,000 UTF-8 bytes and 1,000 Unicode
+scalar values. A rejected positional message is never echoed in parse output.
+Existing macOS syntax remains a compatibility facade until a later, separately
+reviewed migration.
+
+The safety policy performs the production dry-run inspection exactly once.
+`DryRunPlan` retains the validated redacted snapshot privately, excludes it
+from serialization, redacts it in Debug, and exposes it by reference for report
+construction. This prevents a second-probe race between authorization and
+output.
 
 ## JSON contract
 
@@ -71,6 +87,6 @@ a message, raw room name, profile name, HWND, or UIA runtime ID.
 
 ## Compatibility
 
-The 855-line macOS implementation remains in place. Its visible-list and
+The macOS implementation remains in place. Its visible-list and
 already-open-window paths now share the common exact-and-unique matcher. Linux
 and unsupported stubs remain buildable. Manifest changes are target-scoped.

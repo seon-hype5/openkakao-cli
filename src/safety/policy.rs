@@ -212,6 +212,7 @@ where
             snapshot_observed_at_unix_ms: snapshot.target.observed_at_unix_ms,
             snapshot_expires_at_unix_ms: snapshot.target.expires_at_unix_ms,
             retry_safe: true,
+            snapshot,
         })
     }
 
@@ -287,7 +288,7 @@ impl<C> fmt::Debug for WindowsSafetyPolicy<C> {
 }
 
 /// A redacted, non-approved dry-run result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct DryRunPlan {
     pub schema_version: u8,
     pub target: TargetKind,
@@ -299,6 +300,41 @@ pub struct DryRunPlan {
     pub snapshot_observed_at_unix_ms: u64,
     pub snapshot_expires_at_unix_ms: u64,
     pub retry_safe: bool,
+    #[serde(skip)]
+    snapshot: UiSnapshot,
+}
+
+impl DryRunPlan {
+    /// The exact redacted snapshot validated by this plan. Keeping this value
+    /// avoids a second live probe and its associated state race.
+    pub fn snapshot(&self) -> &UiSnapshot {
+        &self.snapshot
+    }
+}
+
+impl fmt::Debug for DryRunPlan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DryRunPlan")
+            .field("schema_version", &self.schema_version)
+            .field("target", &self.target)
+            .field("mode", &self.mode)
+            .field("attempted", &self.attempted)
+            .field("outcome", &self.outcome)
+            .field("approval_issued", &self.approval_issued)
+            .field("message_scalar_count", &self.message_scalar_count)
+            .field(
+                "snapshot_observed_at_unix_ms",
+                &self.snapshot_observed_at_unix_ms,
+            )
+            .field(
+                "snapshot_expires_at_unix_ms",
+                &self.snapshot_expires_at_unix_ms,
+            )
+            .field("retry_safe", &self.retry_safe)
+            .field("snapshot", &"<redacted>")
+            .finish()
+    }
 }
 
 /// One in-process approval lease. The private [`MutexGuard`] makes the value

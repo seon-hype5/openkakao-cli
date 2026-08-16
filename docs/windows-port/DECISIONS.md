@@ -39,3 +39,19 @@ matcher and retain the public facade.
 Children produce clean atomic commits on branches rooted at the frozen
 contract. Root verifies ownership and cherry-picks policy, backend, then CLI.
 No force operations, push, or PR creation are permitted in this session.
+
+## ADR-008: Metadata-only Wave 1 fails closed on identity and draft state
+
+Do not read window titles, UIA Name/Value properties, room/profile names, or
+draft text merely to make a production dry-run pass. The Windows probe leaves
+target-identity and draft-empty evidence false, and the safety policy refuses
+that real snapshot. Redacted UI status remains useful; successful send planning
+is covered only with synthetic fakes until a later privacy-preserving design is
+explicitly approved.
+
+## ADR-009: Reuse the policy-validated dry-run snapshot
+
+Inspect once inside the safety policy and retain the exact redacted snapshot in
+the non-approved `DryRunPlan`. Root output consumes that value instead of
+probing again, avoiding a time-of-check/time-of-use race. Serialization and
+Debug omit the retained snapshot.

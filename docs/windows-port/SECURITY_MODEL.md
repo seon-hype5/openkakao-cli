@@ -16,7 +16,7 @@ window, process, or UI Automation element became ambiguous or stale.
 - Existing drafts, stale snapshots, user activity, modals, session mismatch,
   integrity mismatch, and multiple composers are refusals.
 - Message input rejects empty text, NUL/control characters, CR/LF, and the
-  configured conservative length limit.
+  fixed limits of 1,000 Unicode scalar values and 4,000 valid UTF-8 bytes.
 - Stage/commit require explicit approval; dry-run is the default.
 - An uncertain commit is never automatically retried.
 
@@ -25,6 +25,21 @@ window, process, or UI Automation element became ambiguous or stale.
 Message text and real room/profile names are forbidden in Debug, Display,
 errors, JSON, logs, fixtures, screenshots, and committed artifacts. Read-only
 diagnostics use length, state booleans, and execution-scoped fingerprints.
+
+Windows input is accepted only from stdin. Acquisition stops after 4,001 raw
+bytes so overflow is detected before constructing the final string. Temporary
+buffers are zeroized on read, overflow, and UTF-8 failures; the successful
+`SecretMessage` allocation is zeroized on drop. `SendIntent`, approvals,
+dry-run plans, and rendered reports redact message and nonce material. Windows
+`local-send` parse failures are rendered as a generic diagnostic so a rejected
+legacy positional message cannot be echoed by clap.
+
+The production probe does not read UI Automation Name or Value properties,
+window titles, room/profile labels, or draft contents. It reads only bounded
+selector and state metadata, so target-identity and draft-empty fields remain
+false and the write policy refuses the snapshot. Report rendering allowlists
+fixed action, profile, and evidence codes before producing human or JSON
+output.
 
 No KakaoTalk data directory, database, token, cookie, credential, process
 memory, injection, hook, unofficial login, or telemetry is used by this port.

@@ -14,6 +14,7 @@ use crate::platform::{
     inspect_dry_run, InspectRequest, PlatformProbe, SecretMessage, SendMode, TargetKind, UiError,
     UiErrorKind, UiSnapshot,
 };
+use crate::safety::MAX_MESSAGE_UTF8_BYTES;
 
 const INVALID_LOCAL_SEND_OPTIONS: &str = "invalid_windows_local_send_options";
 const READ_STDIN: &str = "read_windows_stdin";
@@ -22,7 +23,6 @@ const STDIN_TOO_LARGE: &str = "windows_stdin_too_large";
 const UI_INSPECT_UNAVAILABLE: &str = "windows_ui_inspect_unavailable";
 const UI_DOCTOR_REQUIRED: &str = "windows_ui_doctor_required";
 const WRITE_MODE_UNAVAILABLE: &str = "windows_write_mode_not_in_wave_1";
-const MAX_MESSAGE_UTF8_BYTES: usize = 4_000;
 
 /// Windows-only options flattened into the existing `doctor` command.
 #[derive(Args, Debug, Clone, Copy, Default, PartialEq, Eq)]

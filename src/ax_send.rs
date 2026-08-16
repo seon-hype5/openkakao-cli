@@ -803,6 +803,7 @@ mod stub {
         pub text: String,
     }
 
+    #[allow(dead_code)]
     pub fn send_via_ax(_chat_display_name: &str, _message: &str) -> Result<()> {
         Err(anyhow!(
             "local-send (AX automation) is only supported on macOS"
@@ -833,5 +834,8 @@ mod stub {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 pub use stub::{read_via_ax, scrape_chat_list, send_via_ax, ChatListRow};
+
+#[cfg(target_os = "windows")]
+pub use stub::{read_via_ax, scrape_chat_list, ChatListRow};

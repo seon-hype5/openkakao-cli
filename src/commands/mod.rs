@@ -5,6 +5,7 @@ pub mod ax_watch;
 pub mod chats;
 pub mod doctor;
 pub mod download;
+#[cfg(not(target_os = "windows"))]
 pub mod local_send;
 pub mod members;
 pub mod probe;

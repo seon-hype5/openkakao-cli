@@ -16,13 +16,37 @@ mod rest;
 mod state;
 mod util;
 
+#[cfg(target_os = "windows")]
+use std::ffi::OsStr;
 use std::io;
+#[cfg(target_os = "windows")]
+use std::io::Write;
 use std::sync::atomic::Ordering;
+#[cfg(target_os = "windows")]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use chrono::TimeZone;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+
+#[cfg(target_os = "windows")]
+use openkakao_cli::cli::windows::{
+    inspect_ui_doctor, LocalSendOptions as WindowsLocalSendOptions, MessageInput,
+    ReaderMessageInput, UiDoctorOptions,
+};
+#[cfg(target_os = "windows")]
+use openkakao_cli::output::windows::{
+    build_action_report, render_error, render_report, OutputMode, RenderedOutput, ReportAction,
+};
+#[cfg(target_os = "windows")]
+use openkakao_cli::platform::windows::WindowsBackend;
+#[cfg(target_os = "windows")]
+use openkakao_cli::platform::{
+    BackendKind, ExitCode, SendIntent, SendMode, TargetKind, UiError, UiErrorKind,
+};
+#[cfg(target_os = "windows")]
+use openkakao_cli::safety::{WindowsPolicyConfig, WindowsSafetyPolicy};
 
 use crate::auth_flow::{set_auth_policy, AuthPolicy};
 use crate::commands::read::ReadCommandOptions;
@@ -526,6 +550,10 @@ enum Commands {
     },
     /// Show local KakaoTalk database schema
     LocalSchema,
+    #[cfg(target_os = "windows")]
+    /// Inspect an already-open self-chat; Wave 1 never mutates or submits.
+    LocalSend(WindowsLocalSendOptions),
+    #[cfg(not(target_os = "windows"))]
     /// Send a message via AX automation (no server contact, drives KakaoTalk's UI directly)
     LocalSend {
         chat_name: String,
@@ -567,8 +595,12 @@ enum Commands {
     /// Run diagnostic checks on KakaoTalk installation and connectivity
     Doctor {
         /// Also test LOCO booking connectivity (makes network request)
-        #[arg(long)]
+        #[cfg_attr(target_os = "windows", arg(long, conflicts_with = "ui"))]
+        #[cfg_attr(not(target_os = "windows"), arg(long))]
         loco: bool,
+        #[cfg(target_os = "windows")]
+        #[command(flatten)]
+        ui: UiDoctorOptions,
     },
 }
 
@@ -587,6 +619,7 @@ fn require_loco_write(config: &config::OpenKakaoConfig) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 fn require_ax_send(config: &config::OpenKakaoConfig) -> Result<()> {
     if !config.safety.allow_ax_send {
         anyhow::bail!(
@@ -606,6 +639,7 @@ fn require_ax_send(config: &config::OpenKakaoConfig) -> Result<()> {
 /// normally verify with is unreadable on current KakaoTalk builds), so an
 /// exact-match allowlist in config is the only guard against typos or
 /// substring collisions sending to the wrong chat.
+#[cfg(not(target_os = "windows"))]
 fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) -> Result<()> {
     if !config
         .safety
@@ -623,6 +657,159 @@ fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) 
         );
     }
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn contains_windows_local_send_arg<I>(args: I) -> bool
+where
+    I: IntoIterator,
+    I::Item: AsRef<OsStr>,
+{
+    args.into_iter()
+        .any(|argument| argument.as_ref() == OsStr::new("local-send"))
+}
+
+#[cfg(target_os = "windows")]
+fn parse_cli() -> Cli {
+    match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            error.exit()
+        }
+        Err(_error) if contains_windows_local_send_arg(std::env::args_os().skip(1)) => {
+            eprintln!("error: invalid local-send arguments (details redacted)");
+            std::process::exit(ExitCode::Usage.as_i32());
+        }
+        Err(error) => error.exit(),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn parse_cli() -> Cli {
+    Cli::parse()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_output_mode(json: bool) -> OutputMode {
+    if json {
+        OutputMode::Json
+    } else {
+        OutputMode::Human
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn emit_windows_output(output: RenderedOutput) -> Result<i32> {
+    let exit_code = output.exit_code.as_i32();
+    if !output.stdout.is_empty() {
+        let mut stdout = io::stdout().lock();
+        stdout
+            .write_all(output.stdout.as_bytes())
+            .context("failed to write Windows UI output")?;
+        stdout
+            .flush()
+            .context("failed to flush Windows UI output")?;
+    }
+    if !output.stderr.is_empty() {
+        let mut stderr = io::stderr().lock();
+        stderr
+            .write_all(output.stderr.as_bytes())
+            .context("failed to write Windows UI diagnostic")?;
+        stderr
+            .flush()
+            .context("failed to flush Windows UI diagnostic")?;
+    }
+    Ok(exit_code)
+}
+
+#[cfg(target_os = "windows")]
+fn finish_windows_output(output: RenderedOutput) -> Result<()> {
+    let exit_code = emit_windows_output(output)?;
+    if exit_code != ExitCode::Success.as_i32() {
+        std::process::exit(exit_code);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn run_windows_ui_doctor(options: &UiDoctorOptions, json: bool) -> RenderedOutput {
+    let mode = windows_output_mode(json);
+    let backend = WindowsBackend::default();
+    match inspect_ui_doctor(options, &backend) {
+        Ok(snapshot) => render_report(
+            &build_action_report(ReportAction::UiDoctor, BackendKind::WindowsUia, &snapshot),
+            mode,
+        ),
+        Err(error) => render_error(&error, mode),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_dry_run_nonce() -> String {
+    let unix_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("dry-run-{}-{unix_nanos}", std::process::id())
+}
+
+#[cfg(target_os = "windows")]
+fn run_windows_local_send(
+    options: &WindowsLocalSendOptions,
+    config: &config::OpenKakaoConfig,
+    json: bool,
+) -> RenderedOutput {
+    let output_mode = windows_output_mode(json);
+    let mode = match options.mode() {
+        Ok(mode) => mode,
+        Err(error) => return render_error(&error, output_mode),
+    };
+    if mode != SendMode::DryRun {
+        return render_error(
+            &UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "windows_write_mode_not_in_wave_1",
+            ),
+            output_mode,
+        );
+    }
+
+    let policy_config =
+        match WindowsPolicyConfig::new(config.safety.allowed_send_chats.iter().cloned()) {
+            Ok(config) => config,
+            Err(error) => return render_error(&error, output_mode),
+        };
+
+    let mut input = ReaderMessageInput::new(io::stdin().lock());
+    let message = match input.read_message() {
+        Ok(message) => message,
+        Err(error) => return render_error(&error, output_mode),
+    };
+    let intent = SendIntent::new(
+        TargetKind::SelfChat,
+        message,
+        SendMode::DryRun,
+        options.explicit_yes(),
+        windows_dry_run_nonce(),
+    );
+    let policy = WindowsSafetyPolicy::new(policy_config);
+    let backend = WindowsBackend::default();
+    match policy.dry_run(&backend, options.self_chat_name_secret(), &intent) {
+        Ok(plan) => render_report(
+            &build_action_report(
+                ReportAction::LocalSend,
+                BackendKind::WindowsUia,
+                plan.snapshot(),
+            ),
+            output_mode,
+        ),
+        Err(error) => render_error(&error, output_mode),
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -646,10 +833,45 @@ fn main() -> Result<()> {
 }
 
 fn run_cli() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_cli();
+    let json = cli.json;
+
+    // Respect NO_COLOR env var (https://no-color.org/) and --no-color flag.
+    if cli.no_color || std::env::var("NO_COLOR").is_ok() || json {
+        NO_COLOR.store(true, Ordering::Relaxed);
+    }
+
+    #[cfg(target_os = "windows")]
+    if let Commands::Doctor { loco, ui } = &cli.command {
+        if ui.ui_requested() {
+            let output = if *loco {
+                render_error(
+                    &UiError::new(UiErrorKind::InvalidInput, "windows_doctor_ui_loco_conflict"),
+                    windows_output_mode(json),
+                )
+            } else {
+                run_windows_ui_doctor(ui, json)
+            };
+            return finish_windows_output(output);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    if let Commands::LocalSend(options) = &cli.command {
+        let config = match load_config() {
+            Ok(config) => config,
+            Err(_error) => {
+                return finish_windows_output(render_error(
+                    &UiError::new(UiErrorKind::InvalidInput, "windows_config_load"),
+                    windows_output_mode(json),
+                ));
+            }
+        };
+        return finish_windows_output(run_windows_local_send(options, &config, json));
+    }
+
     let config = load_config()?;
     set_auth_policy(AuthPolicy::from_config(&config.auth));
-    let json = cli.json;
     let unattended = cli.unattended || config.mode.unattended;
     let allow_non_interactive_send =
         cli.allow_non_interactive_send || config.send.allow_non_interactive;
@@ -667,11 +889,6 @@ fn run_cli() -> Result<()> {
     } else {
         matches!(config.send.default_prefix, Some(false))
     };
-
-    // Respect NO_COLOR env var (https://no-color.org/) and --no-color flag
-    if cli.no_color || std::env::var("NO_COLOR").is_ok() || json {
-        NO_COLOR.store(true, Ordering::Relaxed);
-    }
 
     // Server-login warning — printed to stderr so it never corrupts JSON on
     // stdout. Silenced with OPENKAKAO_CLI_NO_DEPRECATION=1 for scripted
@@ -1275,6 +1492,7 @@ fn run_cli() -> Result<()> {
                 }
             }
         }
+        #[cfg(not(target_os = "windows"))]
         Commands::LocalSend {
             chat_name,
             message,
@@ -1293,6 +1511,10 @@ fn run_cli() -> Result<()> {
                 dry_run,
                 json,
             })?
+        }
+        #[cfg(target_os = "windows")]
+        Commands::LocalSend(_) => {
+            unreachable!("Windows local-send is handled before legacy dispatch")
         }
         Commands::AxRead { chat_name, count } => {
             commands::ax_read::cmd_ax_read(commands::ax_read::AxReadOptions {
@@ -1331,6 +1553,9 @@ fn run_cli() -> Result<()> {
             allow_side_effects: allow_watch_side_effects,
         })?,
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
+        #[cfg(target_os = "windows")]
+        Commands::Doctor { loco, ui: _ } => commands::doctor::cmd_doctor(json, loco, &config)?,
+        #[cfg(not(target_os = "windows"))]
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
     }
 
@@ -2396,6 +2621,7 @@ mod tests {
         Cli::try_parse_from(["openkakao-cli", "local-schema"]).expect("local-schema should parse");
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn local_send_command_parses() {
         let cli = Cli::try_parse_from(["openkakao-cli", "local-send", "나와의 채팅", "hi", "-y"])
@@ -2414,6 +2640,70 @@ mod tests {
             }
             other => panic!("expected local-send, got {other:?}"),
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_local_send_command_parses_without_argv_message() {
+        let cli = Cli::try_parse_from([
+            "openkakao-cli",
+            "local-send",
+            "SYNTHETIC_SELF_CHAT",
+            "--stdin",
+            "--opened-only",
+        ])
+        .expect("Windows local-send should parse");
+        match cli.command {
+            Commands::LocalSend(options) => {
+                assert_eq!(options.self_chat_name_secret(), "SYNTHETIC_SELF_CHAT");
+                assert_eq!(
+                    options.mode().expect("mode should validate"),
+                    SendMode::DryRun
+                );
+            }
+            other => panic!("expected local-send, got {other:?}"),
+        }
+
+        assert!(Cli::try_parse_from([
+            "openkakao-cli",
+            "local-send",
+            "SYNTHETIC_SELF_CHAT",
+            "SENSITIVE_ARGV_MESSAGE",
+            "--stdin",
+            "--opened-only",
+        ])
+        .is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_doctor_ui_is_separate_from_loco() {
+        let cli = Cli::try_parse_from(["openkakao-cli", "doctor", "--ui"])
+            .expect("doctor --ui should parse");
+        match cli.command {
+            Commands::Doctor { loco, ui } => {
+                assert!(!loco);
+                assert!(ui.ui_requested());
+            }
+            other => panic!("expected doctor, got {other:?}"),
+        }
+
+        assert!(Cli::try_parse_from(["openkakao-cli", "doctor", "--ui", "--loco"]).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn local_send_argument_detection_does_not_format_values() {
+        assert!(contains_windows_local_send_arg([
+            "--json",
+            "local-send",
+            "SENSITIVE_TARGET"
+        ]));
+        assert!(!contains_windows_local_send_arg([
+            "doctor",
+            "--ui",
+            "SENSITIVE_TARGET"
+        ]));
     }
 
     #[test]

@@ -59,14 +59,19 @@ cargo test --bin openkakao-cli
 cargo test --test windows_backend
 cargo test --test windows_policy
 cargo test --test windows_cli
-cargo test --test cli_test -- --skip doctor_json_outputs_valid_json
+cargo test --test cli_test -- \
+  --skip doctor_json_outputs_valid_json \
+  --skip auth_status_json_outputs_valid_json \
+  --skip cache_stats_json_outputs_valid_json
 cargo clippy --all-targets --all-features -- -D warnings
 cargo build
 ```
 
-The legacy `doctor --json` integration test remains excluded until its Windows
-case is switched to the new `doctor --ui --json` path, because legacy doctor
-loads credential/local-DB diagnostics forbidden in this session.
+The legacy doctor, auth-status, and cache-stats JSON integration tests remain
+excluded in this session because their existing paths may load credential or
+local-database diagnostics. No valid production `doctor --ui` or `local-send`
+command is executed by the automated gates; production-backend tests inspect
+only static capabilities and redacted Debug output.
 
 ## Exit evidence
 
