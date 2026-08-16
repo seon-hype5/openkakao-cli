@@ -75,6 +75,11 @@ performs no UI mutation, and cannot read user or application state.
 - Provider-state tests construct only inert in-memory `CRYPT_PROVIDER_DATA`
   values. They prove pointer, SIP subject, offline/revocation flag, error, and
   catalog-recall drift refuses without calling WinTrust or opening a file.
+- A provider-chain helper test retains Rust-owned provider, signer, and leaf
+  structures plus a certificate context created only from the committed public
+  fixture DER. It proves exact helper indices/pointer identity, successful SPKI
+  extraction, and nested signer/leaf `dwError` refusal without calling
+  WinTrust, opening a file, or touching a process, window, or UI.
 - Installation-root tests use only synthetic volume-GUID `PathBuf` values,
   exact GUID constants, and synthetic `CoTaskMemAlloc` buffers. Success,
   failure-HRESULT, parse-refusal, and NULL result paths prove exact release

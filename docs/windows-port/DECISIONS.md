@@ -548,3 +548,23 @@ Exercise every field with an inert in-memory provider structure. These tests
 call no helper, WinTrust, filesystem, process, window, or UI API. Keep the
 adapter disconnected and `UnavailableExecutableTrust` wired until independent
 fixture/root review and production provenance are complete.
+
+## ADR-040: Make provider-chain traversal fakeable and reject nested errors
+
+Place the three WTHelper pointer-returning operations behind one private
+raw-pointer trait and make the single consuming extraction function unsafe.
+Its call contract retains every returned provider structure until CLOSE. The
+production implementation delegates only to the documented helpers. A test
+implementation retains boxed `CRYPT_PROVIDER_DATA`,
+`CRYPT_PROVIDER_SGNR`, and `CRYPT_PROVIDER_CERT` structures and returns their
+exact pointers synchronously.
+
+After top-level provider policy validation and exact signer cardinality one,
+require the signer helper to return `pasSigners`, require signer `dwError` to be
+zero, require a nonempty bounded certificate chain, require the certificate
+helper to return `pasCertChain`, and require the leaf provider certificate's
+`dwError` to be zero before consuming its context or SPKI. Exercise one exact
+successful fixture-SPKI path, both nested error fields, and both helper pointer
+substitutions without calling WinTrust or opening a file. This qualifies local
+traversal logic only; real provider output, the helper ABI, independent unsafe
+review, production provenance, and wiring remain separate gates.

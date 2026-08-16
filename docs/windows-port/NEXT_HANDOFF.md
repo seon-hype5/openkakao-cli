@@ -6,7 +6,7 @@ Date: 2026-08-17 KST
 
 The non-live Windows release candidate is complete through DAG task `I20` on
 branch `integration/windows-mvp`. The reviewed implementation tip is
-`6bbb4efbe7d280d8b1cdbf0af623c0060880f6aa`. The commit containing this
+`6a4012a6c541c3ebd3a2f8fdd4f5aa84f8f7136b`. The commit containing this
 handoff is its clean successor and must be reported externally because a
 commit cannot embed its own content-derived SHA.
 
@@ -59,7 +59,9 @@ concurrency limit.
 - pinned-worker read-only COM call cancellation with retained single-flight:
   `34227b4b68d1b0ec3e6b13c844ed4de2e9970eb7`; and
 - hosted Windows safe-matrix parity and static documentation/pin gate:
-  `6bbb4efbe7d280d8b1cdbf0af623c0060880f6aa`.
+  `6bbb4efbe7d280d8b1cdbf0af623c0060880f6aa`; and
+- provider-owned subject/revocation/error/catalog validation before signer
+  traversal: `6a4012a6c541c3ebd3a2f8fdd4f5aa84f8f7136b`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -239,6 +241,16 @@ union, and is refused before certificate extraction. An inert-structure test
 mutates every field without calling WinTrust or opening a file. The adapter
 remains disconnected and no production value was added.
 
+The current offline successor makes the complete successful
+provider-to-primary-signer-to-leaf SPKI traversal independently executable
+without WinTrust. Three pointer-returning WTHelper operations are behind a
+private trait and one unsafe extraction lifetime contract; production still
+calls the same helpers, while the test implementation retains exact Rust-owned
+structures. Signer and leaf `dwError` must now both be zero, and substituted
+helper pointers refuse before dereference. The committed public fixture DER
+supplies only the certificate context/SPKI bytes. No file, process, window,
+product, or live adapter call occurs.
+
 ## Delivered release-candidate behavior
 
 - Windows process/window/version/session/integrity/process-creation and exact
@@ -297,6 +309,10 @@ remains disconnected and no production value was added.
 - Successful provider traversal additionally requires exact SIP subject,
   effective offline/revocation flags, zero provider errors, and no catalog
   recall before the first signer pointer is consumed.
+- Primary signer and selected leaf provider-certificate errors must also be
+  zero, and both helper returns must equal their parent structure's exact array
+  pointer. An inert helper implementation proves the full successful SPKI path
+  plus both nested-error and pointer-substitution refusals.
 - Generic native root derivation binds the source-static root kind to an exact
   known-folder ID and same-volume handle-derived relative digest while keeping
   all absolute/component text out of evidence and reviewed profile types.
@@ -337,8 +353,8 @@ All recorded final-matrix Rust commands used the ignored
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 188 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 112 passed |
+| `cargo test --locked --lib` | 189 passed |
+| `cargo test --locked --lib --all-features platform::windows` | 113 passed |
 | `cargo test --locked --bin openkakao-cli` | 177 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -350,13 +366,13 @@ All recorded final-matrix Rust commands used the ignored
 | `loco_crypto_test` | 12 passed |
 | `loco_packet_test` | 13 passed |
 | `message_db_test` | 20 passed |
-| disconnected native executable-trust module | 25 passed |
+| disconnected native executable-trust module | 26 passed |
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 112 passed |
+| release all-feature Windows synthetic tests | 113 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 47 files, 55 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 48 files, 56 local links, 0 broken; 3 action refs pinned |
 | final `git diff --check` | passed |
 
 The excluded `cli_test` cases are
@@ -470,12 +486,13 @@ mutation-boundary modal checks are now implemented as well. Read-only COM
 cancellation now uses a pinned worker-thread handshake while preserving
 single-flight fallback for unsupported providers. The committed Windows
 workflow now mirrors the local safe compatibility and release matrix. All pass
-locally. Provider-owned WinTrust subject/revocation/error/catalog state is now
-validated synthetically as well. The next safe work is a second independent
-unsafe review and a clean pinned-Windows hosted CI reproduction, followed
-separately by reviewed production signer/root provenance. None of these tasks
-requires or authorizes a real KakaoTalk path or signature, a live label probe,
-or a trust-store change.
+locally. Provider-owned WinTrust subject/revocation/error/catalog state and the
+complete helper-mediated primary signer/leaf SPKI traversal are now validated
+synthetically as well. The next safe work is a second independent unsafe
+review and a clean pinned-Windows hosted CI reproduction, followed separately
+by reviewed production signer/root provenance. None of these tasks requires or
+authorizes a real KakaoTalk path or signature, a live label probe, or a
+trust-store change.
 The failed L10 result does not authorize another live observation.
 
 A future retry of DAG node L10, documented in

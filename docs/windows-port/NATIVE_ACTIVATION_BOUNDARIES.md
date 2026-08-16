@@ -415,8 +415,15 @@ exact caller low-word flags plus
 `CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`, and zero low-level/final errors.
 `fRecallWithState` is independent catalog-state evidence and any true value is
 catalog ambiguity. With zero secondary signatures, `dwVerifiedSigIndex` must
-be zero. Any drift is provider uncertainty and refuses before certificate
-extraction.
+be zero. After exact primary cardinality one, the signer helper must return the
+provider's exact `pasSigners` allocation and that signer's `dwError` must be
+zero. The leaf helper must return the signer's exact `pasCertChain` allocation
+and that provider certificate's `dwError` must also be zero before its context
+or SPKI is consumed. Any drift is provider uncertainty and refuses before
+certificate extraction. A private raw-pointer helper seam with one unsafe
+extraction boundary exercises this complete provider-to-signer-to-leaf
+traversal with retained Rust-owned structures and the committed public fixture
+certificate, without calling WinTrust.
 `WINTRUST_SIGNATURE_SETTINGS.dwFlags` is an in/out field: the input-mask bits
 must still equal exactly `WSS_GET_SECONDARY_SIG_COUNT`, only documented
 `WSS_OUT_*` bits may be added, and any other input or unknown bit refuses. This

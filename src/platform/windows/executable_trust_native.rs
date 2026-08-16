@@ -1039,8 +1039,89 @@ fn noninteractive_hwnd() -> HWND {
     HWND(INVALID_HANDLE_VALUE.0)
 }
 
+/// Supplies pointers borrowed from one live WinTrust VERIFY state.
+///
+/// Every non-null pointer returned by an implementation must identify the
+/// requested provider-owned structure, remain readable for the complete
+/// extraction call, and remain live until the owning WinTrust state is
+/// closed. The production implementation delegates only to the documented
+/// WTHelper accessors; the test implementation retains every Rust allocation.
+trait WinTrustProviderHelpers {
+    fn provider_from_state(&self, state_data: HANDLE) -> *mut CRYPT_PROVIDER_DATA;
+
+    fn signer_from_chain(
+        &self,
+        provider: *mut CRYPT_PROVIDER_DATA,
+        signer_index: u32,
+        counter_signer: bool,
+        counter_signer_index: u32,
+    ) -> *mut CRYPT_PROVIDER_SGNR;
+
+    fn certificate_from_chain(
+        &self,
+        signer: *mut CRYPT_PROVIDER_SGNR,
+        certificate_index: u32,
+    ) -> *mut CRYPT_PROVIDER_CERT;
+}
+
+struct WindowsWinTrustProviderHelpers;
+
+// Each accessor returns a pointer borrowed from the exact live state
+// or parent provider structure supplied by WinTrust. Extraction consumes the
+// pointers synchronously before the owning state is closed.
+impl WinTrustProviderHelpers for WindowsWinTrustProviderHelpers {
+    fn provider_from_state(&self, state_data: HANDLE) -> *mut CRYPT_PROVIDER_DATA {
+        // SAFETY: the caller retains the live VERIFY state for this call.
+        unsafe { WTHelperProvDataFromStateData(state_data) }
+    }
+
+    fn signer_from_chain(
+        &self,
+        provider: *mut CRYPT_PROVIDER_DATA,
+        signer_index: u32,
+        counter_signer: bool,
+        counter_signer_index: u32,
+    ) -> *mut CRYPT_PROVIDER_SGNR {
+        // SAFETY: the provider pointer came from the live state helper and the
+        // caller bounds and identity-checks index zero before dereferencing.
+        unsafe {
+            WTHelperGetProvSignerFromChain(
+                provider,
+                signer_index,
+                counter_signer,
+                counter_signer_index,
+            )
+        }
+    }
+
+    fn certificate_from_chain(
+        &self,
+        signer: *mut CRYPT_PROVIDER_SGNR,
+        certificate_index: u32,
+    ) -> *mut CRYPT_PROVIDER_CERT {
+        // SAFETY: the signer pointer came from the live provider helper and
+        // the caller proves a nonempty bounded chain before requesting zero.
+        unsafe { WTHelperGetProvCertFromChain(signer, certificate_index) }
+    }
+}
+
 fn extract_windows_authenticode(
     state: &WindowsTrustState,
+) -> Result<NativeAuthenticodeObservation, NativeTrustFailure> {
+    // SAFETY: the production helper returns only pointers borrowed from this
+    // exact live WinTrust state, which remains open for the entire call.
+    unsafe { extract_windows_authenticode_with_helpers(state, &WindowsWinTrustProviderHelpers) }
+}
+
+/// Extracts provider-owned state through a supplied raw-pointer accessor.
+///
+/// # Safety
+///
+/// Every non-null pointer returned by `helpers` must satisfy the helper trait's
+/// lifetime and structure contract for this exact live `state`.
+unsafe fn extract_windows_authenticode_with_helpers<H: WinTrustProviderHelpers>(
+    state: &WindowsTrustState,
+    helpers: &H,
 ) -> Result<NativeAuthenticodeObservation, NativeTrustFailure> {
     if !state.verify_attempted || state.close_attempted || !state.debug_invariants() {
         return Err(NativeTrustFailure::ProviderExtraction);
@@ -1068,11 +1149,9 @@ fn extract_windows_authenticode(
         return Err(NativeTrustFailure::ProviderExtraction);
     }
 
-    // SAFETY: the state handle belongs to the live VERIFY state and is used
-    // only before CLOSE. Returned pointers are borrowed from that state.
-    let provider_pointer = unsafe { WTHelperProvDataFromStateData(state.data.hWVTStateData) };
-    // SAFETY: WinTrust returned `provider_pointer` for this exact live state;
-    // the helper below additionally validates alignment and cbStruct.
+    let provider_pointer = helpers.provider_from_state(state.data.hWVTStateData);
+    // SAFETY: the helper contract retains `provider_pointer` for this exact
+    // live state; validation additionally checks alignment and cbStruct.
     let provider = unsafe { checked_provider(state, provider_pointer) }?;
     if !provider_policy_is_exact(state, provider) {
         return Err(NativeTrustFailure::ProviderExtraction);
@@ -1096,36 +1175,36 @@ fn extract_windows_authenticode(
         });
     }
 
-    // SAFETY: provider is validated and remains borrowed from the live state;
-    // only signer index zero is requested after exact cardinality one.
     if provider.pasSigners.is_null()
         || !(provider.pasSigners as usize).is_multiple_of(align_of::<CRYPT_PROVIDER_SGNR>())
     {
         return Err(NativeTrustFailure::ProviderExtraction);
     }
-    let signer_pointer = unsafe { WTHelperGetProvSignerFromChain(provider_pointer, 0, false, 0) };
+    let signer_pointer = helpers.signer_from_chain(provider_pointer, 0, false, 0);
     if signer_pointer != provider.pasSigners {
         return Err(NativeTrustFailure::ProviderExtraction);
     }
     // SAFETY: the helper returned index zero from the validated one-signer
     // provider state, and pointer identity is checked above.
     let signer = unsafe { checked_signer(state, signer_pointer) }?;
-    if signer.csCertChain == 0
+    if signer.dwError != 0
+        || signer.csCertChain == 0
         || signer.csCertChain > 64
         || signer.pasCertChain.is_null()
         || !(signer.pasCertChain as usize).is_multiple_of(align_of::<CRYPT_PROVIDER_CERT>())
     {
         return Err(NativeTrustFailure::ProviderExtraction);
     }
-    // SAFETY: signer is a validated live provider pointer and its certificate
-    // chain has at least one entry. The returned certificate remains borrowed.
-    let certificate_pointer = unsafe { WTHelperGetProvCertFromChain(signer_pointer, 0) };
+    let certificate_pointer = helpers.certificate_from_chain(signer_pointer, 0);
     if certificate_pointer != signer.pasCertChain {
         return Err(NativeTrustFailure::ProviderExtraction);
     }
     // SAFETY: certificate index zero is borrowed from the validated signer and
     // remains live until CLOSE; all nested pointers are shape-checked below.
     let certificate = unsafe { checked_provider_certificate(state, certificate_pointer) }?;
+    if certificate.dwError != 0 {
+        return Err(NativeTrustFailure::ProviderExtraction);
+    }
     let context = unsafe { checked_certificate_context(state, certificate.pCert) }?;
     let info = unsafe { checked_certificate_info(state, context.pCertInfo) }?;
     let signer_digest = Some(spki_digest(info)?);
@@ -2212,6 +2291,70 @@ mod tests {
         }
     }
 
+    struct InertVerifiedTrustState(WindowsTrustState);
+
+    impl InertVerifiedTrustState {
+        fn new() -> Self {
+            let mut state = inert_windows_state();
+            state.verify_status = 0;
+            state.verify_attempted = true;
+            state.data.hWVTStateData = HANDLE(ptr::from_mut(&mut *state.data).cast::<c_void>());
+            Self(state)
+        }
+    }
+
+    impl Drop for InertVerifiedTrustState {
+        fn drop(&mut self) {
+            // This state never entered WinVerifyTrust. Clear the attempt bit
+            // before the inner state's Drop runs so it cannot issue CLOSE,
+            // including while a test assertion unwinds.
+            self.0.verify_attempted = false;
+            self.0.data.hWVTStateData = HANDLE::default();
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct SyntheticProviderHelpers {
+        state_data: HANDLE,
+        provider: *mut CRYPT_PROVIDER_DATA,
+        signer: *mut CRYPT_PROVIDER_SGNR,
+        certificate: *mut CRYPT_PROVIDER_CERT,
+    }
+
+    // The test retains the boxed provider, signer, and certificate
+    // plus the owned certificate context for every synchronous extraction.
+    // The implementation returns only those exact live allocations.
+    impl WinTrustProviderHelpers for SyntheticProviderHelpers {
+        fn provider_from_state(&self, state_data: HANDLE) -> *mut CRYPT_PROVIDER_DATA {
+            assert_eq!(state_data, self.state_data);
+            self.provider
+        }
+
+        fn signer_from_chain(
+            &self,
+            provider: *mut CRYPT_PROVIDER_DATA,
+            signer_index: u32,
+            counter_signer: bool,
+            counter_signer_index: u32,
+        ) -> *mut CRYPT_PROVIDER_SGNR {
+            assert_eq!(provider, self.provider);
+            assert_eq!(signer_index, 0);
+            assert!(!counter_signer);
+            assert_eq!(counter_signer_index, 0);
+            self.signer
+        }
+
+        fn certificate_from_chain(
+            &self,
+            signer: *mut CRYPT_PROVIDER_SGNR,
+            certificate_index: u32,
+        ) -> *mut CRYPT_PROVIDER_CERT {
+            assert_eq!(signer, self.signer);
+            assert_eq!(certificate_index, 0);
+            self.certificate
+        }
+    }
+
     #[test]
     fn exact_evidence_uses_fixed_policy_and_closes_state_once() {
         let (result, api) = run(api());
@@ -2477,6 +2620,97 @@ mod tests {
         provider.fRecallWithState.0 = 1;
         assert!(provider_policy_is_exact(&state, &provider));
         assert!(provider_catalog_choice_used(&provider));
+    }
+
+    #[test]
+    fn native_provider_chain_success_and_nested_errors_are_checked_without_wintrust() {
+        let mut state = InertVerifiedTrustState::new();
+        // SAFETY: the committed DER bytes remain live for this call; the
+        // returned independent context is immediately owned by the guard.
+        let certificate_context =
+            unsafe { CertCreateCertificateContext(X509_ASN_ENCODING, FIXTURE_CERTIFICATE) };
+        assert!(!certificate_context.is_null());
+        let certificate_context = OwnedFixtureCertificateContext(certificate_context);
+
+        let mut certificate = Box::new(CRYPT_PROVIDER_CERT {
+            cbStruct: size_of::<CRYPT_PROVIDER_CERT>() as u32,
+            pCert: certificate_context.0,
+            ..Default::default()
+        });
+        let certificate_pointer = ptr::from_mut(&mut *certificate);
+        let mut signer = Box::new(CRYPT_PROVIDER_SGNR {
+            cbStruct: size_of::<CRYPT_PROVIDER_SGNR>() as u32,
+            csCertChain: 1,
+            pasCertChain: certificate_pointer,
+            ..Default::default()
+        });
+        let signer_pointer = ptr::from_mut(&mut *signer);
+        let mut provider = Box::new(exact_synthetic_provider(&mut state.0));
+        provider.csSigners = 1;
+        provider.pasSigners = signer_pointer;
+        let provider_pointer = ptr::from_mut(&mut *provider);
+        let helpers = SyntheticProviderHelpers {
+            state_data: state.0.data.hWVTStateData,
+            provider: provider_pointer,
+            signer: signer_pointer,
+            certificate: certificate_pointer,
+        };
+        let extract = |helpers: &SyntheticProviderHelpers| {
+            // SAFETY: every helper used below returns one of the retained box
+            // allocations above, and the certificate context outlives every
+            // synchronous extraction call.
+            unsafe { extract_windows_authenticode_with_helpers(&state.0, helpers) }
+        };
+
+        let observation = extract(&helpers).unwrap();
+        assert_eq!(observation.winverifytrust_status, 0);
+        assert!(!observation.catalog_choice_used);
+        assert_eq!(observation.primary_signer_count, 1);
+        assert_eq!(observation.secondary_signature_count, 0);
+        assert_eq!(
+            observation.signer_digest,
+            Some(TrustDigest::from_bytes(FIXTURE_SPKI_SHA256).unwrap())
+        );
+
+        signer.dwError = 1;
+        assert!(matches!(
+            extract(&helpers),
+            Err(NativeTrustFailure::ProviderExtraction)
+        ));
+        signer.dwError = 0;
+
+        certificate.dwError = 1;
+        assert!(matches!(
+            extract(&helpers),
+            Err(NativeTrustFailure::ProviderExtraction)
+        ));
+        certificate.dwError = 0;
+
+        let mut alternate_signer = Box::new(CRYPT_PROVIDER_SGNR {
+            cbStruct: size_of::<CRYPT_PROVIDER_SGNR>() as u32,
+            ..Default::default()
+        });
+        let substituted_signer_helpers = SyntheticProviderHelpers {
+            signer: ptr::from_mut(&mut *alternate_signer),
+            ..helpers
+        };
+        assert!(matches!(
+            extract(&substituted_signer_helpers),
+            Err(NativeTrustFailure::ProviderExtraction)
+        ));
+
+        let mut alternate_certificate = Box::new(CRYPT_PROVIDER_CERT {
+            cbStruct: size_of::<CRYPT_PROVIDER_CERT>() as u32,
+            ..Default::default()
+        });
+        let substituted_certificate_helpers = SyntheticProviderHelpers {
+            certificate: ptr::from_mut(&mut *alternate_certificate),
+            ..helpers
+        };
+        assert!(matches!(
+            extract(&substituted_certificate_helpers),
+            Err(NativeTrustFailure::ProviderExtraction)
+        ));
     }
 
     #[test]

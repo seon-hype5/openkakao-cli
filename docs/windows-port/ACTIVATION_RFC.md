@@ -332,8 +332,12 @@ retains the canonical root/ancestor handles, and hashes only a bounded
 same-volume relative relation. Post-VERIFY extraction now exact-
 checks every caller-owned policy/pointer field, the provider's data/action/
 signature-settings links, SIP subject choice, effective offline/revocation
-flags, zero provider errors, catalog-recall state, and primary
-verified-signature index zero.
+flags, zero provider errors, catalog-recall state, primary verified-signature
+index zero, exact helper-returned signer/leaf pointers, and zero nested signer
+and leaf errors. A private raw-pointer helper seam with one unsafe extraction
+boundary now exercises the complete successful provider-to-signer-to-leaf
+SPKI path and pointer substitution refusals with retained synthetic
+structures; it does not qualify a real Windows provider image.
 
 The version-1 installation-root codec accepts only a reviewed root kind
 (`ProgramFilesX86`, `ProgramFiles64`, or `CurrentUserLocalAppData`) plus one to
@@ -390,7 +394,11 @@ No step inherits authorization from an earlier step.
 - [WINTRUST_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_data)
 - [WINTRUST_FILE_INFO](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-wintrust_file_info)
 - [CRYPT_PROVIDER_DATA](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_data)
+- [CRYPT_PROVIDER_SGNR](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_sgnr)
+- [CRYPT_PROVIDER_CERT](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/ns-wintrust-crypt_provider_cert)
 - [WTHelperProvDataFromStateData](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-wthelperprovdatafromstatedata)
+- [WTHelperGetProvSignerFromChain](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-wthelpergetprovsignerfromchain)
+- [WTHelperGetProvCertFromChain](https://learn.microsoft.com/en-us/windows/win32/api/wintrust/nf-wintrust-wthelpergetprovcertfromchain)
 - [GetFinalPathNameByHandleW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew)
 - [SHGetKnownFolderPath](https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shgetknownfolderpath)
 - [CryptProtectData](https://learn.microsoft.com/en-us/windows/win32/api/dpapi/nf-dpapi-cryptprotectdata)

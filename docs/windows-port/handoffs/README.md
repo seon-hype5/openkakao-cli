@@ -72,3 +72,7 @@ targets, release parity, and the still-external first hosted run.
 [`root-wintrust-provider-state.md`](root-wintrust-provider-state.md) records
 the provider-owned SIP/revocation/error/catalog checks added before signer
 extraction and the still-missing independent positive-provider qualification.
+[`root-wintrust-provider-chain.md`](root-wintrust-provider-chain.md) records
+the fakeable WTHelper seam, exact provider-to-signer-to-leaf SPKI traversal,
+nested error/pointer-substitution refusals, and the still-external real-provider
+qualification.

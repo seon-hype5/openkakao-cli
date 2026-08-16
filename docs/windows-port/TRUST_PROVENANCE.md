@@ -153,9 +153,12 @@ windows, or open any installed application. The real WinTrust test retains
 it has no network or UI fallback.
 
 The local fixture build, structural/SPKI test, and offline VERIFY/CLOSE test
-are complete. A pinned clean Windows CI run and a second independent unsafe
-review remain required; a self-signed refusal does not exercise the successful
-provider-chain extraction path on an independently qualified image.
+are complete. A retained synthetic provider chain now exercises the successful
+provider-to-primary-signer-to-leaf SPKI traversal, exact helper pointer
+identity, and nested signer/certificate error refusals without WinTrust. A
+pinned clean Windows CI run and a second independent unsafe review remain
+required; the inert helper seam does not qualify successful provider output or
+the WTHelper ABI on an independently reviewed Windows image.
 
 ## Review and activation gates
 

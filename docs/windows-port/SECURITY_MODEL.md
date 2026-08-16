@@ -152,9 +152,13 @@ or write authority.
   runtime SPKI/path observations from becoming expected pins by accident, and
   provider extraction exact-checks the owned
   WinTrust state/pointer links, SIP subject choice, effective provider flags,
-  catalog recall, error state, and verified primary index. No production path
-  constructs the process/HWND-bound adapter, and tests never construct that
-  full adapter. Generic runtime root derivation now receives only the
+  catalog recall, top-level/nested error state, verified primary index, and
+  exact signer/leaf helper pointer identity. A raw-pointer helper seam with one
+  unsafe extraction boundary traverses a retained synthetic provider chain
+  through the committed public fixture SPKI without calling WinTrust. No
+  production path constructs the
+  process/HWND-bound adapter, and tests never construct that full adapter.
+  Generic runtime root derivation now receives only the
   source-static root kind, retains the exact known-folder and ancestor handles,
   and emits only an evidence digest from bounded relative components; observed
   paths/components cannot construct a reviewed profile. Synthetic CoTaskMem
