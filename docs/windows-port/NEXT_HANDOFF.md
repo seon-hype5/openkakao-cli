@@ -13,8 +13,10 @@ commit cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-Not completed or authorized: live gates `L10`, `L20`, `L30`, `L40`, and final
-post-live task `R00`. A green I20 does not carry authority into any live gate.
+`L10` was subsequently approved for one read-only session and attempted once;
+it failed closed and is not complete. Not completed or authorized now: a new
+`L10` attempt, `L20`, `L30`, `L40`, and final post-live task `R00`. A green I20
+does not carry authority into any live gate.
 
 The requested topology was used: root plus Child A/B/C, with isolated
 worktrees and no child subdelegation. Rust builds were kept within the stated
@@ -40,6 +42,32 @@ concurrency limit.
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
 for merging the default-off scaffold.
+
+## L10 read-only attempt: failed closed
+
+The user approved one L10 session and confirmed the self-chat was manually
+opened with no recording, screenshot, or output redirection. Root rebuilt the
+exact `1c358db` commit with default features, kept every child idle, and ran
+one guarded `doctor --ui` plus one synthetic stdin dry-run. The session ended
+at approximately `2026-08-16T19:57:34+09:00`.
+
+- `doctor --ui` exited 0 and produced a valid redacted schema-v1 report with
+  19 fixed evidence codes, no attempted action, and `not_submitted`.
+- The report did not establish a supported UI profile.
+- Independent before/after guards could not establish an exact unique
+  KakaoTalk top-level window or composer, so composer length remained
+  unobserved. L10 therefore did not pass.
+- The synthetic dry-run was refused before UI inspection with fixed
+  `invalid_input` / `policy_allowlist_config`, exit 2. Neither the synthetic
+  target nor canary was echoed.
+- Foreground, focus, Z-order neighbors, clipboard sequence, visibility, and
+  enabled-state observations were unchanged across the session.
+- Raw doctor/dry-run output, HWNDs, PIDs, labels, draft material, and
+  fingerprints were not emitted or persisted.
+
+No retry, weaker selector, alternate live probe, stage, or commit followed the
+failure. The troubleshooting runbook permits only offline source/synthetic
+work now. L20 is blocked.
 
 ## Delivered release-candidate behavior
 
@@ -131,7 +159,8 @@ its first GitHub-hosted run remains an external integration check.
 
 ## Safety ledger for this implementation session
 
-- live KakaoTalk/UIA probes: 0;
+- live KakaoTalk/UIA doctor probes: 1;
+- live before/after read-only guard snapshots: 2;
 - KakaoTalk UI mutations: 0;
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
@@ -165,11 +194,16 @@ ports, never KakaoTalk or another desktop application.
 
 ## Next permissible step
 
-The next DAG node is L10, documented in
-[`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md).
-It is a live read-only KakaoTalk/UIA gate and is **not authorized by this
-handoff**. It requires fresh user approval naming L10 and must preserve focus,
-composer, clipboard, and all user data.
+The next work is offline diagnosis using only fixed codes, reviewed selector
+constants, and synthetic fakes. The failed L10 result does not authorize
+another live observation.
+
+A future retry of DAG node L10, documented in
+[`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),
+is a new live read-only KakaoTalk/UIA session and is **not authorized by this
+handoff**. It requires environment/selector remediation followed by fresh user
+approval naming L10, and must preserve focus, composer, clipboard, and all
+user data.
 
 L20 through L40 remain blocked both by sequence and by missing production
 selectors. L20 modifies the composer, L30 reserves submission for the user,
