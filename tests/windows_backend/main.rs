@@ -4,7 +4,7 @@ use openkakao_cli::platform::windows::WindowsBackend;
 use openkakao_cli::platform::PlatformProbe;
 
 #[test]
-fn production_backend_advertises_read_only_wave_one_capabilities() {
+fn production_backend_keeps_send_disabled_without_verified_identity_and_selector() {
     let backend = WindowsBackend::default();
     let capabilities = backend.capabilities();
 

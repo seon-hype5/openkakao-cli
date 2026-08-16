@@ -1,11 +1,14 @@
-//! Read-only Windows discovery backend.
+//! Read-only Windows discovery plus build-gated guarded transaction backend.
 //!
 //! This module deliberately exposes only platform-neutral snapshots. Native
 //! handles, executable paths, COM interfaces, and UI Automation element
-//! identities remain inside [`native`]. Wave 1 never reads UI text and never
-//! offers a mutation path.
+//! identities remain inside [`native`]. Default builds contain no UI write
+//! boundary; the `windows-ui-write` feature compiles a transaction path that
+//! still fails closed until live self-target and send selectors are verified.
 
 mod native;
+#[cfg(any(feature = "windows-ui-write", test))]
+mod transaction;
 
 use std::fmt;
 use std::sync::mpsc;
@@ -114,12 +117,15 @@ impl FingerprintKey {
         format!("run:{}", hex::encode(&digest[..16]))
     }
 
-    fn executable(self, utf16_path: &[u16]) -> String {
+    fn executable(self, utf16_path: &[u16], creation_time_100ns: u64) -> String {
         let mut bytes = Vec::with_capacity(utf16_path.len() * 2);
         for unit in utf16_path {
             bytes.extend_from_slice(&unit.to_le_bytes());
         }
-        self.digest(b"executable", &[&bytes])
+        self.digest(
+            b"executable-instance",
+            &[&bytes, &creation_time_100ns.to_le_bytes()],
+        )
     }
 
     fn window(self, handle: usize, pid: u32) -> String {
@@ -148,6 +154,8 @@ impl fmt::Debug for FingerprintKey {
 struct NativeProcess {
     pid: u32,
     executable_fingerprint: String,
+    #[cfg(feature = "windows-ui-write")]
+    creation_time_100ns: u64,
     executable_verified: bool,
     version: Option<FileVersion>,
     session_id: u32,
@@ -242,6 +250,44 @@ impl WindowsBackend {
             )),
         }
     }
+
+    #[cfg(feature = "windows-ui-write")]
+    fn mutation_on_mta(
+        &self,
+        approved: &ApprovedSend,
+        mode: super::SendMode,
+    ) -> Result<SendOutcome, UiError> {
+        let expected = transaction::ExpectedState::from_approved(approved, mode, unix_now_ms())?;
+        let fingerprints = self.fingerprints;
+
+        // Unlike read-only inspection, a mutation worker is scoped and always
+        // joined. Returning while a detached UIA call could still mutate would
+        // make the outcome unknowable and allow unsafe caller behavior.
+        std::thread::scope(|scope| {
+            let worker = std::thread::Builder::new()
+                .name("openkakao-windows-transaction".to_string())
+                .spawn_scoped(scope, move || match mode {
+                    super::SendMode::StageOnly => native::stage(fingerprints, approved, &expected),
+                    super::SendMode::Commit => native::commit(fingerprints, approved, &expected),
+                    super::SendMode::DryRun => Err(UiError::new(
+                        UiErrorKind::InvalidInput,
+                        "windows_transaction_mode",
+                    )),
+                })
+                .map_err(|_| {
+                    UiError::new(
+                        UiErrorKind::UnsupportedCapability,
+                        "windows_transaction_thread_start",
+                    )
+                })?;
+            worker.join().map_err(|_| {
+                UiError::new(
+                    UiErrorKind::UnsupportedCapability,
+                    "windows_transaction_thread_failed",
+                )
+            })?
+        })
+    }
 }
 
 impl PlatformProbe for WindowsBackend {
@@ -265,22 +311,38 @@ impl PlatformProbe for WindowsBackend {
 impl super::contract::message_sender_seal::Sealed for WindowsBackend {}
 
 impl MessageSender for WindowsBackend {
-    fn stage(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
-        Err(UiError::new(
-            UiErrorKind::UnsupportedCapability,
-            "windows_stage_not_in_wave_1",
-        ))
+    fn stage(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+        #[cfg(feature = "windows-ui-write")]
+        {
+            self.mutation_on_mta(approved, super::SendMode::StageOnly)
+        }
+        #[cfg(not(feature = "windows-ui-write"))]
+        {
+            let _ = approved;
+            Err(UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "windows_ui_write_feature_disabled",
+            ))
+        }
     }
 
-    fn commit(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
-        Err(UiError::new(
-            UiErrorKind::UnsupportedCapability,
-            "windows_commit_not_in_wave_1",
-        ))
+    fn commit(&self, approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+        #[cfg(feature = "windows-ui-write")]
+        {
+            self.mutation_on_mta(approved, super::SendMode::Commit)
+        }
+        #[cfg(not(feature = "windows-ui-write"))]
+        {
+            let _ = approved;
+            Err(UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "windows_ui_write_feature_disabled",
+            ))
+        }
     }
 }
 
-fn unix_now_ms() -> u64 {
+pub(super) fn unix_now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -441,6 +503,8 @@ mod tests {
         NativeProcess {
             pid: 42,
             executable_fingerprint: "run:synthetic-process".to_string(),
+            #[cfg(feature = "windows-ui-write")]
+            creation_time_100ns: 123,
             executable_verified: true,
             version,
             session_id: 3,
@@ -593,5 +657,10 @@ mod tests {
         assert_eq!(first.window(7, 42), first.window(7, 42));
         assert_ne!(first.window(7, 42), second.window(7, 42));
         assert_ne!(first.window(7, 42), first.composer(7, 42));
+        assert_ne!(
+            first.executable(&[b'C' as u16], 100),
+            first.executable(&[b'C' as u16], 101),
+            "recycled PIDs must produce a different executable-instance digest"
+        );
     }
 }
