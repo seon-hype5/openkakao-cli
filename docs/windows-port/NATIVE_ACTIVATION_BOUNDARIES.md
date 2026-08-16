@@ -410,8 +410,13 @@ Before consuming provider pointers, exact-check the still-live caller-owned
 action, `WINTRUST_DATA`, file info, signature settings, policy flags, union,
 file/path/settings pointers, and null-reserved fields. Provider
 `pWintrustData`, `pgActionID`, and `pSigSettings` must point to those exact
-allocations. With zero secondary signatures, `dwVerifiedSigIndex` must be zero.
-Any drift is provider uncertainty and refuses before certificate extraction.
+allocations. The provider-owned state must also report `CPD_CHOICE_SIP`, the
+exact caller low-word flags plus
+`CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`, and zero low-level/final errors.
+`fRecallWithState` is independent catalog-state evidence and any true value is
+catalog ambiguity. With zero secondary signatures, `dwVerifiedSigIndex` must
+be zero. Any drift is provider uncertainty and refuses before certificate
+extraction.
 `WINTRUST_SIGNATURE_SETTINGS.dwFlags` is an in/out field: the input-mask bits
 must still equal exactly `WSS_GET_SECONDARY_SIG_COUNT`, only documented
 `WSS_OUT_*` bits may be added, and any other input or unknown bit refuses. This

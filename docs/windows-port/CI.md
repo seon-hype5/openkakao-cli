@@ -72,6 +72,9 @@ performs no UI mutation, and cannot read user or application state.
   guards and calls WinTrust with `WTD_CACHE_ONLY_URL_RETRIEVAL`, `WTD_UI_NONE`,
   and the noninteractive HWND. It accepts trust or refusal, closes state once,
   performs no trust-store change, and has no network/UI fallback.
+- Provider-state tests construct only inert in-memory `CRYPT_PROVIDER_DATA`
+  values. They prove pointer, SIP subject, offline/revocation flag, error, and
+  catalog-recall drift refuses without calling WinTrust or opening a file.
 - Installation-root tests use only synthetic volume-GUID `PathBuf` values,
   exact GUID constants, and synthetic `CoTaskMemAlloc` buffers. Success,
   failure-HRESULT, parse-refusal, and NULL result paths prove exact release

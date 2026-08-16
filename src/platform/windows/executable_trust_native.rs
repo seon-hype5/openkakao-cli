@@ -35,13 +35,13 @@ use windows::Win32::Security::Cryptography::{
 };
 use windows::Win32::Security::WinTrust::{
     WTHelperGetProvCertFromChain, WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData,
-    WinVerifyTrust, CRYPT_PROVIDER_CERT, CRYPT_PROVIDER_DATA, CRYPT_PROVIDER_SGNR,
-    WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0,
-    WINTRUST_DATA_PROVIDER_FLAGS, WINTRUST_DATA_REVOCATION_CHECKS, WINTRUST_DATA_STATE_ACTION,
-    WINTRUST_DATA_UICHOICE, WINTRUST_DATA_UICONTEXT, WINTRUST_DATA_UNION_CHOICE,
-    WINTRUST_FILE_INFO, WINTRUST_SIGNATURE_SETTINGS, WINTRUST_SIGNATURE_SETTINGS_FLAGS,
-    WSS_GET_SECONDARY_SIG_COUNT, WSS_INPUT_FLAG_MASK, WSS_OUTPUT_FLAG_MASK,
-    WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4,
+    WinVerifyTrust, CPD_CHOICE_SIP, CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, CRYPT_PROVIDER_CERT,
+    CRYPT_PROVIDER_DATA, CRYPT_PROVIDER_SGNR, WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA,
+    WINTRUST_DATA_0, WINTRUST_DATA_PROVIDER_FLAGS, WINTRUST_DATA_REVOCATION_CHECKS,
+    WINTRUST_DATA_STATE_ACTION, WINTRUST_DATA_UICHOICE, WINTRUST_DATA_UICONTEXT,
+    WINTRUST_DATA_UNION_CHOICE, WINTRUST_FILE_INFO, WINTRUST_SIGNATURE_SETTINGS,
+    WINTRUST_SIGNATURE_SETTINGS_FLAGS, WSS_GET_SECONDARY_SIG_COUNT, WSS_INPUT_FLAG_MASK,
+    WSS_OUTPUT_FLAG_MASK, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_DISABLE_MD2_MD4,
     WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, WTD_REVOKE_WHOLECHAIN, WTD_STATEACTION_CLOSE,
     WTD_STATEACTION_VERIFY, WTD_UICONTEXT_EXECUTE, WTD_UI_NONE,
 };
@@ -123,6 +123,13 @@ impl WinTrustCallPolicy {
                     | WTD_DISABLE_MD2_MD4)
             && self.ui_context == WTD_UICONTEXT_EXECUTE
             && self.signature_flags == WSS_GET_SECONDARY_SIG_COUNT
+    }
+
+    fn expected_provider_flags(self) -> u32 {
+        // The Windows SDK contract fixes CRYPT_PROVIDER_DATA.dwProvFlags's
+        // low word to the caller's WINTRUST_DATA.dwProvFlags and records the
+        // effective revocation choice in the CPD high-word flags.
+        self.provider_flags.0 | CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT
     }
 }
 
@@ -1067,11 +1074,18 @@ fn extract_windows_authenticode(
     // SAFETY: WinTrust returned `provider_pointer` for this exact live state;
     // the helper below additionally validates alignment and cbStruct.
     let provider = unsafe { checked_provider(state, provider_pointer) }?;
-    if provider.pWintrustData != ptr::from_ref(&*state.data).cast_mut()
-        || provider.pgActionID != ptr::from_ref(&*state.action).cast_mut()
-        || provider.pSigSettings != ptr::from_ref(&*state.signature_settings).cast_mut()
-    {
+    if !provider_policy_is_exact(state, provider) {
         return Err(NativeTrustFailure::ProviderExtraction);
+    }
+    // fRecallWithState is provider-owned evidence that state was maintained
+    // for a catalog file. It is not derived from the caller's fixed FILE
+    // union choice; any such recall is independently surfaced and refused by
+    // the pure verifier before signer extraction.
+    if provider_catalog_choice_used(provider) {
+        return Ok(NativeAuthenticodeObservation {
+            catalog_choice_used: true,
+            ..base
+        });
     }
     let primary_signer_count =
         usize::try_from(provider.csSigners).map_err(|_| NativeTrustFailure::ProviderExtraction)?;
@@ -1121,6 +1135,21 @@ fn extract_windows_authenticode(
         signer_digest,
         ..base
     })
+}
+
+fn provider_policy_is_exact(state: &WindowsTrustState, provider: &CRYPT_PROVIDER_DATA) -> bool {
+    let policy = WinTrustCallPolicy::offline_embedded();
+    provider.pWintrustData == ptr::from_ref(&*state.data).cast_mut()
+        && provider.pgActionID == ptr::from_ref(&*state.action).cast_mut()
+        && provider.pSigSettings == ptr::from_ref(&*state.signature_settings).cast_mut()
+        && provider.dwSubjectChoice == CPD_CHOICE_SIP
+        && provider.dwProvFlags == policy.expected_provider_flags()
+        && provider.dwError == 0
+        && provider.dwFinalError == 0
+}
+
+fn provider_catalog_choice_used(provider: &CRYPT_PROVIDER_DATA) -> bool {
+    provider.fRecallWithState.as_bool()
 }
 
 unsafe fn checked_provider(
@@ -2171,6 +2200,18 @@ mod tests {
         }
     }
 
+    fn exact_synthetic_provider(state: &mut WindowsTrustState) -> CRYPT_PROVIDER_DATA {
+        CRYPT_PROVIDER_DATA {
+            cbStruct: size_of::<CRYPT_PROVIDER_DATA>() as u32,
+            pWintrustData: ptr::from_mut(&mut *state.data),
+            pgActionID: ptr::from_mut(&mut *state.action),
+            pSigSettings: ptr::from_mut(&mut *state.signature_settings),
+            dwSubjectChoice: CPD_CHOICE_SIP,
+            dwProvFlags: WinTrustCallPolicy::offline_embedded().expected_provider_flags(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn exact_evidence_uses_fixed_policy_and_closes_state_once() {
         let (result, api) = run(api());
@@ -2392,6 +2433,50 @@ mod tests {
         assert!(unsafe { checked_provider(&state, unaligned_pointer) }.is_err());
         assert!(unsafe { checked_certificate_context(&state, ptr::null()) }.is_err());
         assert!(unsafe { checked_certificate_info(&state, ptr::null_mut()) }.is_err());
+    }
+
+    #[test]
+    fn native_provider_policy_and_catalog_state_are_independently_checked() {
+        let mut state = inert_windows_state();
+        let mut provider = exact_synthetic_provider(&mut state);
+        assert!(provider_policy_is_exact(&state, &provider));
+        assert!(!provider_catalog_choice_used(&provider));
+
+        provider.pWintrustData = ptr::null_mut();
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.pgActionID = ptr::null_mut();
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.pSigSettings = ptr::null_mut();
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.dwSubjectChoice = 0;
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.dwProvFlags ^= WTD_CACHE_ONLY_URL_RETRIEVAL.0;
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.dwProvFlags ^= CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.dwError = 1;
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.dwFinalError = 1;
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.fRecallWithState.0 = 1;
+        assert!(provider_policy_is_exact(&state, &provider));
+        assert!(provider_catalog_choice_used(&provider));
     }
 
     #[test]

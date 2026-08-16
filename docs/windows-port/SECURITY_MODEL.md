@@ -151,7 +151,8 @@ or write authority.
   exist. Distinct source-static signer and root-relation profile types prevent
   runtime SPKI/path observations from becoming expected pins by accident, and
   provider extraction exact-checks the owned
-  WinTrust state/pointer links and verified primary index. No production path
+  WinTrust state/pointer links, SIP subject choice, effective provider flags,
+  catalog recall, error state, and verified primary index. No production path
   constructs the process/HWND-bound adapter, and tests never construct that
   full adapter. Generic runtime root derivation now receives only the
   source-static root kind, retains the exact known-folder and ancestor handles,

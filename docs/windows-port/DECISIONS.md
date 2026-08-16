@@ -531,3 +531,20 @@ They must not invoke the product, prepare a desktop session, upload artifacts,
 inject secrets, or infer live authorization from a green result. The first
 GitHub-hosted run remains external evidence; local parity proves only that the
 committed commands pass in the current non-live workspace.
+
+## ADR-039: Verify provider-owned WinTrust policy and catalog state
+
+Do not derive catalog absence from the caller-owned `WINTRUST_DATA` union: it
+is fixed to `WTD_CHOICE_FILE` before VERIFY and therefore cannot independently
+describe provider recall. After a zero WinTrust result and before signer
+extraction, require the returned `CRYPT_PROVIDER_DATA` to retain exact pointers
+to the caller's data, action, and signature-settings allocations, select
+`CPD_CHOICE_SIP`, report the exact caller low-word flags plus
+`CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`, and carry zero low-level and final
+errors. Treat `fRecallWithState=true` as catalog ambiguity and refuse through
+the existing pure trust verifier.
+
+Exercise every field with an inert in-memory provider structure. These tests
+call no helper, WinTrust, filesystem, process, window, or UI API. Keep the
+adapter disconnected and `UnavailableExecutableTrust` wired until independent
+fixture/root review and production provenance are complete.

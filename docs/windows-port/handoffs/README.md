@@ -69,3 +69,6 @@ single-flight fallback, and residual custom-marshaler/provider limitations.
 [`root-windows-ci-parity.md`](root-windows-ci-parity.md) records the hosted
 Windows workflow's static documentation/pin checks, synthetic compatibility
 targets, release parity, and the still-external first hosted run.
+[`root-wintrust-provider-state.md`](root-wintrust-provider-state.md) records
+the provider-owned SIP/revocation/error/catalog checks added before signer
+extraction and the still-missing independent positive-provider qualification.
