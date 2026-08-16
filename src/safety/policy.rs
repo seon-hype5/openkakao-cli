@@ -8,11 +8,12 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, TryLockError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 use super::ApprovalToken;
 use crate::platform::{
@@ -23,6 +24,9 @@ use crate::platform::{
 
 /// The only KakaoTalk version accepted by the frozen Windows MVP profile.
 pub const SUPPORTED_APP_VERSION: &str = "26.7.0.5255";
+
+/// The only selector profile accepted by the frozen Windows MVP policy.
+pub const SUPPORTED_SELECTOR_PROFILE_ID: &str = "kakaotalk-windows-26.7.0.5255";
 
 /// Conservative maximum message length, counted as Unicode scalar values.
 pub const MAX_MESSAGE_SCALARS: usize = 1_000;
@@ -48,6 +52,8 @@ const OP_NONCE_REPLAY: &str = "policy_nonce_replay";
 const OP_APPROVAL_MUTEX: &str = "policy_approval_mutex";
 const OP_INSPECT_CAPABILITY: &str = "policy_inspect_capability";
 const OP_SEND_CAPABILITY: &str = "policy_send_capability";
+const OP_DRY_RUN_INSPECT: &str = "policy_dry_run_inspect";
+const OP_AUTHORIZE_INSPECT: &str = "policy_authorize_inspect";
 const OP_APP_SNAPSHOT: &str = "policy_app_snapshot";
 const OP_SNAPSHOT_TIME: &str = "policy_snapshot_time";
 const OP_TARGET_SNAPSHOT: &str = "policy_target_snapshot";
@@ -68,21 +74,28 @@ impl WindowsPolicyConfig {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        let allowed_self_chat_labels: Vec<String> = labels.into_iter().map(Into::into).collect();
+        let mut allowed_self_chat_labels: Vec<String> =
+            labels.into_iter().map(Into::into).collect();
 
         if allowed_self_chat_labels.is_empty()
-            || allowed_self_chat_labels
-                .iter()
-                .any(|label| label.is_empty() || label.chars().any(char::is_control))
+            || allowed_self_chat_labels.iter().any(|label| {
+                label.is_empty()
+                    || label.chars().all(char::is_whitespace)
+                    || label.chars().any(char::is_control)
+            })
         {
+            allowed_self_chat_labels.zeroize();
             return Err(policy_error(UiErrorKind::InvalidInput, OP_ALLOWLIST_CONFIG));
         }
 
-        let mut unique = HashSet::with_capacity(allowed_self_chat_labels.len());
-        if allowed_self_chat_labels
-            .iter()
-            .any(|label| !unique.insert(label.as_str()))
-        {
+        let has_duplicate = {
+            let mut unique = HashSet::with_capacity(allowed_self_chat_labels.len());
+            allowed_self_chat_labels
+                .iter()
+                .any(|label| !unique.insert(label.as_str()))
+        };
+        if has_duplicate {
+            allowed_self_chat_labels.zeroize();
             return Err(policy_error(
                 UiErrorKind::AmbiguousTarget,
                 OP_ALLOWLIST_CONFIG,
@@ -115,6 +128,12 @@ impl WindowsPolicyConfig {
                 OP_ALLOWLIST_MATCH,
             )),
         }
+    }
+}
+
+impl Drop for WindowsPolicyConfig {
+    fn drop(&mut self) {
+        self.allowed_self_chat_labels.zeroize();
     }
 }
 
@@ -195,10 +214,8 @@ where
         }
 
         validate_inspect_capability(probe.capabilities())?;
-        let snapshot = probe.inspect(&InspectRequest {
-            target: TargetKind::SelfChat,
-        })?;
-        let now_unix_ms = self.clock.now_unix_ms()?;
+        let snapshot = inspect_for_policy(probe, OP_DRY_RUN_INSPECT)?;
+        let now_unix_ms = policy_now(&self.clock)?;
         validate_snapshot(&snapshot, intent.target, now_unix_ms)?;
 
         Ok(DryRunPlan {
@@ -246,19 +263,22 @@ where
         validate_inspect_capability(capabilities)?;
         validate_send_capability(capabilities)?;
         let nonce_key = nonce_digest(&intent.nonce);
-        let mut lease = self
-            .approval_state
-            .lock()
-            .map_err(|_| policy_error(UiErrorKind::UnsupportedCapability, OP_APPROVAL_MUTEX))?;
+        let mut lease = match self.approval_state.try_lock() {
+            Ok(lease) => lease,
+            Err(TryLockError::WouldBlock | TryLockError::Poisoned(_)) => {
+                return Err(policy_error(
+                    UiErrorKind::UnsupportedCapability,
+                    OP_APPROVAL_MUTEX,
+                ));
+            }
+        };
 
         if lease.used_nonces.contains(&nonce_key) {
             return Err(policy_error(UiErrorKind::InvalidInput, OP_NONCE_REPLAY));
         }
 
-        let snapshot = probe.inspect(&InspectRequest {
-            target: TargetKind::SelfChat,
-        })?;
-        let now_unix_ms = self.clock.now_unix_ms()?;
+        let snapshot = inspect_for_policy(probe, OP_AUTHORIZE_INSPECT)?;
+        let now_unix_ms = policy_now(&self.clock)?;
         validate_snapshot(&snapshot, intent.target, now_unix_ms)?;
 
         lease.used_nonces.insert(nonce_key);
@@ -383,13 +403,18 @@ fn validate_message(message: &crate::platform::SecretMessage) -> Result<(), UiEr
     if scalar_count == 0
         || scalar_count > MAX_MESSAGE_SCALARS
         || value.len() > MAX_MESSAGE_UTF8_BYTES
+        || value.chars().all(char::is_whitespace)
     {
         return Err(policy_error(UiErrorKind::InvalidInput, OP_VALIDATE_MESSAGE));
     }
-    if value.chars().any(char::is_control) {
+    if value.chars().any(is_disallowed_message_scalar) {
         return Err(policy_error(UiErrorKind::InvalidInput, OP_VALIDATE_MESSAGE));
     }
     Ok(())
+}
+
+fn is_disallowed_message_scalar(value: char) -> bool {
+    value.is_control() || matches!(value, '\u{2028}' | '\u{2029}')
 }
 
 fn validate_nonce(nonce: &str) -> Result<(), UiError> {
@@ -425,6 +450,32 @@ fn validate_send_capability(capabilities: UiCapabilities) -> Result<(), UiError>
             OP_SEND_CAPABILITY,
         ))
     }
+}
+
+fn inspect_for_policy<P>(probe: &P, operation: &'static str) -> Result<UiSnapshot, UiError>
+where
+    P: PlatformProbe + ?Sized,
+{
+    probe
+        .inspect(&InspectRequest {
+            target: TargetKind::SelfChat,
+        })
+        .map_err(|error| sanitize_external_error(error, operation))
+}
+
+fn policy_now<C>(clock: &C) -> Result<u64, UiError>
+where
+    C: PolicyClock,
+{
+    clock
+        .now_unix_ms()
+        .map_err(|_| policy_error(UiErrorKind::StaleSnapshot, OP_CURRENT_TIME))
+}
+
+fn sanitize_external_error(error: UiError, operation: &'static str) -> UiError {
+    let mut sanitized = policy_error(error.kind, operation);
+    sanitized.retry_safe &= error.retry_safe;
+    sanitized
 }
 
 fn validate_snapshot(
@@ -468,7 +519,7 @@ fn validate_app_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
             OP_APP_SNAPSHOT,
         ));
     }
-    if process.executable.is_empty()
+    if !is_redacted_fingerprint(&process.executable)
         || !app.known_ui_profile
         || app.app_version.as_deref() != Some(SUPPORTED_APP_VERSION)
     {
@@ -516,15 +567,19 @@ fn validate_target_snapshot(
             OP_TARGET_SNAPSHOT,
         ));
     }
-    if target.window.as_deref().is_none_or(str::is_empty) {
+    let window = target
+        .window
+        .as_deref()
+        .filter(|value| is_redacted_fingerprint(value))
+        .ok_or_else(|| policy_error(UiErrorKind::TargetNotFound, OP_TARGET_SNAPSHOT))?;
+    let composer = target
+        .composer
+        .as_deref()
+        .filter(|value| is_redacted_fingerprint(value))
+        .ok_or_else(|| policy_error(UiErrorKind::ComposerNotFound, OP_TARGET_SNAPSHOT))?;
+    if window == composer {
         return Err(policy_error(
-            UiErrorKind::TargetNotFound,
-            OP_TARGET_SNAPSHOT,
-        ));
-    }
-    if target.composer.as_deref().is_none_or(str::is_empty) {
-        return Err(policy_error(
-            UiErrorKind::ComposerNotFound,
+            UiErrorKind::UnknownUiProfile,
             OP_TARGET_SNAPSHOT,
         ));
     }
@@ -557,17 +612,22 @@ fn validate_input_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
     if input.focused {
         return Err(policy_error(UiErrorKind::UserActive, OP_INPUT_SNAPSHOT));
     }
-    if input
-        .selector_profile_id
-        .as_deref()
-        .is_none_or(str::is_empty)
-    {
+    if input.selector_profile_id.as_deref() != Some(SUPPORTED_SELECTOR_PROFILE_ID) {
         return Err(policy_error(
             UiErrorKind::UnknownUiProfile,
             OP_INPUT_SNAPSHOT,
         ));
     }
     Ok(())
+}
+
+fn is_redacted_fingerprint(value: &str) -> bool {
+    value.strip_prefix("run:").is_some_and(|digest| {
+        digest.len() == 32
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
 }
 
 fn nonce_digest(nonce: &str) -> [u8; 32] {
@@ -577,14 +637,10 @@ fn nonce_digest(nonce: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-fn redact_intent_nonce(intent: SendIntent) -> SendIntent {
-    SendIntent {
-        target: intent.target,
-        message: intent.message,
-        mode: intent.mode,
-        explicit_yes: intent.explicit_yes,
-        nonce: REDACTED_NONCE.to_string(),
-    }
+fn redact_intent_nonce(mut intent: SendIntent) -> SendIntent {
+    intent.nonce.zeroize();
+    intent.nonce.push_str(REDACTED_NONCE);
+    intent
 }
 
 const fn policy_error(kind: UiErrorKind, operation: &'static str) -> UiError {

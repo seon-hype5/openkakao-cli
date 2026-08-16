@@ -1,20 +1,26 @@
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Barrier};
+use std::sync::{mpsc, Arc, Barrier, Mutex as StdMutex};
 use std::time::Duration;
 
 use openkakao_cli::platform::fake::FakeBackend;
 use openkakao_cli::platform::{
-    AppSnapshot, ChatTargetSnapshot, InputSnapshot, InspectRequest, PlatformProbe,
-    ProcessFingerprint, SecretMessage, SendIntent, SendMode, SendOutcome, TargetKind,
-    UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    AppSnapshot, ApprovedSend, ChatTargetSnapshot, InputSnapshot, InspectRequest, MessageSender,
+    PlatformProbe, ProcessFingerprint, SecretMessage, SendIntent, SendMode, SendOutcome,
+    TargetKind, UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 use openkakao_cli::safety::{
     PolicyClock, WindowsPolicyConfig, WindowsSafetyPolicy, MAX_MESSAGE_SCALARS,
     MAX_MESSAGE_UTF8_BYTES, MAX_NONCE_BYTES, MAX_SNAPSHOT_TTL_MS, SUPPORTED_APP_VERSION,
+    SUPPORTED_SELECTOR_PROFILE_ID,
 };
 
 const LABEL: &str = "SYNTHETIC_SELF_CHAT";
 const NOW_MS: u64 = 10_000;
+const PROCESS_FINGERPRINT: &str = "run:11111111111111111111111111111111";
+const WINDOW_FINGERPRINT: &str = "run:22222222222222222222222222222222";
+const COMPOSER_FINGERPRINT: &str = "run:33333333333333333333333333333333";
+const OPERATION_LEAK_CANARY: &str = "SYNTHETIC_PRIVATE_OPERATION_CANARY";
 
 #[derive(Debug, Clone, Copy)]
 struct FixedClock(u64);
@@ -22,6 +28,49 @@ struct FixedClock(u64);
 impl PolicyClock for FixedClock {
     fn now_unix_ms(&self) -> Result<u64, UiError> {
         Ok(self.0)
+    }
+}
+
+struct ErrorClock;
+
+impl PolicyClock for ErrorClock {
+    fn now_unix_ms(&self) -> Result<u64, UiError> {
+        Err(UiError::new(
+            UiErrorKind::InvalidInput,
+            OPERATION_LEAK_CANARY,
+        ))
+    }
+}
+
+#[derive(Default)]
+struct ErrorProbe {
+    inspect_calls: AtomicUsize,
+}
+
+impl ErrorProbe {
+    fn inspect_calls(&self) -> usize {
+        self.inspect_calls.load(Ordering::SeqCst)
+    }
+}
+
+impl PlatformProbe for ErrorProbe {
+    fn capabilities(&self) -> UiCapabilities {
+        UiCapabilities {
+            inspect: true,
+            send_open_chat: true,
+            open_chat_by_name: false,
+            read_visible: false,
+            watch_unread: false,
+        }
+    }
+
+    fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+        self.inspect_calls.fetch_add(1, Ordering::SeqCst);
+        Err(UiError {
+            kind: UiErrorKind::Timeout,
+            operation: OPERATION_LEAK_CANARY,
+            retry_safe: false,
+        })
     }
 }
 
@@ -40,7 +89,7 @@ fn safe_snapshot() -> UiSnapshot {
             app_running: true,
             process: Some(ProcessFingerprint {
                 pid: 7,
-                executable: "synthetic-process-fingerprint".to_string(),
+                executable: PROCESS_FINGERPRINT.to_string(),
                 session_id: Some(1),
             }),
             app_version: Some(SUPPORTED_APP_VERSION.to_string()),
@@ -55,8 +104,8 @@ fn safe_snapshot() -> UiSnapshot {
             self_chat_verified: true,
             exact_match: true,
             unique_match: true,
-            window: Some("synthetic-window-fingerprint".to_string()),
-            composer: Some("synthetic-composer-fingerprint".to_string()),
+            window: Some(WINDOW_FINGERPRINT.to_string()),
+            composer: Some(COMPOSER_FINGERPRINT.to_string()),
             observed_at_unix_ms: 9_000,
             expires_at_unix_ms: 11_000,
         },
@@ -67,7 +116,7 @@ fn safe_snapshot() -> UiSnapshot {
             writable: true,
             draft_empty: true,
             focused: false,
-            selector_profile_id: Some("synthetic-known-selector".to_string()),
+            selector_profile_id: Some(SUPPORTED_SELECTOR_PROFILE_ID.to_string()),
         },
     }
 }
@@ -149,12 +198,20 @@ fn allowlist_requires_exact_bytes_and_rejects_duplicates() {
     assert_eq!(duplicate.kind, UiErrorKind::AmbiguousTarget);
     assert_eq!(duplicate.operation, "policy_allowlist_config");
 
+    let whitespace = WindowsPolicyConfig::new([" \u{2003}\u{3000}"])
+        .expect_err("an all-whitespace allowlist entry must fail configuration");
+    assert_eq!(whitespace.kind, UiErrorKind::InvalidInput);
+    assert_eq!(whitespace.operation, "policy_allowlist_config");
+
     for variant in [
         "SYNTHETIC",
         "synthetic_self_chat",
         "SYNTHETIC_SELF_CHAT ",
         " SYNTHETIC_SELF_CHAT",
         "SYNTHETIC_SELF_CHAT\u{00a0}",
+        "SYNTHETIC_SELF_CHAT\u{200b}",
+        "SYNTHETIC_SELF_CHAT\u{3000}",
+        "SYNTHET\u{0406}C_SELF_CHAT",
     ] {
         let backend = FakeBackend::new(safe_snapshot());
         let error = policy()
@@ -266,6 +323,52 @@ fn ambiguous_discovery_wins_over_untrusted_absent_process_state() {
     let error = dry_run_error(state);
     assert_eq!(error.kind, UiErrorKind::AmbiguousTarget);
     assert_eq!(error.operation, "policy_app_snapshot");
+}
+
+#[test]
+fn unredacted_or_wrong_profile_evidence_is_refused_without_leaking_values() {
+    const LEAK_CANARY: &str = "SYNTHETIC_PRIVATE_EVIDENCE_CANARY";
+    let mut cases = Vec::new();
+
+    let mut state = safe_snapshot();
+    state.app.process.as_mut().expect("process").executable = LEAK_CANARY.to_string();
+    cases.push((state, UiErrorKind::UnknownUiProfile, "policy_app_snapshot"));
+
+    let mut state = safe_snapshot();
+    state.target.window = Some(LEAK_CANARY.to_string());
+    cases.push((state, UiErrorKind::TargetNotFound, "policy_target_snapshot"));
+
+    let mut state = safe_snapshot();
+    state.target.composer = Some(LEAK_CANARY.to_string());
+    cases.push((
+        state,
+        UiErrorKind::ComposerNotFound,
+        "policy_target_snapshot",
+    ));
+
+    let mut state = safe_snapshot();
+    state.target.composer = state.target.window.clone();
+    cases.push((
+        state,
+        UiErrorKind::UnknownUiProfile,
+        "policy_target_snapshot",
+    ));
+
+    let mut state = safe_snapshot();
+    state.input.selector_profile_id = Some(LEAK_CANARY.to_string());
+    cases.push((
+        state,
+        UiErrorKind::UnknownUiProfile,
+        "policy_input_snapshot",
+    ));
+
+    for (state, expected_kind, expected_operation) in cases {
+        let error = dry_run_error(state);
+        assert_eq!(error.kind, expected_kind);
+        assert_eq!(error.operation, expected_operation);
+        assert!(!format!("{error}").contains(LEAK_CANARY));
+        assert!(!format!("{error:?}").contains(LEAK_CANARY));
+    }
 }
 
 #[test]
@@ -410,6 +513,9 @@ fn message_boundaries_and_controls_are_refused_without_inspection() {
         "synthetic\tbody".to_string(),
         "synthetic\u{007f}body".to_string(),
         "synthetic\u{0085}body".to_string(),
+        "synthetic\u{2028}body".to_string(),
+        "synthetic\u{2029}body".to_string(),
+        " \u{2003}\u{3000}".to_string(),
     ];
 
     for (index, value) in invalid.into_iter().enumerate() {
@@ -484,6 +590,67 @@ fn stage_and_commit_require_yes_and_can_be_represented_without_mutation() {
 }
 
 #[test]
+fn authorize_refuses_adversarial_state_without_calling_mutation() {
+    let mut cases = Vec::new();
+
+    let mut state = safe_snapshot();
+    state.app.app_running = false;
+    cases.push((state, UiErrorKind::ProcessNotFound));
+
+    let mut state = safe_snapshot();
+    state.app.top_level_window_count = 2;
+    cases.push((state, UiErrorKind::AmbiguousTarget));
+
+    let mut state = safe_snapshot();
+    state.app.known_ui_profile = false;
+    cases.push((state, UiErrorKind::UnknownUiProfile));
+
+    let mut state = safe_snapshot();
+    state.app.modal_present = true;
+    cases.push((state, UiErrorKind::ModalPresent));
+
+    let mut state = safe_snapshot();
+    state.target.kind = TargetKind::Other;
+    cases.push((state, UiErrorKind::TargetNotSelf));
+
+    let mut state = safe_snapshot();
+    state.target.unique_match = false;
+    cases.push((state, UiErrorKind::AmbiguousTarget));
+
+    let mut state = safe_snapshot();
+    state.input.draft_empty = false;
+    cases.push((state, UiErrorKind::ExistingDraft));
+
+    let mut state = safe_snapshot();
+    state.input.focused = true;
+    cases.push((state, UiErrorKind::UserActive));
+
+    let mut state = safe_snapshot();
+    state.target.expires_at_unix_ms = NOW_MS;
+    cases.push((state, UiErrorKind::StaleSnapshot));
+
+    for (index, (state, expected_kind)) in cases.into_iter().enumerate() {
+        let backend = FakeBackend::new(state);
+        let error = policy()
+            .authorize(
+                &backend,
+                LABEL,
+                intent(
+                    TargetKind::SelfChat,
+                    "SYNTHETIC_BODY",
+                    SendMode::Commit,
+                    true,
+                    &format!("adversarial-{index}"),
+                ),
+            )
+            .expect_err("unsafe state must not mint an approval");
+        assert_eq!(error.kind, expected_kind);
+        assert_eq!(backend.stage_calls(), 0);
+        assert_eq!(backend.commit_calls(), 0);
+    }
+}
+
+#[test]
 fn message_label_and_nonce_never_appear_in_formats_or_json() {
     const SECRET: &str = "SYNTHETIC_SECRET_MESSAGE_CANARY";
     const NONCE: &str = "synthetic-secret-nonce";
@@ -532,6 +699,57 @@ fn message_label_and_nonce_never_appear_in_formats_or_json() {
 }
 
 #[test]
+fn external_probe_and_clock_errors_are_rewritten_to_fixed_policy_operations() {
+    let probe = ErrorProbe::default();
+    let dry_policy = policy();
+    let dry_error = dry_policy
+        .dry_run(
+            &probe,
+            LABEL,
+            &dry_intent("SYNTHETIC_BODY", "probe-error-dry"),
+        )
+        .expect_err("probe error must be propagated safely");
+    assert_eq!(dry_error.kind, UiErrorKind::Timeout);
+    assert_eq!(dry_error.operation, "policy_dry_run_inspect");
+    assert!(!dry_error.retry_safe);
+
+    let authorize_error = dry_policy
+        .authorize(
+            &probe,
+            LABEL,
+            intent(
+                TargetKind::SelfChat,
+                "SYNTHETIC_BODY",
+                SendMode::Commit,
+                true,
+                "probe-error-write",
+            ),
+        )
+        .expect_err("authorization probe error must be propagated safely");
+    assert_eq!(authorize_error.kind, UiErrorKind::Timeout);
+    assert_eq!(authorize_error.operation, "policy_authorize_inspect");
+    assert!(!authorize_error.retry_safe);
+    assert_eq!(probe.inspect_calls(), 2);
+
+    let clock_policy = WindowsSafetyPolicy::with_clock(config_for(LABEL), ErrorClock);
+    let backend = FakeBackend::new(safe_snapshot());
+    let clock_error = clock_policy
+        .dry_run(
+            &backend,
+            LABEL,
+            &dry_intent("SYNTHETIC_BODY", "clock-error"),
+        )
+        .expect_err("clock error must fail closed");
+    assert_eq!(clock_error.kind, UiErrorKind::StaleSnapshot);
+    assert_eq!(clock_error.operation, "policy_current_time");
+
+    for error in [dry_error, authorize_error, clock_error] {
+        assert!(!format!("{error}").contains(OPERATION_LEAK_CANARY));
+        assert!(!format!("{error:?}").contains(OPERATION_LEAK_CANARY));
+    }
+}
+
+#[test]
 fn approved_nonce_is_one_shot_but_dry_run_does_not_consume_it() {
     let backend = FakeBackend::new(safe_snapshot());
     let policy = policy();
@@ -573,6 +791,150 @@ fn approved_nonce_is_one_shot_but_dry_run_does_not_consume_it() {
         .expect_err("approved nonce must not be reusable");
     assert_eq!(replay.kind, UiErrorKind::InvalidInput);
     assert_eq!(replay.operation, "policy_nonce_replay");
+}
+
+struct SequenceProbe {
+    snapshots: StdMutex<VecDeque<UiSnapshot>>,
+    inspect_calls: AtomicUsize,
+}
+
+impl SequenceProbe {
+    fn new(snapshots: impl IntoIterator<Item = UiSnapshot>) -> Self {
+        Self {
+            snapshots: StdMutex::new(snapshots.into_iter().collect()),
+            inspect_calls: AtomicUsize::new(0),
+        }
+    }
+
+    fn inspect_calls(&self) -> usize {
+        self.inspect_calls.load(Ordering::SeqCst)
+    }
+}
+
+impl PlatformProbe for SequenceProbe {
+    fn capabilities(&self) -> UiCapabilities {
+        UiCapabilities {
+            inspect: true,
+            send_open_chat: true,
+            open_chat_by_name: false,
+            read_visible: false,
+            watch_unread: false,
+        }
+    }
+
+    fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+        self.inspect_calls.fetch_add(1, Ordering::SeqCst);
+        self.snapshots
+            .lock()
+            .expect("synthetic sequence mutex")
+            .pop_front()
+            .ok_or_else(|| UiError::new(UiErrorKind::ProcessNotFound, "synthetic_sequence_empty"))
+    }
+}
+
+#[derive(Default)]
+struct CountingSender {
+    stage_calls: AtomicUsize,
+    commit_calls: AtomicUsize,
+}
+
+impl MessageSender for CountingSender {
+    fn stage(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+        self.stage_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(SendOutcome::StagedAndRestored)
+    }
+
+    fn commit(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+        self.commit_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(SendOutcome::Indeterminate)
+    }
+}
+
+#[test]
+fn audit_existing_approval_retains_old_snapshot_after_backend_state_changes() {
+    let initial = safe_snapshot();
+    let mut changed = safe_snapshot();
+    changed.app.process.as_mut().expect("process").pid = 8;
+    changed.app.process.as_mut().expect("process").executable =
+        "run:44444444444444444444444444444444".to_string();
+    changed.app.modal_present = true;
+    changed.target.window = Some("run:55555555555555555555555555555555".to_string());
+    changed.target.composer = Some("run:66666666666666666666666666666666".to_string());
+    changed.input.draft_empty = false;
+    changed.input.focused = true;
+
+    let probe = SequenceProbe::new([initial.clone(), changed.clone()]);
+    let policy = policy();
+    let approval = policy
+        .authorize(
+            &probe,
+            LABEL,
+            intent(
+                TargetKind::SelfChat,
+                "SYNTHETIC_BODY",
+                SendMode::Commit,
+                true,
+                "toctou-audit",
+            ),
+        )
+        .expect("initial snapshot approves");
+    assert_eq!(probe.inspect_calls(), 1);
+
+    let later = probe
+        .inspect(&InspectRequest {
+            target: TargetKind::SelfChat,
+        })
+        .expect("synthetic later state");
+    assert_ne!(approval.approved().snapshot(), &later);
+    assert_eq!(approval.approved().snapshot(), &initial);
+    assert_ne!(
+        approval
+            .approved()
+            .snapshot()
+            .app
+            .process
+            .as_ref()
+            .expect("approved process")
+            .pid,
+        later.app.process.as_ref().expect("later process").pid
+    );
+    assert!(later.app.modal_present);
+    assert!(!later.input.draft_empty);
+    assert!(later.input.focused);
+}
+
+#[test]
+fn audit_same_approved_send_can_reach_fake_commit_more_than_once() {
+    let probe = ConcurrentProbe::new(safe_snapshot(), true);
+    let policy = policy();
+    let approval = policy
+        .authorize(
+            &probe,
+            LABEL,
+            intent(
+                TargetKind::SelfChat,
+                "SYNTHETIC_BODY",
+                SendMode::Commit,
+                true,
+                "repeatable-approval",
+            ),
+        )
+        .expect("synthetic approval should succeed");
+    let sender = CountingSender::default();
+
+    let first = sender
+        .commit(approval.approved())
+        .expect("first fake commit result");
+    let second = sender
+        .commit(approval.approved())
+        .expect("second fake commit result");
+
+    assert_eq!(first, SendOutcome::Indeterminate);
+    assert_eq!(second, SendOutcome::Indeterminate);
+    assert!(!first.retry_safe());
+    assert!(!second.retry_safe());
+    assert_eq!(sender.commit_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(sender.stage_calls.load(Ordering::SeqCst), 0);
 }
 
 #[derive(Clone)]
@@ -683,7 +1045,12 @@ fn concurrent_same_nonce_has_exactly_one_winner() {
     assert_eq!(
         results
             .iter()
-            .filter(|result| **result == Err(UiErrorKind::InvalidInput))
+            .filter(|result| {
+                matches!(
+                    **result,
+                    Err(UiErrorKind::InvalidInput | UiErrorKind::UnsupportedCapability)
+                )
+            })
             .count(),
         1
     );
@@ -691,7 +1058,7 @@ fn concurrent_same_nonce_has_exactly_one_winner() {
 }
 
 #[test]
-fn approval_lease_serializes_distinct_nonces_until_drop() {
+fn approval_lease_refuses_distinct_nonce_contention_without_blocking() {
     let policy = Arc::new(policy());
     let probe = Arc::new(ConcurrentProbe::new(safe_snapshot(), true));
     let first = policy
@@ -732,17 +1099,103 @@ fn approval_lease_serializes_distinct_nonces_until_drop() {
     started_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("worker should start");
-    assert!(done_rx.recv_timeout(Duration::from_millis(50)).is_err());
+    let contention = done_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("contended approval should fail without blocking")
+        .expect_err("contended approval must fail closed");
+    assert_eq!(contention.kind, UiErrorKind::UnsupportedCapability);
+    assert_eq!(contention.operation, "policy_approval_mutex");
     assert_eq!(probe.inspect_calls(), 1);
 
     drop(first);
-    assert_eq!(
-        done_rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("second approval should resume")
-            .expect("second approval should pass"),
-        SendMode::Commit
-    );
     worker.join().expect("worker must not panic");
+
+    let second = policy
+        .authorize(
+            probe.as_ref(),
+            LABEL,
+            intent(
+                TargetKind::SelfChat,
+                "SYNTHETIC_BODY",
+                SendMode::Commit,
+                true,
+                "lease-two",
+            ),
+        )
+        .expect("contention refusal must not consume the second nonce");
+    assert_eq!(second.approved().mode(), SendMode::Commit);
     assert_eq!(probe.inspect_calls(), 2);
+}
+
+#[test]
+fn poisoned_approval_mutex_fails_closed_before_reinspection() {
+    let policy = Arc::new(policy());
+    let probe = Arc::new(ConcurrentProbe::new(safe_snapshot(), true));
+    let worker_policy = Arc::clone(&policy);
+    let worker_probe = Arc::clone(&probe);
+
+    let panic = std::thread::spawn(move || {
+        let _approval = worker_policy
+            .authorize(
+                worker_probe.as_ref(),
+                LABEL,
+                intent(
+                    TargetKind::SelfChat,
+                    "SYNTHETIC_BODY",
+                    SendMode::Commit,
+                    true,
+                    "poison-one",
+                ),
+            )
+            .expect("synthetic approval should succeed before panic");
+        panic!("synthetic mutex poison");
+    })
+    .join();
+    assert!(panic.is_err());
+
+    let error = policy
+        .authorize(
+            probe.as_ref(),
+            LABEL,
+            intent(
+                TargetKind::SelfChat,
+                "SYNTHETIC_BODY",
+                SendMode::Commit,
+                true,
+                "poison-two",
+            ),
+        )
+        .expect_err("poisoned mutex must refuse");
+    assert_eq!(error.kind, UiErrorKind::UnsupportedCapability);
+    assert_eq!(error.operation, "policy_approval_mutex");
+    assert_eq!(probe.inspect_calls(), 1);
+}
+
+#[test]
+fn audit_separate_policy_instances_do_not_share_nonce_or_mutex_state() {
+    let first_policy = policy();
+    let second_policy = policy();
+    let first_probe = ConcurrentProbe::new(safe_snapshot(), true);
+    let second_probe = ConcurrentProbe::new(safe_snapshot(), true);
+    let request = || {
+        intent(
+            TargetKind::SelfChat,
+            "SYNTHETIC_BODY",
+            SendMode::Commit,
+            true,
+            "cross-policy-nonce",
+        )
+    };
+
+    let first = first_policy
+        .authorize(&first_probe, LABEL, request())
+        .expect("first policy instance approves");
+    let second = second_policy
+        .authorize(&second_probe, LABEL, request())
+        .expect("independent policy instance also approves");
+
+    assert_eq!(first.approved().mode(), SendMode::Commit);
+    assert_eq!(second.approved().mode(), SendMode::Commit);
+    assert_eq!(first_probe.inspect_calls(), 1);
+    assert_eq!(second_probe.inspect_calls(), 1);
 }
