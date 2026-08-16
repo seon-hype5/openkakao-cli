@@ -55,7 +55,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 #[cfg(feature = "windows-ui-write")]
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroize;
+#[cfg(any(feature = "windows-ui-write", test))]
+use zeroize::Zeroizing;
 
 use super::{
     profile_for, ComposerDiscovery, FileVersion, FingerprintKey, NativeComposer, NativeInspection,
@@ -689,7 +691,7 @@ pub(super) fn stage(
 ) -> Result<SendOutcome, UiError> {
     let _apartment = ComApartment::initialize_mta()?;
     let _mutex = NamedMutationMutex::acquire()?;
-    let message_utf16 = Zeroizing::new(approved.message().encode_utf16().collect::<Vec<_>>());
+    let message_utf16 = encode_secret_utf16(approved.message());
     let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16);
     transaction::run_stage(expected, &message_utf16, approved, &mut port)
 }
@@ -702,9 +704,42 @@ pub(super) fn commit(
 ) -> Result<SendOutcome, UiError> {
     let _apartment = ComApartment::initialize_mta()?;
     let _mutex = NamedMutationMutex::acquire()?;
-    let message_utf16 = Zeroizing::new(approved.message().encode_utf16().collect::<Vec<_>>());
+    let message_utf16 = encode_secret_utf16(approved.message());
     let mut port = NativeMutationPort::new(fingerprints, expected, &message_utf16);
     transaction::run_commit(expected, &message_utf16, approved, &mut port)
+}
+
+/// Encodes directly into its final zeroizing allocation. A valid UTF-8
+/// string's byte length is an upper bound for its UTF-16 code-unit length, so
+/// reserving that many units prevents a reallocating growth path from leaving
+/// an unscrubbed freed copy of the secret.
+#[cfg(any(feature = "windows-ui-write", test))]
+fn encode_secret_utf16(message: &str) -> Zeroizing<Vec<u16>> {
+    let mut encoded = Zeroizing::new(Vec::with_capacity(message.len()));
+    let initial_capacity = encoded.capacity();
+    encoded.extend(message.encode_utf16());
+    debug_assert_eq!(encoded.capacity(), initial_capacity);
+    encoded
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MutationMutexWait {
+    Acquired,
+    Contended,
+    Abandoned,
+    Failed,
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
+fn mutation_mutex_wait_error(outcome: MutationMutexWait) -> Option<UiError> {
+    let operation = match outcome {
+        MutationMutexWait::Acquired => return None,
+        MutationMutexWait::Contended => "windows_mutation_mutex_contended_uncertain",
+        MutationMutexWait::Abandoned => "windows_mutation_mutex_abandoned_uncertain",
+        MutationMutexWait::Failed => "windows_mutation_mutex_wait_uncertain",
+    };
+    Some(UiError::new(UiErrorKind::SubmissionUncertain, operation))
 }
 
 /// Process-global serialization for the final observation, write, readback,
@@ -730,32 +765,27 @@ impl NamedMutationMutex {
         // SAFETY: `handle` is a live mutex handle. A zero timeout guarantees
         // there is no hidden wait during which approval evidence can age.
         match unsafe { WaitForSingleObject(handle.raw(), 0) } {
-            WAIT_OBJECT_0 => Ok(Self { handle }),
-            WAIT_TIMEOUT => Err(UiError::new(
-                UiErrorKind::UserActive,
-                "windows_mutation_mutex_contended",
-            )),
+            WAIT_OBJECT_0 => {
+                debug_assert!(mutation_mutex_wait_error(MutationMutexWait::Acquired).is_none());
+                Ok(Self { handle })
+            }
+            WAIT_TIMEOUT => Err(mutation_mutex_wait_error(MutationMutexWait::Contended)
+                .expect("contended mutex has a fixed error")),
             WAIT_ABANDONED => {
                 // WAIT_ABANDONED grants ownership. Release it before refusing;
                 // stale transaction state is never adopted or recovered.
                 let abandoned = Self { handle };
                 drop(abandoned);
-                Err(UiError::new(
-                    UiErrorKind::StaleSnapshot,
-                    "windows_mutation_mutex_abandoned",
-                ))
+                Err(mutation_mutex_wait_error(MutationMutexWait::Abandoned)
+                    .expect("abandoned mutex has a fixed error"))
             }
             WAIT_FAILED => {
-                let error = unsafe { GetLastError() };
-                Err(map_windows_error(
-                    WindowsError::from_hresult(error.to_hresult()),
-                    "windows_mutation_mutex_wait",
-                ))
+                let _ = unsafe { GetLastError() };
+                Err(mutation_mutex_wait_error(MutationMutexWait::Failed)
+                    .expect("failed mutex wait has a fixed error"))
             }
-            _ => Err(UiError::new(
-                UiErrorKind::UnsupportedCapability,
-                "windows_mutation_mutex_wait",
-            )),
+            _ => Err(mutation_mutex_wait_error(MutationMutexWait::Failed)
+                .expect("unknown mutex wait has a fixed error")),
         }
     }
 }
@@ -853,8 +883,7 @@ impl<'message> NativeMutationPort<'message> {
                 "windows_mutation_window_state",
             ));
         }
-        // SAFETY: read-only foreground query; it never activates either app.
-        if unsafe { GetForegroundWindow() } == identity.hwnd {
+        if foreground_indicates_user_activity(identity.hwnd, identity.pid)? {
             return Err(UiError::new(
                 UiErrorKind::UserActive,
                 "windows_mutation_foreground",
@@ -992,8 +1021,7 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.window_enabled = enabled;
         fresh.modal_present = !enabled;
         fresh.window_fingerprint = Some(fingerprint);
-        // SAFETY: this query has no activation side effect.
-        fresh.user_active = unsafe { GetForegroundWindow() } == hwnd;
+        fresh.user_active = foreground_indicates_user_activity(hwnd, process.pid)?;
         fresh.selector_profile_id = profile.map(|profile| profile.id.to_string());
 
         match composer {
@@ -1150,6 +1178,51 @@ impl MutationPort for NativeMutationPort<'_> {
         unsafe { pattern.Invoke() }
             .map_err(|error| map_windows_error(error, "windows_commit_invoke"))
     }
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
+fn classify_foreground_activity(
+    selected_hwnd: usize,
+    foreground_hwnd: usize,
+    foreground_pid: Option<u32>,
+    expected_pid: u32,
+) -> bool {
+    foreground_hwnd != 0
+        && (foreground_hwnd == selected_hwnd || foreground_pid == Some(expected_pid))
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn foreground_indicates_user_activity(
+    selected_hwnd: HWND,
+    expected_pid: u32,
+) -> Result<bool, UiError> {
+    // SAFETY: both calls are read-only queries and never activate a window.
+    let foreground = unsafe { GetForegroundWindow() };
+    let selected_raw = selected_hwnd.0 as usize;
+    let foreground_raw = foreground.0 as usize;
+    if foreground_raw == 0 || foreground_raw == selected_raw {
+        return Ok(classify_foreground_activity(
+            selected_raw,
+            foreground_raw,
+            None,
+            expected_pid,
+        ));
+    }
+
+    let mut foreground_pid = 0;
+    let thread_id = unsafe { GetWindowThreadProcessId(foreground, Some(&mut foreground_pid)) };
+    if thread_id == 0 || foreground_pid == 0 {
+        return Err(UiError::new(
+            UiErrorKind::StaleSnapshot,
+            "windows_mutation_foreground_process",
+        ));
+    }
+    Ok(classify_foreground_activity(
+        selected_raw,
+        foreground_raw,
+        Some(foreground_pid),
+        expected_pid,
+    ))
 }
 
 #[cfg(feature = "windows-ui-write")]
@@ -1429,5 +1502,45 @@ mod tests {
         let wrong_case = Path::new(r"C:\Synthetic\kakaotalk.exe");
         assert_eq!(valid.file_name(), Some(OsStr::new("KakaoTalk.exe")));
         assert_ne!(wrong_case.file_name(), Some(OsStr::new("KakaoTalk.exe")));
+    }
+
+    #[test]
+    fn secret_utf16_encoding_never_reallocates() {
+        for message in [
+            "ASCII synthetic canary".to_string(),
+            "BMP \u{ac00}\u{b098}\u{b2e4}".to_string(),
+            "non-BMP \u{1f642}\u{1f680}".to_string(),
+            "\u{1f642}".repeat(1_000),
+        ] {
+            let encoded = encode_secret_utf16(&message);
+            assert_eq!(
+                encoded.as_slice(),
+                message.encode_utf16().collect::<Vec<_>>()
+            );
+            assert!(encoded.capacity() >= message.len());
+        }
+    }
+
+    #[test]
+    fn same_process_foreground_popup_is_user_activity() {
+        assert!(!classify_foreground_activity(10, 0, None, 42));
+        assert!(classify_foreground_activity(10, 10, None, 42));
+        assert!(classify_foreground_activity(10, 11, Some(42), 42));
+        assert!(!classify_foreground_activity(10, 11, Some(99), 42));
+    }
+
+    #[test]
+    fn mutex_wait_uncertainty_is_never_retryable() {
+        assert!(mutation_mutex_wait_error(MutationMutexWait::Acquired).is_none());
+        for outcome in [
+            MutationMutexWait::Contended,
+            MutationMutexWait::Abandoned,
+            MutationMutexWait::Failed,
+        ] {
+            let error = mutation_mutex_wait_error(outcome)
+                .expect("every non-acquired wait result must fail closed");
+            assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+            assert!(!error.retry_safe);
+        }
     }
 }

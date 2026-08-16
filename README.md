@@ -22,6 +22,17 @@
 
 **한국어** | [English](README.en.md)
 
+> [!IMPORTANT]
+> **Windows 포트는 현재 fail-closed 릴리스 후보입니다.** Windows 빌드와
+> 합성 테스트, 리덕션된 `doctor --ui` 진단 경로는 준비되어 있지만 실제
+> `local-send` 쓰기 기능은 아직 활성화되지 않습니다. 기본 빌드에서는 UI
+> 쓰기 코드가 제외되고, 기능 플래그를 켠 빌드도 검증된 나와의 채팅 식별자와
+> 전송 버튼 선택자가 없어 전송 능력을 `false`로 보고합니다. Windows 포트는
+> 카카오톡 데이터베이스·자격 증명·클립보드·키 입력을 사용하지 않습니다.
+> 자세한 상태와 안전 경계는
+> [Windows 아키텍처](docs/windows-port/ARCHITECTURE.md)와
+> [다음 인계 문서](docs/windows-port/NEXT_HANDOFF.md)를 확인하세요.
+
 > [!TIP]
 > **로그인 없이 바로 동작합니다.** `local-send`/`ax-read`는 macOS Accessibility API로 카카오톡 UI를 직접 읽고 조작해서, 서버 세션 없이도 실제 메시지 전송과 최근 대화 읽기를 지원합니다. KakaoTalk 앱이 실행 중이고 로그인만 되어 있으면 됩니다 — 아래 [Quick Start](#quick-start) 참고.
 

@@ -4,9 +4,10 @@
 
 L20 may be considered only after L10 passes in a separately approved session
 and a privacy-preserving design deterministically proves exact unique
-self-chat identity and empty draft state. The current metadata-only backend
-does neither, and reserved stage mode is unsupported. Do not run it merely to
-observe the refusal.
+self-chat identity and empty draft state. A transaction implementation now
+exists behind the default-off `windows-ui-write` build feature, but the
+production profile proves neither prerequisite and therefore advertises no
+send capability. Do not run it merely to observe the refusal.
 
 ## Required fresh approval
 
@@ -41,8 +42,9 @@ controller and all child agents remain stopped.
 6. Verify exact empty readback and zero submit/commit calls.
 7. Discard the canary and nonce; retain no raw transcript.
 
-No executable staging command is documented because the capability is not
-implemented or approved.
+No executable staging command is documented because the production capability
+is not configured or approved. Merely compiling `windows-ui-write` grants no
+runtime authority.
 
 ## Pass criteria
 

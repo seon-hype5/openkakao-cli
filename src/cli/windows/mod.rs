@@ -1,8 +1,9 @@
-//! Testable Windows command options and read-only orchestration.
+//! Testable Windows command options and dry-run-only preparation.
 //!
 //! This module deliberately does not construct a concrete Windows backend.
-//! Callers supply a [`PlatformProbe`], which keeps Wave 1 dry-runs unable to
-//! reach [`crate::platform::MessageSender`] by type.
+//! Callers supply a [`PlatformProbe`], which keeps this preparation seam
+//! unable to reach [`crate::platform::MessageSender`] by type. Root owns the
+//! separately guarded write orchestration.
 
 use std::fmt;
 use std::io::Read;
@@ -60,15 +61,15 @@ pub struct LocalSendOptions {
     #[arg(long, conflicts_with_all = ["stage_only", "commit"])]
     dry_run: bool,
 
-    /// Reserved write mode; unavailable in Wave 1.
+    /// Request guarded staging; requires explicit approval and capability.
     #[arg(long, conflicts_with = "commit", requires = "yes")]
     stage_only: bool,
 
-    /// Reserved write mode; unavailable in Wave 1.
+    /// Request guarded submission; requires explicit approval and capability.
     #[arg(long, conflicts_with = "stage_only", requires = "yes")]
     commit: bool,
 
-    /// Explicitly acknowledge a reserved write mode.
+    /// Explicitly acknowledge a guarded write mode.
     #[arg(long, short = 'y')]
     yes: bool,
 }
@@ -233,9 +234,9 @@ pub fn inspect_ui_doctor<P: PlatformProbe>(
 
 /// Reads stdin and inspects the already-open self-chat for a dry-run.
 ///
-/// Reserved stage/commit modes are refused before reading input or calling
-/// the probe. This function has no `MessageSender` bound, so it cannot stage
-/// or commit even when the supplied probe is also a sender.
+/// Stage/commit modes are refused before reading input or calling the probe.
+/// This legacy preparation function has no `MessageSender` bound, so it cannot
+/// stage or commit even when the supplied probe is also a sender.
 pub fn prepare_local_send<P: PlatformProbe, I: MessageInput>(
     options: &LocalSendOptions,
     input: &mut I,

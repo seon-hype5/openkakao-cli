@@ -313,6 +313,23 @@ pub(super) fn run_stage<C: ExecutionClaim, P: MutationPort>(
 
     port.prepare_set_value(message_utf16)?;
     claim.try_claim()?;
+
+    // From the first SetValue entry onward, a returned error or panic cannot
+    // prove that the provider made no change. Normalize the entire remainder
+    // of the transaction to a fixed, non-retryable uncertainty boundary.
+    match catch_unwind(AssertUnwindSafe(|| {
+        run_stage_after_claim(expected, message_utf16, port)
+    })) {
+        Ok(Ok(outcome)) => Ok(outcome),
+        Ok(Err(_)) | Err(_) => Err(post_set_value_error(SendMode::StageOnly)),
+    }
+}
+
+fn run_stage_after_claim<P: MutationPort>(
+    expected: &ExpectedState<'_>,
+    message_utf16: &[u16],
+    port: &mut P,
+) -> Result<SendOutcome, UiError> {
     let stage_error = port.set_value(message_utf16).err();
     let staged = match port.observe(message_utf16) {
         Ok(state) => state,
@@ -349,6 +366,21 @@ pub(super) fn run_commit<C: ExecutionClaim, P: MutationPort>(
 
     port.prepare_set_value(message_utf16)?;
     claim.try_claim()?;
+
+    match catch_unwind(AssertUnwindSafe(|| {
+        run_commit_after_claim(expected, message_utf16, port)
+    })) {
+        Ok(Ok(outcome)) => Ok(outcome),
+        Ok(Err(error)) if error.kind == UiErrorKind::SubmissionUncertain => Err(error),
+        Ok(Err(_)) | Err(_) => Err(post_set_value_error(SendMode::Commit)),
+    }
+}
+
+fn run_commit_after_claim<P: MutationPort>(
+    expected: &ExpectedState<'_>,
+    message_utf16: &[u16],
+    port: &mut P,
+) -> Result<SendOutcome, UiError> {
     let stage_error = port.set_value(message_utf16).err();
     let staged = match port.observe(message_utf16) {
         Ok(state) => state,
@@ -381,6 +413,15 @@ pub(super) fn run_commit<C: ExecutionClaim, P: MutationPort>(
             "windows_commit_invoke_uncertain",
         )),
     }
+}
+
+fn post_set_value_error(mode: SendMode) -> UiError {
+    let operation = match mode {
+        SendMode::StageOnly => "windows_stage_after_set_value_uncertain",
+        SendMode::Commit => "windows_commit_after_set_value_uncertain",
+        SendMode::DryRun => "windows_write_after_set_value_uncertain",
+    };
+    error(UiErrorKind::SubmissionUncertain, operation)
 }
 
 fn restore_if_proven_owned<P: MutationPort>(
@@ -573,9 +614,10 @@ mod tests {
     struct FakePort {
         states: VecDeque<Result<FreshState, UiError>>,
         set_results: VecDeque<Result<(), UiError>>,
-        prepare_set_result: Result<(), UiError>,
+        prepare_set_results: VecDeque<Result<(), UiError>>,
         prepare_invoke_result: Result<(), UiError>,
         invoke_result: Result<(), UiError>,
+        panic_on_observe_call: Option<usize>,
         observe_calls: usize,
         prepare_set_calls: usize,
         set_calls: usize,
@@ -589,9 +631,10 @@ mod tests {
             Self {
                 states: states.into_iter().map(Ok).collect(),
                 set_results: VecDeque::new(),
-                prepare_set_result: Ok(()),
+                prepare_set_results: VecDeque::new(),
                 prepare_invoke_result: Ok(()),
                 invoke_result: Ok(()),
+                panic_on_observe_call: None,
                 observe_calls: 0,
                 prepare_set_calls: 0,
                 set_calls: 0,
@@ -611,6 +654,9 @@ mod tests {
     impl MutationPort for FakePort {
         fn observe(&mut self, _expected_message_utf16: &[u16]) -> Result<FreshState, UiError> {
             self.observe_calls += 1;
+            if self.panic_on_observe_call == Some(self.observe_calls) {
+                panic!("synthetic post-SetValue provider panic");
+            }
             self.states
                 .pop_front()
                 .expect("synthetic observation must be queued")
@@ -621,7 +667,7 @@ mod tests {
                 assert_eq!(value_utf16, MESSAGE);
             }
             self.prepare_set_calls += 1;
-            self.prepare_set_result.clone()
+            self.prepare_set_results.pop_front().unwrap_or(Ok(()))
         }
 
         fn set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError> {
@@ -853,7 +899,8 @@ mod tests {
             FakePort::with_states([valid(DraftState::Empty), valid(DraftState::Different)]);
 
         let error = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
-        assert_eq!(error.kind, UiErrorKind::ExistingDraft);
+        assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+        assert!(!error.retry_safe);
         assert_eq!(port.set_calls, 1);
         assert_eq!(port.clear_calls, 0);
         assert_eq!(port.invoke_calls, 0);
@@ -879,10 +926,10 @@ mod tests {
     fn final_native_preflight_refusal_does_not_claim_or_mutate() {
         let claim = FakeClaim::accepting();
         let mut port = FakePort::with_states([valid(DraftState::Empty)]);
-        port.prepare_set_result = Err(error(
+        port.prepare_set_results.push_back(Err(error(
             UiErrorKind::StaleSnapshot,
             "synthetic_process_recycled",
-        ));
+        )));
 
         let error = run_stage(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
         assert_eq!(error.kind, UiErrorKind::StaleSnapshot);
@@ -950,9 +997,111 @@ mod tests {
             valid(DraftState::Empty),
         ]);
 
-        assert!(run_commit(&expected(), MESSAGE, &claim, &mut port).is_err());
+        let error = run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+        assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+        assert!(!error.retry_safe);
         assert_eq!(port.set_calls, 1);
         assert_eq!(port.clear_calls, 1);
+        assert_eq!(port.invoke_calls, 0);
+    }
+
+    #[test]
+    fn every_post_set_value_stage_failure_is_nonretryable_uncertainty() {
+        let cases = [
+            "set_and_readback_error",
+            "expired_readback",
+            "clear_preflight_error",
+            "clear_error",
+            "restore_observe_error",
+            "provider_panic",
+        ];
+
+        for case in cases {
+            let claim = FakeClaim::accepting();
+            let mut port = match case {
+                "set_and_readback_error" => {
+                    let mut port = FakePort::with_states([valid(DraftState::Empty)]);
+                    port.states
+                        .push_back(Err(error(UiErrorKind::Timeout, "synthetic_readback")));
+                    port.set_results
+                        .push_back(Err(error(UiErrorKind::Timeout, "synthetic_set_value")));
+                    port
+                }
+                "expired_readback" => {
+                    let mut expired = valid(DraftState::ExactMessage);
+                    expired.now_unix_ms = expected().expires_at_unix_ms;
+                    FakePort::with_states([valid(DraftState::Empty), expired])
+                }
+                "clear_preflight_error" => {
+                    let mut port = FakePort::with_states([
+                        valid(DraftState::Empty),
+                        valid(DraftState::ExactMessage),
+                    ]);
+                    port.prepare_set_results.push_back(Ok(()));
+                    port.prepare_set_results.push_back(Err(error(
+                        UiErrorKind::StaleSnapshot,
+                        "synthetic_clear_preflight",
+                    )));
+                    port
+                }
+                "clear_error" => {
+                    let mut port = FakePort::with_states([
+                        valid(DraftState::Empty),
+                        valid(DraftState::ExactMessage),
+                    ]);
+                    port.set_results.push_back(Ok(()));
+                    port.set_results
+                        .push_back(Err(error(UiErrorKind::Timeout, "synthetic_clear")));
+                    port
+                }
+                "restore_observe_error" => {
+                    let mut port = FakePort::with_states([
+                        valid(DraftState::Empty),
+                        valid(DraftState::ExactMessage),
+                    ]);
+                    port.states.push_back(Err(error(
+                        UiErrorKind::Timeout,
+                        "synthetic_restore_observe",
+                    )));
+                    port
+                }
+                "provider_panic" => {
+                    let mut port = FakePort::with_states([valid(DraftState::Empty)]);
+                    port.panic_on_observe_call = Some(2);
+                    port
+                }
+                _ => unreachable!(),
+            };
+
+            let error = run_stage(&expected(), MESSAGE, &claim, &mut port)
+                .expect_err("post-SetValue failure must be uncertain");
+            assert_eq!(error.kind, UiErrorKind::SubmissionUncertain, "{case}");
+            assert!(!error.retry_safe, "{case}");
+            assert_eq!(claim.calls.get(), 1, "{case}");
+            assert_eq!(port.set_calls, 1, "{case}");
+            assert!(port.clear_calls <= 1, "{case}");
+            assert_eq!(port.invoke_calls, 0, "{case}");
+        }
+    }
+
+    #[test]
+    fn commit_readback_failure_after_set_value_is_nonretryable_uncertainty() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([valid(DraftState::Empty)]);
+        port.states.push_back(Err(error(
+            UiErrorKind::Timeout,
+            "synthetic_commit_readback",
+        )));
+
+        let error = run_commit(&expected(), MESSAGE, &claim, &mut port)
+            .expect_err("post-SetValue commit failure must be uncertain");
+
+        assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+        assert_eq!(error.operation, "windows_commit_after_set_value_uncertain");
+        assert!(!error.retry_safe);
+        assert_eq!(claim.calls.get(), 1);
+        assert_eq!(port.set_calls, 1);
+        assert_eq!(port.clear_calls, 0);
         assert_eq!(port.invoke_calls, 0);
     }
 }

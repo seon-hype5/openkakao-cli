@@ -22,6 +22,17 @@
 
 [한국어](README.md) | **English**
 
+> [!IMPORTANT]
+> **The Windows port is currently a fail-closed release candidate.** Windows
+> builds, synthetic tests, and a redacted `doctor --ui` diagnostic path are in
+> place, but production `local-send` writes are not enabled. Default builds
+> exclude UI write call sites, and feature-enabled builds still advertise no
+> send capability because no verified self-chat identity or send-button
+> selector is configured. The Windows port does not use KakaoTalk databases,
+> credentials, clipboard input, or synthetic keys. See the
+> [Windows architecture](docs/windows-port/ARCHITECTURE.md) and
+> [current handoff](docs/windows-port/NEXT_HANDOFF.md).
+
 > [!TIP]
 > **Works fully without logging in.** `local-send`/`ax-read` drive the real KakaoTalk UI directly via the macOS Accessibility API — no server session needed for either sending real messages or reading recent chat history. Just KakaoTalk running and already logged in — see [Quick Start](#quick-start) below.
 

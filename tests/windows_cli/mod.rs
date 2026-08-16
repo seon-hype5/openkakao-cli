@@ -240,7 +240,7 @@ fn reserved_write_modes_never_call_input_or_backend() {
 
         let error = prepare_local_send(&options, &mut input, &backend)
             .err()
-            .expect("Wave 1 must refuse write modes");
+            .expect("the dry-run preparation seam must refuse write modes");
 
         assert_eq!(error.kind, UiErrorKind::UnsupportedCapability);
         assert_eq!(input.reads.get(), 0);

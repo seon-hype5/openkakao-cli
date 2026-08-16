@@ -29,10 +29,12 @@ The job runs in this order and stops on the first failure:
 | Format | `cargo fmt --all -- --check` | Source-only formatting check |
 | Lint | `cargo clippy --locked --all-targets --all-features -- -D warnings` | Compiles/lints targets; does not execute the product |
 | Library | `cargo test --locked --lib` | Unit tests use synthetic values and pure mappings |
+| Guarded transaction | `cargo test --locked --lib --all-features platform::windows` | Runs only the named synthetic Windows unit-test subtree with the default-off write feature compiled |
 | Binary unit | `cargo test --locked --bin openkakao-cli` | Parser and unit coverage; no command dispatch against a live app |
 | Windows contracts | `cargo test --locked --test windows_backend --test windows_policy --test windows_cli` | Capability, fake, policy, redaction, and zero-mutation coverage |
+| Guarded backend contract | `cargo test --locked --all-features --test windows_backend` | Verifies the feature-enabled production backend remains fail-closed without calling `inspect`, `stage`, or `commit` |
 | CLI compatibility | Fourteen individually named `cli_test` cases, each run with `--exact` | Closed allowlist of help/version/usage parsing only |
-| Build | `cargo build --locked` | Debug build using the committed lockfile |
+| Builds | `cargo build --locked` and `cargo build --locked --all-features` | Builds both the default read-only artifact and the feature-gated artifact using the committed lockfile; neither is executed |
 
 The CLI compatibility step is a closed allowlist. It deliberately excludes
 these cases because they can enter legacy local-state or credential diagnostic
@@ -54,11 +56,20 @@ performs no UI mutation, and cannot read user or application state.
 - The production-backend integration target checks only advertised
   capabilities and redacted formatting; it does not call `inspect`.
 - Stage and commit are exercised only as policy/fake states with mutation
-  counters fixed at zero.
+  counters fixed at zero, plus a synthetic in-memory transaction port. The
+  production backend contract test never calls either mutation method.
 - There is no service container, desktop session preparation, application
   installation, account setup, network login, or secret injection.
 - `RUST_BACKTRACE=0` prevents failure backtraces from becoming accidental
   diagnostic artifacts. Test failures must remain synthetic and redacted.
+
+`windows-ui-write` is a real, default-off build boundary rather than an
+authorization switch. Enabling it compiles the reviewed transaction and
+native call sites, but the production profile still advertises
+`send_open_chat=false` because no privacy-safe self-target proof or measured
+send-button selector is configured. All-feature CI is compile and synthetic
+behavior coverage only; it must never be interpreted as permission to run a
+live UI command.
 
 ## Cache and artifact policy
 

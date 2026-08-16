@@ -1,85 +1,97 @@
-# Wave 1 integration checklist
+# I20 release-candidate integration checklist
 
-Frozen contract: `d974c0597528e079919d4c45ee0893fa61d4335d`
+Wave 1 integration ancestor: `fed2bb1558b4e07878f17f4c8140aab5ead682b2`
 
-## Per-child intake
+## Wave 2 intake
 
-For every child SHA:
+For every child source commit:
 
-1. Confirm the expected branch and clean worktree.
-2. Run `git merge-base --is-ancestor` from the frozen contract.
-3. Inspect `git diff --name-only CONTRACT..CHILD` for exact ownership.
-4. Run `git diff --check CONTRACT..CHILD`.
-5. Review every unsafe block and any COM/native resource wrapper.
-6. Confirm no manifest/common-contract edits, private strings, screenshots,
-   KakaoTalk data paths, UI mutation, send, retry, push, or PR.
-7. Confirm the handoff lists focused tests, skipped tests, assumptions, risks,
-   and RFCs.
+1. verify its expected branch, clean worktree, and Wave 1 ancestry;
+2. inspect the complete name/status diff for exact ownership;
+3. run `git diff --check` and review every unsafe/native change;
+4. confirm no private strings, screenshots, UI dumps, KakaoTalk paths, data,
+   credentials, live UI calls, sends, retries, pushes, or PRs;
+5. reconcile root-owned contracts/config only through recorded RFC decisions;
+6. cherry-pick atomic commits without rewriting child history; and
+7. retain child handoffs with tests, skips, assumptions, and residual risks.
 
-## Windows API review points
+Integrated Wave 2 sources:
 
-- `EnumWindows` callback state has a valid lifetime and does not retain stale
-  pointers or handles.
-- `GetWindowThreadProcessId` failure (zero) is checked.
-- process handles request only the minimum query rights, are non-inheritable,
-  and are closed on every path; no process-memory rights are requested.
-- executable path buffer lengths are in UTF-16 code units and checked.
-- file-version buffers remain alive while `VerQueryValueW` pointers are used.
-- UI Automation runs on a dedicated windowless MTA thread; successful
-  `CoInitializeEx` calls, including `S_FALSE`, are balanced by
-  `CoUninitialize` on the same thread.
-- UIA interface pointers/elements do not outlive or escape the creating
-  apartment.
-- desktop searches use direct children, and app-subtree searches are bounded.
-- selector decisions combine process, top-level class, composer class,
-  AutomationId, control type, and pattern metadata.
-- no `SetValue`, Invoke, focus/Z-order, key, clipboard, screen capture, raw UI
-  tree dump, title/body logging, or cross-process memory access exists.
+- P40 Windows transaction: Child A `47452d8327d4ce52929de17523a6fc4f971d4293`;
+- P50 adversarial safety: Child B `f9ca1964942276fa3fb0a4305a5408afb5599e2d`;
+- P60 Windows CI/manuals: Child C `f09fc19bb05e11b0d4659a726e662e414c1e1408`.
 
-## Integration order
+Root additionally closed consuming-capability, sender-sealing,
+mode/outcome-normalization, post-SetValue uncertainty, process-instance,
+same-process foreground, mutex-result, UTF-16 zeroization, parse-redaction,
+allowlist-ordering, and CI allowlist findings.
 
-1. Child B safety policy.
-2. Resolve only root-owned config/module wiring requested by a reviewed RFC.
-3. Child A Windows discovery backend.
-4. Child C CLI/output/fake surface.
-5. Root wires `doctor --ui` and Windows `local-send` into `src/main.rs` while
-   preserving the macOS compatibility path.
+## Native and unsafe review
 
-Each child is cherry-picked, not merged, and followed by focused tests. No
-branch rewrite or force operation is allowed.
+- COM initialization and uninitialization occur on the same MTA thread.
+- No UIA interface leaves the scoped mutation worker/apartment.
+- Enumeration callbacks, lengths, pointers, SIDs, file-version data, and
+  process/token handles have documented validity and ownership.
+- Process handles request only limited query rights; no memory rights exist.
+- PID/HWND/path/process-creation/session/integrity and exact UIA identity are
+  revalidated immediately before mutation.
+- The named mutex is zero-wait and held through validation and the complete
+  write/readback/restore or Invoke transaction.
+- Contention, abandoned ownership, wait failure, and every post-SetValue error
+  or panic are non-retryable uncertainty.
+- Secret stdin, nonce, UTF-16, outgoing BSTR, and CurrentValue BSTR buffers are
+  bounded/redacted/zeroized according to their ownership.
+- No focus/Z-order change, keys, clipboard, window messages, screenshots,
+  hooks, injection, process-memory access, or retry edge exists.
 
-## Final automated gates
+## Automated I20 gates
 
-Use a root-only target directory and no live KakaoTalk command:
+Use an isolated ignored target directory and never execute a product command:
 
 ```text
-cargo fmt --check
-cargo test --lib
-cargo test --bin openkakao-cli
-cargo test --test windows_backend
-cargo test --test windows_policy
-cargo test --test windows_cli
-cargo test --test cli_test -- \
-  --skip doctor_json_outputs_valid_json \
-  --skip auth_status_json_outputs_valid_json \
-  --skip cache_stats_json_outputs_valid_json
-cargo clippy --all-targets --all-features -- -D warnings
-cargo build
+cargo fmt --all -- --check
+cargo test --locked --lib
+cargo test --locked --lib --all-features platform::windows
+cargo test --locked --bin openkakao-cli
+cargo test --locked --test windows_backend --test windows_policy --test windows_cli
+cargo test --locked --all-features --test windows_backend
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo build --locked
+cargo build --locked --all-features
 ```
 
-The legacy doctor, auth-status, and cache-stats JSON integration tests remain
-excluded in this session because their existing paths may load credential or
-local-database diagnostics. No valid production `doctor --ui` or `local-send`
-command is executed by the automated gates; production-backend tests inspect
-only static capabilities and redacted Debug output.
+Run only the fourteen exact help/version/usage cases listed in
+`.github/workflows/windows.yml` from `cli_test`. Do not replace this closed
+allowlist with a skip list or full integration-target execution. The legacy
+doctor/auth/cache cases may enter local-state or credential paths.
+
+The synthetic compatibility suites `auth_flow_test`, `loco_client_test`,
+`loco_crypto_test`, `loco_packet_test`, and `message_db_test` may also run;
+they must not be replaced by live CLI/product invocations.
+
+## Release-candidate interpretation
+
+A green I20 proves buildability, lint, deterministic synthetic transaction
+behavior, redaction, exact configuration/capability refusal order, and the
+absence of automatic retry. It does not prove live KakaoTalk selector
+compatibility, target identity, draft safety, or submission correctness.
+
+Production mutation must remain unreachable:
+
+- `windows-ui-write` defaults off;
+- `allow_windows_ui_write` defaults false;
+- the Windows backend advertises `send_open_chat=false`;
+- native target identity remains unverified; and
+- the commit selector remains unconfigured.
 
 ## Exit evidence
 
 - integration worktree clean;
-- all accepted child commits recorded;
-- Windows build and safe automated tests recorded;
-- mutation count 0;
-- actual message count 0;
-- KakaoTalk data/credential access count 0;
-- push/PR count 0;
-- `NEXT_HANDOFF.md` names Wave 2 as the next start point.
+- all accepted source/integration commits recorded;
+- default and all-feature builds recorded;
+- all safe automated gates recorded;
+- unsafe audit and residual blockers recorded;
+- KakaoTalk UI mutation and actual message counts are zero;
+- KakaoTalk data/credential access counts are zero;
+- push and PR counts are zero; and
+- `NEXT_HANDOFF.md` names L10 as a manual, not-yet-authorized next gate.

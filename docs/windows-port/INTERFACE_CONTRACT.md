@@ -1,76 +1,109 @@
 # Windows MVP interface contract v1
 
-Status: frozen by the local commit named `contract/windows-mvp-v1`.
+Status: the public schema remains v1; Wave 2 adds deny-by-default internal
+execution guards without changing serialized report fields.
 
 ## Capabilities and snapshots
 
-The public contract is exported from `openkakao_cli::platform`:
+The platform facade exports:
 
-- `UiCapabilities`
-- `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, `UiSnapshot`
-- `InspectRequest`, `TargetKind`
-- `PlatformProbe`, `MessageSender`
-- `SendIntent`, `SecretMessage`, `ApprovedSend`
-- `SendMode`, `SendOutcome`, `UiError`, `UiErrorKind`
-- `ActionReport`, `BackendKind`, `ExitCode`
-- `ExactMatch` and `exact_unique_match`
+- `UiCapabilities`;
+- `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, and `UiSnapshot`;
+- `InspectRequest`, `TargetKind`, and `PlatformProbe`;
+- `MessageSender`, `SendIntent`, `SecretMessage`, and `ApprovedSend`;
+- `SendMode`, `SendOutcome`, `UiError`, and `UiErrorKind`; and
+- `ActionReport`, `BackendKind`, `ExitCode`, and exact-match helpers.
 
-Snapshots contain only process/window/composer fingerprints and non-sensitive
-state. Raw room names, profile names, draft text, and message text are excluded.
+Snapshots contain only process/window/composer fingerprints and bounded state.
+Raw room/profile names, draft text, message text, HWNDs, creation FILETIMEs, and
+UIA runtime IDs are excluded.
 
-## Backend semantics
+## Inspection semantics
 
 `PlatformProbe::inspect` is read-only: no focus, Z-order, clipboard, input
-value, room selection, or network change. `inspect_dry_run` accepts only this
-trait.
+value, room selection, network change, or submission. `inspect_dry_run`
+accepts only that trait.
 
-The Windows implementation additionally does not read window titles, UIA Name
-or Value properties, room/profile names, or draft text. It may return a
+The Windows implementation does not read window titles, UIA Name/Value,
+room/profile names, or draft text during normal inspection. It may return a
 diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
 states; native/COM failures remain `UiError`. Target identity and draft-empty
-claims stay false unless a future, separately approved design can verify them
-without crossing the privacy boundary.
+claims stay false in the current production profile.
 
-`MessageSender::stage` and `MessageSender::commit` require `&ApprovedSend`.
-Windows Wave 1 returns unsupported for both. The type is not serializable or
-cloneable, formats message text as redacted, and can be created only through
-the safety token boundary.
+## Mutation capability semantics
 
-## Outcomes and retries
+`MessageSender` is public for invocation but sealed against external
+implementations. The only reviewed implementations are the synthetic fake and
+Windows backend. Its methods still borrow `ApprovedSend` internally, but no
+public API lends that value: callers receive `ApprovedOperation`, whose
+`execute` method consumes the operation and retains its policy mutex for the
+entire synchronous sender call.
 
-Outcomes are `dry_run`, `staged_and_restored`, `commit_issued`,
-`echo_confirmed`, `submitted_unverified`, `not_submitted`, and
-`indeterminate`. `commit_issued`, `submitted_unverified`, and `indeterminate`
-always report `retry_safe=false`.
+The Windows sender independently validates mode and fresh evidence and uses a
+crate-private atomic one-shot execution claim immediately before its first
+write attempt. Policy then validates the returned outcome against the
+dispatched mode. An incompatible successful result is normalized to
+`SubmissionUncertain`.
 
-## CLI meaning fixed for Wave 1
+The native transaction is compiled only by the default-off
+`windows-ui-write` feature. This feature is not authorization. Runtime also
+requires `safety.allow_windows_ui_write=true`, an exact allowlist, explicit
+confirmation, and a backend send capability. The current production backend
+always reports that capability false, in both default and all-feature builds.
 
-The integration target is:
+## Outcomes, errors, and retry rules
+
+Outcomes are:
+
+- `dry_run`;
+- `staged_and_restored`;
+- `commit_issued`;
+- `echo_confirmed`;
+- `submitted_unverified`;
+- `not_submitted`; and
+- `indeterminate`.
+
+`commit_issued`, `echo_confirmed`, `submitted_unverified`, and `indeterminate`
+all have `attempted=true` and `retry_safe=false`. A commit report carrying any
+of those uncertain/attempted states exits 21. `SubmissionUncertain` errors also
+exit 21 and override any incorrectly supplied retry flag.
+
+Once the first `SetValue` method is entered, every error or panic through
+readback, validation, clear, restore, or commit preparation is non-retryable
+uncertainty. Once `Invoke` is entered, every returned error or panic is
+submission uncertainty. There is no automatic retry.
+
+## Windows CLI contract
+
+The Windows surface is:
 
 ```text
 openkakao-cli doctor --ui [--json]
-openkakao-cli local-send SELF_CHAT_NAME --stdin --opened-only [--dry-run] [--json]
+openkakao-cli local-send SELF_CHAT_NAME --stdin --opened-only \
+  [--dry-run | --stage-only --yes | --commit --yes] [--json]
 ```
 
-Dry-run is the default. `--stage-only` and `--commit` are reserved, mutually
-exclusive write modes and require `--yes`; neither is implemented or executed
-in Wave 1. They are refused before stdin or UI inspection. Stdin is the only
-Windows message path and is capped at 4,000 UTF-8 bytes and 1,000 Unicode
-scalar values. A rejected positional message is never echoed in parse output.
-Existing macOS syntax remains a compatibility facade until a later, separately
-reviewed migration.
+Dry-run is the default. Staging and commit are guarded requests, not a promise
+of availability. They fail before stdin or UI inspection unless both the
+Windows-specific runtime gate and backend capability are present. The current
+backend capability is absent, so production writes remain unavailable.
 
-The safety policy performs the production dry-run inspection exactly once.
-`DryRunPlan` retains the validated redacted snapshot privately, excludes it
-from serialization, redacts it in Debug, and exposes it by reference for report
-construction. This prevents a second-probe race between authorization and
-output.
+Stdin is the only Windows message path and is capped at 4,000 valid UTF-8 bytes
+and 1,000 Unicode scalar values. Mode, config, backend capability, policy
+configuration, and requested-label allowlist checks occur before message
+acquisition where applicable. A rejected positional message is never echoed
+in parse output.
+
+The safety policy performs one inspection. Dry-run reports the exact retained
+redacted snapshot; write authorization passes the same approved evidence into
+a fresh transaction revalidation instead of trusting it as current state.
 
 ## JSON contract
 
 `ActionReport` schema version 1 contains action, platform, backend, UI profile,
-target kind, attempted, outcome, evidence, and retry safety. It never contains
-a message, raw room name, profile name, HWND, or UIA runtime ID.
+target kind, attempted, outcome, evidence, and retry safety. Report fields and
+operation diagnostics are normalized through closed code allowlists. Unknown
+strings become fixed redacted values.
 
 ## Exit codes
 
@@ -82,11 +115,13 @@ a message, raw room name, profile name, HWND, or UIA runtime ID.
 | 11 | target refused |
 | 12 | composer/draft/user-state refusal |
 | 13 | permission/session/profile refusal |
-| 20 | backend failure before commit |
-| 21 | submission indeterminate; never retry automatically |
+| 20 | backend failure proven before commit/mutation uncertainty |
+| 21 | mutation/submission indeterminate; never retry automatically |
 
 ## Compatibility
 
-The macOS implementation remains in place. Its visible-list and
-already-open-window paths now share the common exact-and-unique matcher. Linux
-and unsupported stubs remain buildable. Manifest changes are target-scoped.
+The macOS implementation remains in place and continues to use
+`safety.allow_ax_send`. Windows uses the separate
+`safety.allow_windows_ui_write` flag, so an existing macOS opt-in cannot grant
+Windows UI-write authority. Linux and unsupported stubs remain buildable.
+Windows-only dependencies and the write feature are target-scoped/additive.

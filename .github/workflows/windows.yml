@@ -88,11 +88,17 @@ jobs:
       - name: Run synthetic library tests
         run: cargo test --locked --lib
 
+      - name: Run feature-gated Windows transaction tests
+        run: cargo test --locked --lib --all-features platform::windows
+
       - name: Run synthetic binary unit tests
         run: cargo test --locked --bin openkakao-cli
 
       - name: Run Windows fake and contract tests
         run: cargo test --locked --test windows_backend --test windows_policy --test windows_cli
+
+      - name: Run feature-gated Windows backend contract tests
+        run: cargo test --locked --all-features --test windows_backend
 
       - name: Run safe CLI compatibility selection
         shell: pwsh
@@ -123,6 +129,9 @@ jobs:
 
       - name: Build Windows debug binary
         run: cargo build --locked
+
+      - name: Build feature-gated Windows debug binary
+        run: cargo build --locked --all-features
 
       # Deliberately no upload-artifact step. The workflow never invokes a
       # live UI command and retains only dependency/compiler caches.

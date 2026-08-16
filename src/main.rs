@@ -553,7 +553,7 @@ enum Commands {
     /// Show local KakaoTalk database schema
     LocalSchema,
     #[cfg(target_os = "windows")]
-    /// Inspect an already-open self-chat; Wave 1 never mutates or submits.
+    /// Inspect or request a guarded action for an already-open self-chat.
     LocalSend(WindowsLocalSendOptions),
     #[cfg(not(target_os = "windows"))]
     /// Send a message via AX automation (no server contact, drives KakaoTalk's UI directly)
@@ -797,7 +797,7 @@ where
         Err(error) => return render_error(&error, output_mode),
     };
     if mode != SendMode::DryRun {
-        if !config.safety.allow_ax_send {
+        if !config.safety.allow_windows_ui_write {
             return render_error(
                 &UiError::new(
                     UiErrorKind::UnsupportedCapability,
@@ -822,6 +822,9 @@ where
             Ok(config) => config,
             Err(error) => return render_error(&error, output_mode),
         };
+    if let Err(error) = policy_config.validate_requested_label(options.self_chat_name_secret()) {
+        return render_error(&error, output_mode);
+    }
 
     let message = match input.read_message() {
         Ok(message) => message,
@@ -2806,7 +2809,7 @@ mod tests {
     #[cfg(target_os = "windows")]
     fn windows_write_test_config() -> config::OpenKakaoConfig {
         let mut config = config::OpenKakaoConfig::default();
-        config.safety.allow_ax_send = true;
+        config.safety.allow_windows_ui_write = true;
         config.safety.allowed_send_chats = vec!["SYNTHETIC_SELF_CHAT".to_string()];
         config
     }
@@ -2814,48 +2817,125 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_write_config_refuses_before_input_or_probe() {
-        let options = windows_local_send_options("--stage-only");
-        let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
-        let mut input = ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+        for mode in ["--stage-only", "--commit"] {
+            let options = windows_local_send_options(mode);
+            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+            let mut input =
+                ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
 
-        let output = run_windows_local_send_with(
-            &options,
-            &config::OpenKakaoConfig::default(),
-            true,
-            &backend,
-            &mut input,
-            "config-refusal".to_string(),
-        );
+            let output = run_windows_local_send_with(
+                &options,
+                &config::OpenKakaoConfig::default(),
+                true,
+                &backend,
+                &mut input,
+                "config-refusal".to_string(),
+            );
 
-        assert_eq!(output.exit_code, ExitCode::CapabilityUnavailable);
-        assert!(output.stderr.contains("windows_write_config_disabled"));
-        assert_eq!(input.into_inner().position(), 0);
-        assert_eq!(backend.inspect_calls(), 0);
-        assert_eq!(backend.stage_calls(), 0);
-        assert_eq!(backend.commit_calls(), 0);
+            assert_eq!(output.exit_code, ExitCode::CapabilityUnavailable);
+            assert!(output.stderr.contains("windows_write_config_disabled"));
+            assert_eq!(input.into_inner().position(), 0);
+            assert_eq!(backend.inspect_calls(), 0);
+            assert_eq!(backend.stage_calls(), 0);
+            assert_eq!(backend.commit_calls(), 0);
+        }
     }
 
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_production_write_capability_refuses_before_stdin_or_ui() {
-        let options = windows_local_send_options("--stage-only");
-        let backend = WindowsBackend::default();
+        for mode in ["--stage-only", "--commit"] {
+            let options = windows_local_send_options(mode);
+            let backend = WindowsBackend::default();
+            let mut input =
+                ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+
+            let output = run_windows_local_send_with(
+                &options,
+                &windows_write_test_config(),
+                true,
+                &backend,
+                &mut input,
+                "capability-refusal".to_string(),
+            );
+
+            assert_eq!(output.exit_code, ExitCode::CapabilityUnavailable);
+            assert!(output
+                .stderr
+                .contains("windows_write_capability_unavailable"));
+            assert_eq!(input.into_inner().position(), 0);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_synthetic_dry_run_inspects_once_without_mutation_or_secret_output() {
+        for json in [false, true] {
+            let options = windows_local_send_options("--dry-run");
+            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+            let mut input =
+                ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+            let nonce = "SYNTHETIC_NONCE_CANARY";
+
+            let output = run_windows_local_send_with(
+                &options,
+                &windows_write_test_config(),
+                json,
+                &backend,
+                &mut input,
+                nonce.to_string(),
+            );
+
+            assert_eq!(output.exit_code, ExitCode::Success);
+            if json {
+                let value: serde_json::Value = serde_json::from_str(output.stdout.trim())
+                    .expect("synthetic dry-run report should be JSON");
+                assert_eq!(value["outcome"], "dry_run");
+            } else {
+                assert!(output.stdout.contains("outcome: dry_run"));
+            }
+            assert_eq!(backend.inspect_calls(), 1);
+            assert_eq!(backend.stage_calls(), 0);
+            assert_eq!(backend.commit_calls(), 0);
+            for canary in ["SYNTHETIC_SELF_CHAT", "SYNTHETIC_BODY", nonce] {
+                assert!(!output.stdout.contains(canary));
+                assert!(!output.stderr.contains(canary));
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_allowlist_refuses_before_input_or_probe() {
+        let options = windows_local_send_options("--dry-run");
+        let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
         let mut input = ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+        let mut config = windows_write_test_config();
+        config.safety.allowed_send_chats = vec!["DIFFERENT_SYNTHETIC_TARGET".to_string()];
 
         let output = run_windows_local_send_with(
             &options,
-            &windows_write_test_config(),
+            &config,
             true,
             &backend,
             &mut input,
-            "capability-refusal".to_string(),
+            "SYNTHETIC_NONCE_CANARY".to_string(),
         );
 
-        assert_eq!(output.exit_code, ExitCode::CapabilityUnavailable);
-        assert!(output
-            .stderr
-            .contains("windows_write_capability_unavailable"));
+        assert_eq!(output.exit_code, ExitCode::TargetRefused);
         assert_eq!(input.into_inner().position(), 0);
+        assert_eq!(backend.inspect_calls(), 0);
+        assert_eq!(backend.stage_calls(), 0);
+        assert_eq!(backend.commit_calls(), 0);
+        for canary in [
+            "SYNTHETIC_SELF_CHAT",
+            "DIFFERENT_SYNTHETIC_TARGET",
+            "SYNTHETIC_BODY",
+            "SYNTHETIC_NONCE_CANARY",
+        ] {
+            assert!(!output.stdout.contains(canary));
+            assert!(!output.stderr.contains(canary));
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -2865,30 +2945,52 @@ mod tests {
             ("--stage-only", "staged_and_restored"),
             ("--commit", "commit_issued"),
         ] {
-            let options = windows_local_send_options(mode);
-            let backend = openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
-            let mut input =
-                ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
-            let output = run_windows_local_send_with(
-                &options,
-                &windows_write_test_config(),
-                true,
-                &backend,
-                &mut input,
-                format!("synthetic-{expected_outcome}"),
-            );
-            let value: serde_json::Value = serde_json::from_str(output.stdout.trim())
-                .expect("synthetic transaction report should be JSON");
+            for json in [false, true] {
+                let options = windows_local_send_options(mode);
+                let backend =
+                    openkakao_cli::platform::fake::FakeBackend::new(windows_safe_snapshot());
+                let mut input =
+                    ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
+                let nonce = format!("synthetic-{expected_outcome}-{json}");
+                let output = run_windows_local_send_with(
+                    &options,
+                    &windows_write_test_config(),
+                    json,
+                    &backend,
+                    &mut input,
+                    nonce.clone(),
+                );
 
-            assert_eq!(value["outcome"], expected_outcome);
-            assert_eq!(backend.inspect_calls(), 1);
-            assert_eq!(backend.stage_calls(), usize::from(mode == "--stage-only"));
-            assert_eq!(backend.commit_calls(), usize::from(mode == "--commit"));
-            if mode == "--commit" {
-                assert_eq!(output.exit_code, ExitCode::SubmissionIndeterminate);
-                assert_eq!(value["retry_safe"], false);
-            } else {
-                assert_eq!(output.exit_code, ExitCode::Success);
+                assert_eq!(backend.inspect_calls(), 1);
+                assert_eq!(backend.stage_calls(), usize::from(mode == "--stage-only"));
+                assert_eq!(backend.commit_calls(), usize::from(mode == "--commit"));
+                if json {
+                    let value: serde_json::Value = serde_json::from_str(output.stdout.trim())
+                        .expect("synthetic transaction report should be JSON");
+                    assert_eq!(value["outcome"], expected_outcome);
+                    assert_eq!(value["attempted"], mode == "--commit");
+                    assert_eq!(value["retry_safe"], mode != "--commit");
+                } else {
+                    assert!(output
+                        .stdout
+                        .contains(&format!("outcome: {expected_outcome}")));
+                    assert!(output
+                        .stdout
+                        .contains(&format!("attempted: {}", mode == "--commit")));
+                    assert!(output
+                        .stdout
+                        .contains(&format!("retry_safe: {}", mode != "--commit")));
+                }
+                if mode == "--commit" {
+                    assert_eq!(output.exit_code, ExitCode::SubmissionIndeterminate);
+                    assert_eq!(output.exit_code.as_i32(), 21);
+                } else {
+                    assert_eq!(output.exit_code, ExitCode::Success);
+                }
+                for canary in ["SYNTHETIC_SELF_CHAT", "SYNTHETIC_BODY", nonce.as_str()] {
+                    assert!(!output.stdout.contains(canary));
+                    assert!(!output.stderr.contains(canary));
+                }
             }
         }
     }

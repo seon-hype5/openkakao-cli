@@ -55,6 +55,7 @@ const OP_SEND_CAPABILITY: &str = "policy_send_capability";
 const OP_DRY_RUN_INSPECT: &str = "policy_dry_run_inspect";
 const OP_AUTHORIZE_INSPECT: &str = "policy_authorize_inspect";
 const OP_EXECUTE_MODE: &str = "policy_execute_mode";
+const OP_EXECUTE_OUTCOME: &str = "policy_execute_outcome";
 const OP_APP_SNAPSHOT: &str = "policy_app_snapshot";
 const OP_SNAPSHOT_TIME: &str = "policy_snapshot_time";
 const OP_TARGET_SNAPSHOT: &str = "policy_target_snapshot";
@@ -112,7 +113,10 @@ impl WindowsPolicyConfig {
         self.allowed_self_chat_labels.len()
     }
 
-    fn require_exact_unique(&self, requested_label: &str) -> Result<(), UiError> {
+    /// Validates a sensitive requested label without formatting or returning
+    /// it. Callers may use this before acquiring message bytes or UI state;
+    /// authorization repeats the same validation at the policy boundary.
+    pub fn validate_requested_label(&self, requested_label: &str) -> Result<(), UiError> {
         match exact_unique_match(
             self.allowed_self_chat_labels
                 .iter()
@@ -392,11 +396,41 @@ impl ApprovedOperation<'_> {
     where
         S: MessageSender + ?Sized,
     {
-        match self.approved.mode() {
+        let mode = self.approved.mode();
+        let outcome = match mode {
             SendMode::StageOnly => sender.stage(&self.approved),
             SendMode::Commit => sender.commit(&self.approved),
             SendMode::DryRun => Err(policy_error(UiErrorKind::InvalidInput, OP_EXECUTE_MODE)),
-        }
+        }?;
+
+        validate_execute_outcome(mode, outcome)
+    }
+}
+
+/// Refuses a sender result that is incompatible with the operation that was
+/// dispatched. Once a mutation method has returned, the policy cannot prove
+/// that no write or submission occurred, so a mismatch is always uncertain
+/// and never retry-safe.
+fn validate_execute_outcome(mode: SendMode, outcome: SendOutcome) -> Result<SendOutcome, UiError> {
+    let compatible = match mode {
+        SendMode::StageOnly => matches!(outcome, SendOutcome::StagedAndRestored),
+        SendMode::Commit => matches!(
+            outcome,
+            SendOutcome::CommitIssued
+                | SendOutcome::EchoConfirmed
+                | SendOutcome::SubmittedUnverified
+                | SendOutcome::Indeterminate
+        ),
+        SendMode::DryRun => false,
+    };
+
+    if compatible {
+        Ok(outcome)
+    } else {
+        Err(policy_error(
+            UiErrorKind::SubmissionUncertain,
+            OP_EXECUTE_OUTCOME,
+        ))
     }
 }
 
@@ -422,7 +456,7 @@ fn validate_common_intent(
         return Err(policy_error(UiErrorKind::TargetNotSelf, OP_TARGET_SNAPSHOT));
     }
 
-    config.require_exact_unique(requested_label)?;
+    config.validate_requested_label(requested_label)?;
     validate_message(&intent.message)?;
     validate_nonce(&intent.nonce)
 }
@@ -679,6 +713,8 @@ const fn policy_error(kind: UiErrorKind, operation: &'static str) -> UiError {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
     use crate::platform::{AppSnapshot, InputSnapshot, ProcessFingerprint, SecretMessage};
 
@@ -689,7 +725,7 @@ mod tests {
                 app_running: true,
                 process: Some(ProcessFingerprint {
                     pid: 7,
-                    executable: "process-fingerprint".to_string(),
+                    executable: "run:11111111111111111111111111111111".to_string(),
                     session_id: Some(1),
                 }),
                 app_version: Some(SUPPORTED_APP_VERSION.to_string()),
@@ -704,8 +740,8 @@ mod tests {
                 self_chat_verified: true,
                 exact_match: true,
                 unique_match: true,
-                window: Some("window-fingerprint".to_string()),
-                composer: Some("composer-fingerprint".to_string()),
+                window: Some("run:22222222222222222222222222222222".to_string()),
+                composer: Some("run:33333333333333333333333333333333".to_string()),
                 observed_at_unix_ms: 1_000,
                 expires_at_unix_ms: 2_000,
             },
@@ -716,7 +752,7 @@ mod tests {
                 writable: true,
                 draft_empty: true,
                 focused: false,
-                selector_profile_id: Some("known-selector".to_string()),
+                selector_profile_id: Some(SUPPORTED_SELECTOR_PROFILE_ID.to_string()),
             },
         }
     }
@@ -752,5 +788,134 @@ mod tests {
         assert_eq!(first, nonce_digest("nonce-1"));
         assert_ne!(first, nonce_digest("nonce-2"));
         assert_ne!(first.as_slice(), "nonce-1".as_bytes());
+    }
+
+    #[test]
+    fn execute_outcomes_are_compatible_with_the_dispatched_mode() {
+        assert_eq!(
+            validate_execute_outcome(SendMode::StageOnly, SendOutcome::StagedAndRestored),
+            Ok(SendOutcome::StagedAndRestored)
+        );
+
+        for outcome in [
+            SendOutcome::CommitIssued,
+            SendOutcome::EchoConfirmed,
+            SendOutcome::SubmittedUnverified,
+            SendOutcome::Indeterminate,
+        ] {
+            assert_eq!(
+                validate_execute_outcome(SendMode::Commit, outcome),
+                Ok(outcome)
+            );
+        }
+    }
+
+    #[test]
+    fn incompatible_execute_outcomes_are_submission_uncertain() {
+        for (mode, outcome) in [
+            (SendMode::StageOnly, SendOutcome::DryRun),
+            (SendMode::StageOnly, SendOutcome::CommitIssued),
+            (SendMode::StageOnly, SendOutcome::NotSubmitted),
+            (SendMode::Commit, SendOutcome::DryRun),
+            (SendMode::Commit, SendOutcome::StagedAndRestored),
+            (SendMode::Commit, SendOutcome::NotSubmitted),
+            (SendMode::DryRun, SendOutcome::DryRun),
+        ] {
+            let error = validate_execute_outcome(mode, outcome)
+                .expect_err("a mode/outcome mismatch must fail closed");
+            assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+            assert_eq!(error.operation, OP_EXECUTE_OUTCOME);
+            assert!(!error.retry_safe);
+        }
+    }
+
+    #[derive(Clone)]
+    struct FixedClock;
+
+    impl PolicyClock for FixedClock {
+        fn now_unix_ms(&self) -> Result<u64, UiError> {
+            Ok(1_500)
+        }
+    }
+
+    struct StaticProbe(UiSnapshot);
+
+    impl PlatformProbe for StaticProbe {
+        fn capabilities(&self) -> UiCapabilities {
+            UiCapabilities {
+                inspect: true,
+                send_open_chat: true,
+                open_chat_by_name: false,
+                read_visible: false,
+                watch_unread: false,
+            }
+        }
+
+        fn inspect(&self, _request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    struct MismatchedOutcomeSender {
+        outcome: SendOutcome,
+        stage_calls: Cell<usize>,
+        commit_calls: Cell<usize>,
+    }
+
+    impl crate::platform::contract::message_sender_seal::Sealed for MismatchedOutcomeSender {}
+
+    impl MessageSender for MismatchedOutcomeSender {
+        fn stage(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+            self.stage_calls.set(self.stage_calls.get() + 1);
+            Ok(self.outcome)
+        }
+
+        fn commit(&self, _approved: &ApprovedSend) -> Result<SendOutcome, UiError> {
+            self.commit_calls.set(self.commit_calls.get() + 1);
+            Ok(self.outcome)
+        }
+    }
+
+    #[test]
+    fn consuming_execute_normalizes_sender_mismatch_after_one_dispatch() {
+        for (mode, outcome, expected_stage_calls, expected_commit_calls) in [
+            (SendMode::StageOnly, SendOutcome::CommitIssued, 1, 0),
+            (SendMode::Commit, SendOutcome::StagedAndRestored, 0, 1),
+        ] {
+            let probe = StaticProbe(snapshot());
+            let policy = WindowsSafetyPolicy::with_clock(
+                WindowsPolicyConfig::new(["SYNTHETIC_SELF_CHAT"])
+                    .expect("synthetic allowlist should be valid"),
+                FixedClock,
+            );
+            let approval = policy
+                .authorize(
+                    &probe,
+                    "SYNTHETIC_SELF_CHAT",
+                    SendIntent::new(
+                        TargetKind::SelfChat,
+                        SecretMessage::new("SYNTHETIC_BODY"),
+                        mode,
+                        true,
+                        format!("synthetic-{mode:?}"),
+                    ),
+                )
+                .expect("synthetic state should authorize");
+            let sender = MismatchedOutcomeSender {
+                outcome,
+                stage_calls: Cell::new(0),
+                commit_calls: Cell::new(0),
+            };
+
+            let error = approval
+                .execute(&sender)
+                .expect_err("a sender mismatch must normalize to uncertainty");
+
+            assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+            assert_eq!(error.operation, OP_EXECUTE_OUTCOME);
+            assert!(!error.retry_safe);
+            assert_eq!(sender.stage_calls.get(), expected_stage_calls);
+            assert_eq!(sender.commit_calls.get(), expected_commit_calls);
+        }
     }
 }

@@ -64,6 +64,12 @@ pub struct SafetyConfig {
     /// messages from a real KakaoTalk window.
     #[serde(default)]
     pub allow_ax_send: bool,
+    /// Enable the guarded Windows UI write transaction. This is deliberately
+    /// separate from macOS AX authorization and remains insufficient without
+    /// the build feature, backend capability, exact allowlist, and a fresh
+    /// policy approval.
+    #[serde(default)]
+    pub allow_windows_ui_write: bool,
     /// Chat display names `local-send` is allowed to target. AX-send matches
     /// chats by display-name text scraped from the UI, not a chat-id (the
     /// local DB it would normally cross-check against is unreadable on
@@ -85,6 +91,7 @@ impl Default for SafetyConfig {
             allow_insecure_webhooks: false,
             allow_loco_write: false,
             allow_ax_send: false,
+            allow_windows_ui_write: false,
             allowed_send_chats: Vec::new(),
         }
     }
@@ -127,5 +134,29 @@ mod tests {
         assert_eq!(config.safety.webhook_timeout_secs, Some(10));
         assert!(!config.safety.allow_insecure_webhooks);
         assert!(!config.safety.allow_loco_write);
+        assert!(!config.safety.allow_ax_send);
+        assert!(!config.safety.allow_windows_ui_write);
+    }
+
+    #[test]
+    fn macos_ax_opt_in_does_not_enable_windows_ui_writes() {
+        let config: OpenKakaoConfig = toml::from_str(
+            "[safety]\nallow_ax_send = true\nallowed_send_chats = [\"SYNTHETIC\"]\n",
+        )
+        .expect("legacy macOS safety config should remain compatible");
+
+        assert!(config.safety.allow_ax_send);
+        assert!(!config.safety.allow_windows_ui_write);
+    }
+
+    #[test]
+    fn windows_ui_write_requires_its_own_explicit_opt_in() {
+        let config: OpenKakaoConfig = toml::from_str(
+            "[safety]\nallow_windows_ui_write = true\nallowed_send_chats = [\"SYNTHETIC\"]\n",
+        )
+        .expect("Windows safety config should parse");
+
+        assert!(!config.safety.allow_ax_send);
+        assert!(config.safety.allow_windows_ui_write);
     }
 }

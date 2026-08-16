@@ -4,7 +4,7 @@
 //! deliberately separated behind [`MessageSender`] and require an
 //! [`ApprovedSend`] produced by the safety module.
 
-mod contract;
+pub(crate) mod contract;
 pub mod fake;
 mod matcher;
 

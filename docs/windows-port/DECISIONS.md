@@ -8,13 +8,15 @@ process-memory techniques to the Windows MVP.
 
 ## ADR-002: Self-chat and opened-only
 
-Wave 1 recognizes only an already-open, exact-and-unique self-chat. It does not
-search for or open rooms. Ambiguity fails closed.
+The Windows MVP recognizes only an already-open, exact-and-unique self-chat.
+It does not search for or open rooms. Ambiguity fails closed.
 
 ## ADR-003: Read-only probe and sealed mutation capability
 
-Inspection and mutation are separate traits. Mutation accepts only a sealed
-`ApprovedSend`; dry-run depends only on the inspection trait.
+Inspection and mutation are separate traits. Dry-run depends only on the
+inspection trait. Mutation is implemented only by sealed crate backends and
+is dispatched through a consumed `ApprovedOperation`; the internal
+`ApprovedSend` also carries an atomic one-shot execution claim.
 
 ## ADR-004: Target-scoped SQLite features
 
@@ -55,3 +57,53 @@ Inspect once inside the safety policy and retain the exact redacted snapshot in
 the non-approved `DryRunPlan`. Root output consumes that value instead of
 probing again, avoiding a time-of-check/time-of-use race. Serialization and
 Debug omit the retained snapshot.
+
+## ADR-010: Default-off Windows native write feature
+
+Compile native ValuePattern/InvokePattern call sites only with the additive
+`windows-ui-write` Cargo feature, whose default is off. A feature-enabled build
+does not itself grant authority; runtime config, capability, policy, and fresh
+native validation remain mandatory.
+
+## ADR-011: Synchronous consumed transaction with outcome normalization
+
+Keep the policy lease for one synchronous sealed sender call. Validate the
+approved mode in both dispatcher and backend. Accept only
+`StagedAndRestored` from stage and commit-attempt outcomes from commit; map any
+sender-result mismatch to non-retryable submission uncertainty.
+
+## ADR-012: Bind freshness to a process instance and cross-process mutex
+
+Include process creation time in a run-local executable-instance fingerprint
+and requery it with PID, HWND, path, session, and UIA identity immediately
+before mutation. Hold a zero-wait named Windows mutex through final validation,
+write, readback, restore, or Invoke. Contention, abandonment, and wait failure
+are non-retryable uncertainty, never permission to continue.
+
+## ADR-013: Treat every post-SetValue failure as uncertain
+
+After entering the first `SetValue`, a provider error or panic cannot prove
+that no draft mutation occurred. Normalize every later failure—including
+readback, invariant change, clear, restore, and commit preflight—to
+`SubmissionUncertain`. Clear only after exact owned-value proof, at most once.
+Invoke remains a single-attempt boundary with the same non-retry rule.
+
+## ADR-014: Separate macOS and Windows runtime write authorization
+
+Retain `safety.allow_ax_send` for macOS compatibility and add the default-false
+`safety.allow_windows_ui_write` flag. Neither platform's opt-in authorizes the
+other. Both continue to require their own target allowlist and safety checks.
+
+## ADR-015: Compile all features in non-live Windows CI
+
+Pin third-party actions to reviewed full commit SHAs. Build both default and
+all-feature artifacts, but execute only explicit synthetic unit/contract test
+selections. Never infer live UI permission from an all-feature CI pass.
+
+## ADR-016: Keep production writes disabled pending measured selectors
+
+Do not infer self-chat identity from process/window/composer metadata and do
+not guess a send button. Until privacy-safe target evidence and an exact unique
+Invoke selector are measured and reviewed, advertise `send_open_chat=false`
+even in a feature-enabled build. A durable privacy-safe replay ledger is also
+required before automatic commit activation.
