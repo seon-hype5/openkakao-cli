@@ -3,9 +3,11 @@
 ## Scope
 
 `.github/workflows/windows.yml` is a non-live Windows compile and synthetic-test
-gate. It does not launch a UI probe, execute `doctor`, stage input, submit
-anything, inspect application data, or load credentials. The runner receives
-read-only repository permission and no project secrets.
+gate. `.github/workflows/openkakao-cli-ci.yml` is the corresponding
+fail-closed Linux regression and macOS build gate. Neither workflow launches a
+UI probe, executes `doctor`, stages input, submits anything, inspects
+application data, or loads credentials. Both receive read-only repository
+permission and no project secrets.
 
 The workflow uses `windows-2022` and the repository pin in
 `rust-toolchain.toml` (`1.95.0` with rustfmt and Clippy). The explicit action
@@ -14,19 +16,20 @@ requires one reviewed change to the repository pin and a matching workflow
 change.
 
 Every third-party action reference is pinned to a reviewed full 40-hex commit
-SHA. A trailing comment records the corresponding reviewed major tag for
+SHA. A trailing comment records the corresponding reviewed release tag for
 maintainer readability, but the tag is never used as the executable ref. Any
 action update requires provenance review in the action's official repository
 and a static check that rejects moving tags, branches, abbreviated SHAs, and
 non-hex refs.
 
-The workflow also checks every local Markdown link below `docs/windows-port`,
-rejects links that escape the repository, confirms the exact toolchain pin,
-and rejects any mutable third-party action reference. Changes anywhere in the
-Windows-port documentation trigger this gate, so a broken handoff or manual
-cannot bypass review through a narrower path filter. The check is inline
-PowerShell and does not depend on changing the runner's script-execution
-policy.
+The Windows workflow also checks every local Markdown link below
+`docs/windows-port`, rejects links that escape the repository, confirms the
+exact toolchain pin, and rejects any mutable third-party action reference in
+either non-release CI workflow. Changes to either CI workflow or anywhere in
+the Windows-port documentation trigger this gate, so a broken handoff, manual,
+or mutable cross-platform CI action cannot bypass review through a narrower
+path filter. The check is inline PowerShell and does not depend on changing the
+runner's script-execution policy.
 
 ## Automated Windows gates
 
@@ -143,32 +146,29 @@ retention period, and proof that forbidden fields cannot be produced.
 Action pins are part of the workflow trust boundary. Cache or artifact policy
 must not be weakened by replacing a full action SHA with a moving tag.
 
-## Linux regression plan
+## Linux regression gate
 
-The existing `.github/workflows/openkakao-cli-ci.yml` remains root-owned and is
-not modified by P60. Its Ubuntu test and lint jobs currently provide the
-primary Linux regression signal. Before `I20` or a release candidate, root
-should confirm:
+The root-owned `.github/workflows/openkakao-cli-ci.yml` uses the exact pinned
+toolchain and full-SHA action references, disables checkout credential
+persistence, grants only `contents: read`, and sets `RUST_BACKTRACE=0`. Its
+Ubuntu jobs run formatting, warnings-denied all-target/all-feature Clippy,
+library tests, binary-unit tests, the five synthetic compatibility targets,
+and the same fourteen exact CLI cases as the Windows workflow.
 
-1. formatting and warnings-denied Clippy pass with the pinned toolchain;
-2. library, binary-unit, and synthetic integration tests pass;
-3. the unsupported desktop-platform facade builds and refuses mutation;
-4. no Windows-only dependency leaks into an unconditional target; and
-5. no live diagnostic or local-state CLI case is added to CI.
+It deliberately does not use broad `cargo test`. The three legacy diagnostic
+cases that can enter credential or local-state paths stay excluded, and a new
+`cli_test` does not become executable merely because it was added. Any
+expansion must preserve this closed allowlist and prove that the new case uses
+no user, application, credential, UI, or network state.
 
-Any expansion of the Linux job must preserve the same explicit safe-test rule
-used by the Windows workflow.
+## macOS regression gate
 
-## macOS regression plan
-
-The existing CI builds the macOS release binary and runs `--version`; the
-release workflow also retains both supported macOS architectures. Before
-`I20`, root should additionally run or arrange a reviewed macOS job for:
-
-1. the existing AX unit/fake tests and exact-and-unique matcher regression;
-2. library and parser tests that do not open local data stores or credentials;
-3. a release build on the pinned toolchain; and
-4. `--version`/`--help` smoke checks only.
+The cross-platform workflow builds the macOS release artifact with the pinned
+toolchain but does not execute it. It uses the same read-only permission,
+full-SHA actions, disabled checkout credential persistence, compiler-only
+cache, and zero-backtrace policy as the Linux jobs. The tag-only release
+workflow remains a separate release-security scope and is never triggered by
+an ordinary integration-branch push.
 
 Automated macOS CI must not drive Accessibility UI, open a chat, invoke legacy
 database diagnostics, or submit anything. Live AX validation is a separately

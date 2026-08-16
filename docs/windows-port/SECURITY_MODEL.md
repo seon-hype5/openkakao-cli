@@ -146,34 +146,31 @@ or write authority.
   yet prove that the current room is the requested self-chat.
 - No live-measured exact unique send-button selector/InvokePattern is
   configured.
-- A pure signing/canonical-root decision seam, fakeable VERIFY/extract/CLOSE
-  orchestration, and a disconnected native process/file/WinTrust/SPKI adapter
-  exist. Distinct source-static signer and root-relation profile types prevent
-  runtime SPKI/path observations from becoming expected pins by accident, and
-  provider extraction exact-checks the owned
-  WinTrust state/pointer links, SIP subject choice, effective provider flags,
-  catalog recall, top-level/nested error state, verified primary index, and
-  exact signer/leaf helper pointer identity. A raw-pointer helper seam with one
-  unsafe extraction boundary traverses a retained synthetic provider chain
-  through the committed public fixture SPKI without calling WinTrust. No
-  production path constructs the
-  process/HWND-bound adapter, and tests never construct that full adapter.
-  Generic runtime root derivation now receives only the
-  source-static root kind, retains the exact known-folder and ancestor handles,
-  and emits only an evidence digest from bounded relative components; observed
-  paths/components cannot construct a reviewed profile. Synthetic CoTaskMem
-  success/failure/refusal/NULL cases prove Shell output ownership before HRESULT
-  handling without resolving a known folder. A focused source/API audit added
-  retained read-share-only canonical file and parent guards around the path-only
-  version query, VERIFY/CLOSE, and final reopen. A repository-owned self-signed fixture
-  now binds its build/source/artifact/certificate/SPKI hashes, checks one
-  bounded embedded signature without execution, and exercises the real
-  cache-only/noninteractive VERIFY/CLOSE lifetime. That call exposed and fixed
-  an over-strict invariant: documented `WSS_OUT_*` result bits may be added to
-  the exact input flags, while changed input or unknown bits still refuse.
-  Reviewed Kakao signer/root provenance, a second independent unsafe/root
-  review, production wiring, and real application observations remain absent.
-  Production refuses at
+- A pure executable-trust verifier, fakeable VERIFY/extract/CLOSE
+  orchestration, and a disconnected native process/path/file/WinTrust/SPKI
+  adapter exist. Distinct source-static target-byte, signer, and root-relation
+  profile types prevent runtime observations from becoming expected pins.
+  Runtime verification now requires an exact complete-file SHA-256, NTFS on a
+  fixed local volume, a guarded second process-image path query, exact file
+  identities, exact version/root/signer, and WinTrust's SHA-2-only strong-sign
+  policy. Provider extraction exact-checks owned state/pointer links, SIP
+  subject choice, effective provider flags, catalog recall, top-level/nested
+  errors, primary index, and helper pointer identity. Root derivation receives
+  only the source-static known-folder kind and emits a bounded relation digest;
+  observed paths cannot construct a profile. The repository fixture exercises
+  structure, complete-file hashing, strong-policy pointer lifetime, SPKI, and
+  cache-only VERIFY/CLOSE without execution. The native adapter and fixture
+  remain disconnected from KakaoTalk.
+
+  Independent unsafe review accepted these additions for a production-
+  disconnected merge, but activation remains blocked. Windows documents
+  `QueryFullProcessImageNameW` as returning a path, not a backing-file identity;
+  the two-query NTFS guard must pass adversarial rename/replacement timing on
+  every supported Windows image. A trusted timestamped fixture must also
+  qualify weak-signature rejection and legal provider high-word flags. The
+  current exact provider flag comparison may conservatively reject RFC3161
+  timestamp state. No architecture-specific Kakao target hash/SPKI/root bundle
+  or production wiring exists. Production refuses at
   `windows_executable_trust_unavailable` before ledger or UI observation.
 - Generic owner-chain evidence does not detect an unowned custom dialog or an
   overlay drawn inside the selected window. Activation needs negative live

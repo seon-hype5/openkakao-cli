@@ -281,33 +281,38 @@ ordinary CLI startup.
 
 ## D. Executable trust and canonical installation root
 
-Offline implementation status: a content-free verifier profile/evidence seam
-now models handle-derived final-path provenance, normalized local fixed-volume
-status, reparse refusal, process-creation binding, three-way file-identity
-agreement, exact version, no-UI/cache-only Authenticode behavior, catalog
-ambiguity, exact signer cardinality/digest, and exact install-root digest.
-Synthetic adversarial tests cover each refusal independently and redact every
-opaque identity. A disconnected native adapter now contains the reviewed
-process/file/WinTrust API sequence, but no automated test or production path
-calls it, no real executable has been observed, and no real signer/root digest
-is present. Production uses `UnavailableExecutableTrust` before ledger or UI
-observation, so this remains an additional activation barrier rather than a
-trust claim.
+Offline implementation status: a path-free/redacted verifier profile/evidence
+seam now models guarded and requeried process-image path provenance, NTFS on a
+fixed local volume, reparse refusal, process-creation binding, exact candidate
+file identities, exact complete-file SHA-256 and version, no-UI/cache-only
+SHA-2-only Authenticode behavior, catalog ambiguity, exact signer
+cardinality/digest, and exact install-root digest. Synthetic adversarial tests
+cover each pure refusal. A disconnected native adapter contains the reviewed
+process/path/file/WinTrust sequence, but no automated test or production path
+calls it against an installed application, and no production target/signer/root
+digest exists. Production uses `UnavailableExecutableTrust` before ledger or
+UI observation, so this remains an activation barrier rather than a trust
+claim.
 
 The current basename/version check is insufficient for activation. A future
-profile must open the executable itself, obtain its final normalized path from
-that handle with `GetFinalPathNameByHandleW`, and bind the handle's file
-identity to the process instance already checked immediately before mutation.
-Symlink/reparse resolution, network paths, unexpected volume types, path
-replacement, or handle/path disagreement fail closed.
+profile must pin the complete reviewed target bytes, target leaf SPKI, exact
+version/machine, and one architecture-specific root. The observer must query
+the process image path, hold the first candidate without write/delete sharing,
+query again, independently guard the second candidate, and require canonical
+path and file-identity agreement before trusting the verification handle.
+Symlink/reparse resolution, non-NTFS or non-fixed volumes, path replacement, or
+candidate disagreement fail closed. Because Windows does not document this
+path query as an atomic backing-file identity, hosted adversarial qualification
+on every supported Windows/NTFS image remains mandatory before wiring.
 
-`WinVerifyTrust` must run with no UI and cache-only URL retrieval so trust
-checking cannot prompt or introduce network access. Generic Authenticode trust
-is not publisher identity: activation also needs a reviewed Kakao release
-signer certificate/public-key digest and an exact allowed canonical install
-root obtained from signed release provenance. Neither value may be guessed
-from the current machine or printed. Unknown signer, catalog ambiguity,
-offline revocation uncertainty, or install-root mismatch disables writes.
+`WinVerifyTrust` must run with no UI, cache-only URL retrieval, and a live
+`CERT_STRONG_SIGN_PARA` selecting `szOID_CERT_STRONG_SIGN_OS_1`, so trust
+checking cannot prompt, introduce network access, or accept MD5/SHA-1. Generic
+Authenticode trust is not publisher identity: activation also needs a reviewed
+Kakao target SPKI and exact canonical install root obtained from release
+provenance. No value may be guessed from the current machine or printed.
+Unknown target bytes/signer, weak signing, catalog ambiguity, offline revocation
+uncertainty, or install-root mismatch disables writes.
 
 Adding this boundary requires a dependency-feature RFC for the minimum
 `windows` namespaces, an unsafe ownership/lifetime audit, and synthetic tests
@@ -323,11 +328,13 @@ A crate-private fakeable orchestration seam fixes the offline/no-UI WinTrust
 policy, attempts one CLOSE after every returned VERIFY state, maps provider
 errors/panics to closed refusal codes, and rejects catalog/secondary signature
 ambiguity before the existing pure verifier can succeed. Its disconnected
-Windows adapter retains stable boxed WinTrust state, binds three file identity
-observations to process creation time, validates no-follow fixed-volume paths,
+Windows adapter retains stable boxed WinTrust state, binds guarded candidate
+file identities to process creation time, validates no-follow NTFS/fixed-volume
+paths,
 retains the canonical file and parent directories under read-only sharing to
 exclude version/path write-delete ABA races, and hashes bounded DER-encoded
-leaf SPKI. It also resolves only the profile's source-static known-folder kind,
+leaf SPKI and the complete guarded file. It also resolves only the profile's
+source-static known-folder kind,
 retains the canonical root/ancestor handles, and hashes only a bounded
 same-volume relative relation. Post-VERIFY extraction now exact-
 checks every caller-owned policy/pointer field, the provider's data/action/
@@ -339,6 +346,13 @@ boundary now exercises the complete successful provider-to-signer-to-leaf
 SPKI path and pointer substitution refusals with retained synthetic
 structures; it does not qualify a real Windows provider image.
 
+The current provider high-word check is deliberately exact and therefore may
+reject a legitimate RFC3161 timestamp flag. Before activation, a trusted
+timestamped SHA-2 fixture must establish the supported provider flag shape and
+an isolated weak-signature fixture must prove MD5/SHA-1 refusal. Unknown flags,
+the NT5 chain flag, or any attempt to relax offline/no-UI/strong-sign policy
+remain refusals.
+
 The version-1 installation-root codec accepts only a reviewed root kind
 (`ProgramFilesX86`, `ProgramFiles64`, or `CurrentUserLocalAppData`) plus one to
 eight bounded printable-ASCII relative components. It rejects separators,
@@ -346,11 +360,12 @@ alternate-data-stream syntax, dot/space ambiguity, non-ASCII normalization,
 reserved DOS device names, and absolute prefixes; ASCII case is folded before a
 length-delimited,
 domain-separated SHA-256 digest. `ExecutableTrustProfile` accepts only this
-typed root digest and a `ReviewedSignerDigest` constructed from source-embedded
-static bytes; runtime SPKI/root observations remain unreviewed evidence types
-and cannot be passed as expected pins by accident. Generic runtime root
-derivation is implemented, but no production root kind/components or signer
-value is configured and the native adapter has zero production references.
+typed root digest, a `ReviewedExecutableDigest`, and a `ReviewedSignerDigest`
+constructed from source-embedded static bytes; runtime file/SPKI/root
+observations remain evidence types and cannot be passed as expected pins by
+accident. Generic runtime root derivation is implemented, but no production
+target bytes, root kind/components, or signer value is configured and the
+native adapter has zero production references.
 Production therefore remains
 `UnavailableExecutableTrust`.
 
@@ -372,8 +387,9 @@ authorization.
    current unavailable trust makes its production initialization unreachable.
    The native executable API adapter remains disconnected. Repository-owned
    signed-fixture evidence and generic runtime root derivation now exist, while
-   independent unsafe/root review, signer/root provenance, and the trust
-   production-wiring decision remain incomplete.
+   independent unsafe review is complete for a disconnected merge. Hosted NTFS
+   race/provider qualification, architecture-specific target/signer/root
+   provenance, and the trust production-wiring decision remain incomplete.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

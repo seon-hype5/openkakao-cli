@@ -11,6 +11,7 @@ on:
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
       - ".github/workflows/windows.yml"
+      - ".github/workflows/openkakao-cli-ci.yml"
       - "docs/windows-port/**"
   pull_request:
     paths:
@@ -22,6 +23,7 @@ on:
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
       - ".github/workflows/windows.yml"
+      - ".github/workflows/openkakao-cli-ci.yml"
       - "docs/windows-port/**"
   workflow_dispatch:
 
@@ -45,7 +47,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
 
@@ -59,7 +61,10 @@ jobs:
           $repositoryPrefix = $repositoryRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) +
             [System.IO.Path]::DirectorySeparatorChar
           $documentationRoot = Join-Path $repositoryRoot "docs/windows-port"
-          $workflowPath = Join-Path $repositoryRoot ".github/workflows/windows.yml"
+          $workflowPaths = @(
+            (Join-Path $repositoryRoot ".github/workflows/windows.yml"),
+            (Join-Path $repositoryRoot ".github/workflows/openkakao-cli-ci.yml")
+          )
           $toolchainPath = Join-Path $repositoryRoot "rust-toolchain.toml"
           $markdownFiles = @(Get-ChildItem -LiteralPath $documentationRoot -Recurse -File -Filter "*.md")
           $brokenLinks = [System.Collections.Generic.List[string]]::new()
@@ -92,17 +97,20 @@ jobs:
           }
 
           $thirdPartyActionCount = 0
-          foreach ($line in Get-Content -LiteralPath $workflowPath) {
-            if ($line -notmatch '^\s*uses:\s*(?<reference>\S+)') {
-              continue
-            }
-            $actionReference = $Matches["reference"]
-            if ($actionReference.StartsWith("./", [System.StringComparison]::Ordinal)) {
-              continue
-            }
-            $thirdPartyActionCount++
-            if ($actionReference -notmatch '^[^@\s]+@[0-9a-f]{40}$') {
-              throw "mutable third-party action reference"
+          foreach ($workflowPath in $workflowPaths) {
+            foreach ($line in Get-Content -LiteralPath $workflowPath) {
+              if ($line -notmatch '^\s*uses:\s*(?<reference>\S+)') {
+                continue
+              }
+              $actionReference = $Matches["reference"]
+              if ($actionReference.StartsWith("./", [System.StringComparison]::Ordinal)) {
+                continue
+              }
+              $thirdPartyActionCount++
+              if ($actionReference -notmatch '^[^@\s]+@[0-9a-f]{40}$') {
+                $relativeWorkflow = [System.IO.Path]::GetRelativePath($repositoryRoot, $workflowPath)
+                throw "mutable third-party action reference in ${relativeWorkflow}"
+              }
             }
           }
           if ($thirdPartyActionCount -eq 0) {
@@ -121,7 +129,7 @@ jobs:
           )
 
       - name: Install pinned repository toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
           toolchain: 1.95.0
           components: rustfmt, clippy
@@ -142,7 +150,7 @@ jobs:
           }
 
       - name: Cache compiler inputs and outputs only
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry

@@ -5,10 +5,12 @@ Date: 2026-08-17 KST
 ## Status
 
 The non-live Windows release candidate is complete through DAG task `I20` on
-branch `integration/windows-mvp`. The reviewed implementation tip is
-`6a4012a6c541c3ebd3a2f8fdd4f5aa84f8f7136b`. The commit containing this
-handoff is its clean successor and must be reported externally because a
-commit cannot embed its own content-derived SHA.
+branch `integration/windows-mvp`. Its reviewed pre-hardening parent is
+`1fc9dc3c32c882fbb33fbd195c264a93f9bd6cbe`. The clean commit containing this
+handoff adds branch-push CI safety, exact target-byte/strong-sign trust
+hardening, public installer corroboration, and independent audit evidence; its
+final SHA must be reported externally because a commit cannot embed its own
+content-derived SHA.
 
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
@@ -61,7 +63,9 @@ concurrency limit.
 - hosted Windows safe-matrix parity and static documentation/pin gate:
   `6bbb4efbe7d280d8b1cdbf0af623c0060880f6aa`; and
 - provider-owned subject/revocation/error/catalog validation before signer
-  traversal: `6a4012a6c541c3ebd3a2f8fdd4f5aa84f8f7136b`.
+  traversal: `6a4012a6c541c3ebd3a2f8fdd4f5aa84f8f7136b`; and
+- exact provider-to-signer-to-leaf traversal with nested error refusal:
+  `1fc9dc3c32c882fbb33fbd195c264a93f9bd6cbe`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -355,10 +359,10 @@ All recorded final-matrix Rust commands used the ignored
 | `cargo fmt --all -- --check` | passed |
 | `cargo test --locked --lib` | 189 passed |
 | `cargo test --locked --lib --all-features platform::windows` | 113 passed |
-| `cargo test --locked --bin openkakao-cli` | 177 passed |
+| `cargo test --locked --bin openkakao-cli` | 178 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
-| `cargo test --locked --test windows_cli` | 2 passed |
+| `cargo test --locked --test windows_cli` | 1 passed |
 | `cargo test --locked --all-features --test windows_backend` | 2 passed |
 | closed exact `cli_test` allowlist | 14 passed; 3 live/local-state cases excluded |
 | `auth_flow_test` | 23 passed |
@@ -366,14 +370,20 @@ All recorded final-matrix Rust commands used the ignored
 | `loco_crypto_test` | 12 passed |
 | `loco_packet_test` | 13 passed |
 | `message_db_test` | 20 passed |
-| disconnected native executable-trust module | 26 passed |
+| disconnected executable-trust module | 36 passed |
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
 | release all-feature Windows synthetic tests | 113 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 48 files, 56 local links, 0 broken; 3 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 50 files, 60 local links, 0 broken; 12 action refs pinned |
+| `actionlint` 1.7.12 on both non-release workflows | passed |
 | final `git diff --check` | passed |
+
+The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
+archive under ignored `.target`. Its SHA-256
+`6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9`
+matched the release checksum manifest; the tool itself is not committed.
 
 The excluded `cli_test` cases are
 `doctor_json_outputs_valid_json`, `auth_status_json_outputs_valid_json`, and
@@ -399,12 +409,15 @@ check.
 - actual messages sent: 0;
 - synthetic fixture executable launches: 0;
 - executable-trust known-folder resolutions: 0;
-- KakaoTalk files/databases read: 0;
+- installed KakaoTalk files/databases read: 0;
+- public official installer downloads: 2, both hash-only/static inspection;
+- installer or target executable launches: 0;
 - credential/token reads: 0;
 - native COM cancellation calls during implementation/tests: 0;
 - screenshots/UI dumps/process-memory reads/injection/hooks: 0;
 - automatic retries: 0;
-- pushes: 0; and
+- push attempts: 2 (noninteractive HTTPS and strict-host-key SSH);
+- successful pushes: 0; and
 - pull requests/releases: 0.
 
 All mutation counts in automated tests belong to fake or in-memory synthetic
@@ -436,25 +449,24 @@ implementation; it likewise authorizes no probe or production wiring.
   checked before the first ledger method; current unavailable trust therefore
   keeps every production locator/store call unreachable. No real LocalAppData
   path has been resolved or written.
-- Complete executable-signature and canonical-installation-root evidence. The
-  content-free decision seam, fakeable offline WinTrust policy, and a
-  disconnected native handle/WinVerifyTrust/provider/SPKI adapter now exist.
-  Its owned state/provider links and verified primary index are exact-checked.
-  A typed domain-separated root-relation codec now accepts only reviewed root
-  kinds and bounded portable relative components, so an observed absolute path
-  cannot become a pin. The adapter has zero production references,
-  has never been called against KakaoTalk, and now derives an evidence-only
-  root relation from guarded known-folder/executable paths. A focused source/API
-  audit closed the permissive-sharing ABA gap. The signed synthetic fixture,
-  structural/SPKI checks, and a real offline VERIFY/CLOSE lifetime test now
-  exist; that test also corrected the signature-settings in/out-flag invariant.
-  Provider-owned SIP subject, effective offline/revocation flags, success error
-  fields, and catalog-recall state are now exact-checked before signer
-  extraction rather than inferred from caller input.
-  Synthetic CoTaskMem success/failure/refusal/NULL paths now prove matching
-  Shell-output release counts without resolving a known folder.
-  Reviewed Kakao signer/root values, a second independent fixture/root unsafe
-  review, and production wiring remain absent and fail closed.
+- Complete architecture-specific target/signature/root evidence. The pure
+  verifier now requires a source-static complete target SHA-256 as well as
+  exact version, leaf SPKI, root relation, candidate identities, NTFS, and the
+  SHA-2-only WinTrust policy. The disconnected native adapter hashes the
+  guarded file, retains `CERT_STRONG_SIGN_PARA` through VERIFY/CLOSE, re-queries
+  the process image path while the first candidate is locked, and rejects
+  canonical/file-ID disagreement. Independent unsafe review found this
+  suitable for a disconnected merge but not activation.
+
+  The public 26.7 x86/x64 installer hashes were reproduced independently and
+  preserved as corroboration; neither architecture has an accepted installed
+  target hash/SPKI/root bundle. Activation additionally requires the NTFS
+  before/between/after-query substitution matrix on every supported Windows
+  image, OS-level MD5/SHA-1 refusal plus SHA-2 acceptance, and a trusted
+  timestamped provider-path run. The current exact provider flag comparison
+  may conservatively reject a legitimate RFC3161 high-word flag. All of these
+  failures remain closed because production has zero profile values/references
+  and uses `UnavailableExecutableTrust`.
 - Generic Win32 owner-chain modal evidence cannot identify an unowned custom
   dialog or an overlay drawn inside the selected window. Future activation
   needs negative live measurements and a reviewed version-specific rule if
@@ -473,27 +485,23 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-The offline multiple-window remediation, target-binding scaffold,
-replay-ledger scaffold, explicit-synthetic-base native ledger store,
-trust-ordered lazy production ledger factory, pure executable-trust decision
-seam, disconnected native trust API adapter, focused source/API audit, and
-repository-owned signed fixture with bounded structural/SPKI and offline
-VERIFY/CLOSE tests, guarded root derivation, and exact Shell allocation-lifetime
-tests, approval-owned native target-permit plumbing, a closed native
-target-observation state, and an approval-owned monotonic deadline are
-implemented. Conventional same-process owner-group popup evidence and repeated
-mutation-boundary modal checks are now implemented as well. Read-only COM
-cancellation now uses a pinned worker-thread handshake while preserving
-single-flight fallback for unsupported providers. The committed Windows
-workflow now mirrors the local safe compatibility and release matrix. All pass
-locally. Provider-owned WinTrust subject/revocation/error/catalog state and the
-complete helper-mediated primary signer/leaf SPKI traversal are now validated
-synthetically as well. The next safe work is a second independent unsafe
-review and a clean pinned-Windows hosted CI reproduction, followed separately
-by reviewed production signer/root provenance. None of these tasks requires or
-authorizes a real KakaoTalk path or signature, a live label probe, or a
+All production-disconnected code and documentation above now pass the local
+safe matrix, and independent CI, provenance, and native-unsafe reviews are
+complete. Both branch-push workflows have been narrowed to their non-live
+boundary. The current integration commit is clean, but noninteractive HTTPS
+had no credential and strict-host-key SSH had no authorized public key;
+neither attempt changed the remote. The next safe step is to supply repository
+write authentication, push the current integration head, and review the
+Windows/Linux/macOS hosted results. That work does not require a desktop
+session, product installation, KakaoTalk path/signature observation, or a
 trust-store change.
-The failed L10 result does not authorize another live observation.
+
+After hosted CI, the next activation work is isolated artifact qualification:
+select one architecture, reproduce the target bundle in a disposable VM, run
+the NTFS race matrix and strong-sign/provider fixtures, and accept or reject
+the resulting profile in a separate source change. It must keep production
+disconnected. The failed L10 result does not authorize another live
+observation.
 
 A future retry of DAG node L10, documented in
 [`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),

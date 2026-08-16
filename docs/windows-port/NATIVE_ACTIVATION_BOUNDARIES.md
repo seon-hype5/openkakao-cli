@@ -315,9 +315,10 @@ Offline adapter status: the crate-private orchestrator fixes the exact call
 policy and guarantees VERIFY/extract/CLOSE/post-CLOSE-reopen ordering across
 ordinary errors and panics. A disconnected native adapter now implements the
 process/HWND/creation binding, no-follow file and ancestor checks, normalized
-volume-GUID path, fixed-volume classification, content-free file identity,
-WinTrust provider extraction, bounded SPKI DER hashing, and an exactly-once
-RAII CLOSE fallback. It is compiled but has no production constructor call,
+volume-GUID path, NTFS/fixed-volume classification, redacted file identity,
+complete-file SHA-256, SHA-2-only WinTrust provider extraction, bounded SPKI
+DER hashing, and an exactly-once RAII CLOSE fallback. It is compiled but has
+no production constructor call,
 and automated tests never invoke the production observer or open an installed
 executable. A bounded repository-fixture test now invokes WinTrust only with
 the frozen cache-only/noninteractive policy and closes its state exactly once;
@@ -326,8 +327,9 @@ The adapter now also resolves only the source-static profile root kind through
 the known-folder API, retains canonical no-follow root/ancestor handles, and
 reduces the handle-derived relative executable relation to the existing digest.
 It receives no expected component text and cannot promote an observation into
-a reviewed profile. Reviewed signer/root values, independent fixture-backed
-unsafe review, and production wiring remain activation blockers. Native code
+a reviewed profile. Reviewed target/signer/root values, hosted NTFS adversarial
+qualification, a trusted timestamped provider fixture, and production wiring
+remain activation blockers. Native code
 avoids dynamic panic payloads because `catch_unwind` does not suppress the
 process-wide panic hook.
 
@@ -338,7 +340,7 @@ directory are now retained with read sharing only through VERIFY, CLOSE, and
 the final identity reopen. Any pre-existing writer/deleter conflict refuses;
 later write, delete, and rename opens remain excluded while the guards live.
 
-### Handle and process binding
+### Path guards and process binding
 
 The observer runs on the same joined mutation MTA worker and under the same
 named mutex as final validation. It receives the already selected HWND, PID,
@@ -346,32 +348,60 @@ process creation time, and process handle. It must not perform a separate
 best-effort scan.
 
 1. Requery HWND ownership and process creation time.
-2. Obtain the process image path through the opened process handle. Use a
-   read/write/delete-shared no-follow handle only for initial discovery. After
-   canonicalization, open the verification file with read access and
-   `FILE_SHARE_READ` only; failure caused by an existing writer or deleter is a
-   closed refusal.
+2. Obtain the process image path through `QueryFullProcessImageNameW`. This is
+   only a path query; it does not return the process's backing-file handle.
+   Open the first no-follow candidate, canonicalize it, then open the
+   verification candidate with read access and `FILE_SHARE_READ` only. Failure
+   caused by an existing writer or deleter is a closed refusal.
 3. Obtain the normalized final path from the file handle with
    `GetFinalPathNameByHandleW(FILE_NAME_NORMALIZED | VOLUME_NAME_GUID)` using a
    bounded two-call buffer protocol.
-4. Require an absolute volume-GUID path, derive its volume root, and require
-   `GetDriveTypeW(root) == DRIVE_FIXED`. Unknown, remote, removable, RAM-disk,
+4. Require an absolute volume-GUID path, derive its volume root, require
+   `GetDriveTypeW(root) == DRIVE_FIXED`, and require the guarded file's
+   `GetVolumeInformationByHandleW` filesystem name to be exactly `NTFS`
+   (ASCII-case-insensitive). Unknown, ReFS, remote, removable, RAM-disk,
    CD-ROM, or unmounted results refuse.
-5. Open and inspect every existing path component with
+5. While the first candidate is still held without write/delete sharing,
+   query the process image path a second time, independently open that second
+   candidate with the same share restrictions, and require exact canonical
+   path and file-identity agreement. The evidence flag is named
+   `process_image_path_requeried_and_guarded`; it never claims possession of a
+   kernel process-image backing handle.
+6. Open and inspect every existing path component with
    `FILE_FLAG_OPEN_REPARSE_POINT`; any reparse tag or inspection uncertainty
    refuses. Retain canonical parent handles with `FILE_SHARE_READ` only through
    verification and final reopen so a component cannot be renamed or replaced.
    Never follow an alternate path after such a refusal.
-6. Derive a content-free `FileIdentity` from volume serial/file ID plus the
-   already required process-creation binding. Compare the process-bound,
-   verification-handle, and immediately reopened identities exactly.
-7. Query the fixed file version while the canonical file and parent share
+7. Derive a redacted `FileIdentity` from volume serial/file ID plus the
+   already required process-creation binding. Compare the initial candidate,
+   guarded verification candidate, second-query candidate, and post-VERIFY
+   reopen identities exactly.
+8. Hash every byte of the guarded file with SHA-256, then query the fixed file
+   version while the canonical file and parent share
    guards remain live, immediately reopen and rebind the file identity, and
    require `FileVersion::KNOWN`. `GetFileVersionInfoW` is path-only; without
    those guards, before/after identities alone do not exclude replace/restore.
 
-Raw paths, file IDs, PIDs, HWNDs, volume identifiers, or creation times never
-enter `UiError`, output, fixtures, or `Debug`.
+An NTFS experiment in the ignored repository target directory demonstrated
+that a running synthetic PE can be source-renamed and replaced. On this host,
+both `QueryFullProcessImageNameW` calls followed the renamed backing file and
+the guarded comparison refused the substitution shape. Microsoft documents
+the API as returning a path, however, not an atomic backing-file identity.
+Activation therefore requires the three adversarial timings (replacement
+before observation, between queries, and after the second query) to pass on
+every supported Windows/NTFS image. Supported builds must be limited to that
+matrix; a long-term stronger design would retain a backing-file handle at
+launch or use another documented kernel-backed identity mechanism.
+
+Raw paths, file IDs, PIDs, HWNDs, volume identifiers, creation times, or target
+digests never enter `UiError`, output, fixtures, or `Debug`.
+
+The complete-file hash uses a bounded 64-KiB zeroizing buffer, rejects empty
+or larger-than-512-MiB files, reads exactly the handle-reported length, and
+rewinds the shared handle on every path before WinTrust consumes it. A
+production profile must supply a source-static `ReviewedExecutableDigest` from
+the accepted target bundle. The installer hash, the target's Authenticode PE
+digest, and a runtime observation cannot satisfy this exact-byte pin.
 
 ### Authenticode and signer pin
 
@@ -385,7 +415,10 @@ opened file handle and its final path. Initialize every structure with
 - `dwProvFlags` containing `WTD_CACHE_ONLY_URL_RETRIEVAL`,
   `WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`, and `WTD_DISABLE_MD2_MD4`;
 - `fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN`; and
-- `WINTRUST_SIGNATURE_SETTINGS.dwFlags = WSS_GET_SECONDARY_SIG_COUNT`.
+- `WINTRUST_SIGNATURE_SETTINGS.dwFlags = WSS_GET_SECONDARY_SIG_COUNT`; and
+- `WINTRUST_SIGNATURE_SETTINGS.pCryptoPolicy` pointing to a live
+  `CERT_STRONG_SIGN_PARA` with `CERT_STRONG_SIGN_OID_INFO_CHOICE` and
+  `szOID_CERT_STRONG_SIGN_OS_1` (SHA-2 only).
 
 Treat only the integer return value `0` as trusted. Missing cached revocation
 evidence, provider/policy uncertainty, any secondary signature, catalog use,
@@ -428,6 +461,17 @@ certificate, without calling WinTrust.
 must still equal exactly `WSS_GET_SECONDARY_SIG_COUNT`, only documented
 `WSS_OUT_*` bits may be added, and any other input or unknown bit refuses. This
 distinction is covered by both pure drift tests and the real fixture call.
+
+The current provider check rejects every additional high-word flag. The SDK
+also defines provider-added `CPD_RFC3161v21` and
+`CPD_RETURN_LOWER_QUALITY_CHAINS` flags, so that exact check may refuse a valid
+timestamped target. This is safe availability failure while the adapter is
+disconnected, not completed ABI qualification. Before activation, a positive
+trusted timestamped fixture must establish the observed flags. The eventual
+policy must require the caller low word exactly, require exactly the
+chain-excluding-root revocation choice, explicitly decide any observed
+RFC3161/lower-quality bits, and reject `CPD_USE_NT5_CHAIN_FLAG` and all unknown
+bits.
 
 Every `WTD_STATEACTION_VERIFY` attempt that produced state is paired with
 exactly one `WTD_STATEACTION_CLOSE`, including trust failure, extraction
@@ -475,21 +519,24 @@ then emits only an evidence `TrustDigest`. Absolute/root/component text never
 enters evidence, errors, formatting, or the reviewed profile type.
 
 No implementation may inspect the current KakaoTalk installation and then
-declare that observed value trusted. Until an independently reviewed signer
-SPKI digest and root-relation digest exist, production continues to use
+declare that observed value trusted. Until an independently reviewed target
+whole-file digest/length, signer SPKI digest, root-relation digest, and Windows
+qualification matrix exist, production continues to use
 `UnavailableExecutableTrust`.
 
 ### Trust native API inventory
 
 - Existing process/file APIs plus `CreateFileW`,
   `GetFinalPathNameByHandleW`, `GetFileInformationByHandleEx`,
-  `GetVolumePathNameW`, and `GetDriveTypeW`.
+  `GetVolumePathNameW`, `GetVolumeInformationByHandleW`, `GetDriveTypeW`,
+  `GetFileSizeEx`, `SetFilePointerEx`, and `ReadFile`.
 - `SHGetKnownFolderPath` with the three exact folder IDs above and
   `CoTaskMemFree` for every non-null returned allocation.
 - `WinVerifyTrust`, `WINTRUST_DATA`, `WINTRUST_FILE_INFO`,
   `WINTRUST_SIGNATURE_SETTINGS`, `WTHelperProvDataFromStateData`,
   `WTHelperGetProvSignerFromChain`, and `WTHelperGetProvCertFromChain`.
-- `CryptEncodeObjectEx` with `X509_PUBLIC_KEY_INFO`; SHA-256 remains the
+- `CERT_STRONG_SIGN_PARA` with `szOID_CERT_STRONG_SIGN_OS_1`, plus
+  `CryptEncodeObjectEx` with `X509_PUBLIC_KEY_INFO`; SHA-256 remains the
   existing Rust `sha2` implementation.
 
 ## Unsafe ownership table
@@ -501,7 +548,7 @@ SPKI digest and root-relation digest exist, production continues to use
 | Known-folder `PWSTR` | Shell allocator | `CoTaskMemFree` exactly once |
 | DPAPI output/description | Local allocator | zero sensitive span, then `LocalFree` exactly once |
 | `GetSecurityInfo` descriptor | Local allocator | `LocalFree`; owner/DACL/ACE pointers borrow it |
-| Process/file/directory handles | caller | existing RAII `CloseHandle` wrapper, exactly once; canonical file/parent read-share guards outlive VERIFY, CLOSE, and final reopen |
+| Process/candidate-file/directory handles | caller | existing RAII `CloseHandle` wrapper, exactly once; the queried path is not a process backing-file handle; candidate file/parent read-share guards outlive complete hashing, VERIFY, CLOSE, and final reopen |
 | Token-information bytes | Rust allocation | pointer/range validation; drop after copied SID use |
 | ACL/security descriptor | Rust-owned aligned storage | all embedded pointers remain valid through synchronous create call |
 | WinTrust file/data/settings | stack owner | path/handle/settings outlive VERIFY and CLOSE calls |
@@ -560,9 +607,14 @@ open the installed KakaoTalk binary.
   synthetic worker is still pinned when cancellation is requested, with no
   native COM call.
 
-Automated tests must not run the product binary, enumerate desktop windows,
-call the production native observer, or access KakaoTalk files. Live L10 and
-all later gates still require a fresh, explicitly named approval.
+Automated native/transaction tests must not run the product binary, enumerate
+desktop windows, call the production native observer, or access KakaoTalk
+files. Within the two non-release safe CI workflows, the only automated
+product-binary executions are the fourteen exact help/version/usage parser
+cases named in both workflows; broad or newly discovered CLI tests are
+forbidden. The separate tag/manual release workflow remains outside this
+claim. Live L10 and all later gates still require a fresh, explicitly named
+approval.
 
 ## Implementation order
 

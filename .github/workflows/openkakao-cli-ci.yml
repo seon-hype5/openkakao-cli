@@ -1,4 +1,4 @@
-name: openkakao-cli CI
+name: openkakao-cli safe cross-platform CI
 
 on:
   push:
@@ -18,86 +18,142 @@ on:
       - "rust-toolchain.toml"
       - ".github/workflows/openkakao-cli-ci.yml"
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: safe-cross-platform-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  MANIFEST: Cargo.toml
+  CARGO_TARGET_DIR: .target/cross-platform-ci
+  RUST_BACKTRACE: "0"
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: synthetic library, unit, compatibility, exact CLI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          rustflags: ""
+          persist-credentials: false
 
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
+      - name: Install pinned repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.95.0
+          rustflags: ""
+          cache: false
+
+      - name: Cache compiler inputs and outputs only
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: cargo-test-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-test-${{ runner.os }}-
+            .target/cross-platform-ci
+          key: linux-safe-rust-1.95.0-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            linux-safe-rust-1.95.0-
 
-      - name: Cargo test
-        run: cargo test --manifest-path $MANIFEST
+      - name: Run synthetic library tests
+        run: cargo test --locked --lib
+
+      - name: Run synthetic binary unit tests
+        run: cargo test --locked --bin openkakao-cli
+
+      - name: Run synthetic compatibility suites
+        run: cargo test --locked --test auth_flow_test --test loco_client_test --test loco_crypto_test --test loco_packet_test --test message_db_test
+
+      - name: Run safe CLI compatibility selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_tests=(
+            help_exits_zero
+            help_lists_expected_subcommands
+            version_prints_correct_version
+            invalid_subcommand_exits_nonzero
+            send_without_args_fails
+            read_without_chat_id_fails
+            json_flag_is_global
+            no_color_flag_is_global
+            watch_accepts_capture_flag
+            probe_accepts_capture_pushes_flag
+            delete_help_works
+            delete_without_args_fails
+            mark_read_help_works
+            mark_read_without_args_fails
+          )
+          for test_name in "${safe_tests[@]}"; do
+            cargo test --locked --test cli_test "$test_name" -- --exact
+          done
 
   lint:
-    runs-on: ubuntu-latest
+    name: pinned formatting and warnings-denied lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          rustflags: ""
+          persist-credentials: false
 
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
+      - name: Install pinned repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.95.0
+          components: rustfmt, clippy
+          rustflags: ""
+          cache: false
+
+      - name: Cache compiler inputs and outputs only
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: cargo-lint-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-lint-${{ runner.os }}-
+            .target/cross-platform-ci
+          key: linux-lint-rust-1.95.0-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            linux-lint-rust-1.95.0-
 
-      - name: Cargo fmt
-        run: cargo fmt --manifest-path $MANIFEST --check
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
-      - name: Cargo clippy
-        run: cargo clippy --manifest-path $MANIFEST -- -D warnings
+      - name: Lint every target
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   build-macos:
+    name: pinned macOS release build only
     runs-on: macos-14
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          rustflags: ""
+          persist-credentials: false
 
-      - name: Cache cargo registry and build
-        uses: actions/cache@v4
+      - name: Install pinned repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+        with:
+          toolchain: 1.95.0
+          rustflags: ""
+          cache: false
+
+      - name: Cache compiler inputs and outputs only
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: cargo-macos-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-macos-${{ runner.os }}-
+            .target/cross-platform-ci
+          key: macos-build-rust-1.95.0-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: |
+            macos-build-rust-1.95.0-
 
-      - name: Build release
-        run: cargo build --release --manifest-path $MANIFEST
-
-      - name: Smoke test
-        run: ./target/release/openkakao-cli --version
+      - name: Build release without executing it
+        run: cargo build --locked --release

@@ -2,12 +2,13 @@
 //!
 //! The orchestration freezes the exact offline WinTrust policy plus
 //! VERIFY/extract/CLOSE lifetime. A native adapter now implements the process,
-//! file-identity, known-folder-relative root, provider-chain, and SPKI
-//! boundary, but no production path constructs the full process-bound adapter
-//! and automated tests never call it. Reviewed signer/root values remain
+//! file-identity, complete-file digest, known-folder-relative root,
+//! provider-chain, strong-signature, and SPKI boundary, but no production path
+//! constructs the full process-bound adapter and automated tests never call
+//! it. Reviewed target/signer/root values and Windows/NTFS qualification remain
 //! mandatory before wiring. The stable WinTrust state is revalidated after
-//! VERIFY, including exact provider pointer linkage and the primary
-//! verified-signature index.
+//! VERIFY, including exact provider pointer linkage and the primary verified-
+//! signature index.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -20,7 +21,7 @@ use std::path::{Component, Path, PathBuf};
 use std::ptr;
 
 use sha2::{Digest, Sha256};
-use windows::core::{w, GUID, HRESULT, PCWSTR, PWSTR};
+use windows::core::{w, GUID, HRESULT, PCWSTR, PSTR, PWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, FILETIME, GENERIC_READ, HANDLE, HWND,
     INVALID_HANDLE_VALUE,
@@ -30,7 +31,8 @@ use windows::Win32::Security::Cryptography::{
     CertCreateCertificateContext, CertFreeCertificateContext,
 };
 use windows::Win32::Security::Cryptography::{
-    CryptEncodeObjectEx, CERT_CONTEXT, CERT_INFO, CRYPT_ENCODE_OBJECT_FLAGS, X509_ASN_ENCODING,
+    CryptEncodeObjectEx, CERT_CONTEXT, CERT_INFO, CERT_STRONG_SIGN_OID_INFO_CHOICE,
+    CERT_STRONG_SIGN_PARA, CERT_STRONG_SIGN_PARA_0, CRYPT_ENCODE_OBJECT_FLAGS, X509_ASN_ENCODING,
     X509_PUBLIC_KEY_INFO,
 };
 use windows::Win32::Security::WinTrust::{
@@ -47,9 +49,10 @@ use windows::Win32::Security::WinTrust::{
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FileAttributeTagInfo, FileIdInfo, GetDriveTypeW, GetFileInformationByHandleEx,
-    GetFileType, GetFileVersionInfoSizeW, GetFileVersionInfoW, GetFinalPathNameByHandleW,
-    GetVolumePathNameW, VerQueryValueW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_ATTRIBUTE_TAG_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    GetFileSizeEx, GetFileType, GetFileVersionInfoSizeW, GetFileVersionInfoW,
+    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, GetVolumePathNameW, ReadFile,
+    SetFilePointerEx, VerQueryValueW, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_ATTRIBUTE_TAG_INFO, FILE_BEGIN, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
     FILE_ID_INFO, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_MODE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK, GETFINALPATHNAMEBYHANDLE_FLAGS,
     OPEN_EXISTING, VOLUME_NAME_GUID, VS_FIXEDFILEINFO,
@@ -70,12 +73,22 @@ use crate::platform::{UiError, UiErrorKind};
 use super::executable_trust::{
     observed_install_root_digest, verify_executable_trust, AuthenticodeStatus,
     ExecutableTrustBoundary, ExecutableTrustEvidence, ExecutableTrustProfile, FileIdentity,
-    FinalPathSource, InstallRootKind, ReparseState, TrustDigest, VolumeKind,
+    FileSystemKind, FinalPathSource, InstallRootKind, ReparseState, TrustDigest, VolumeKind,
     MAX_INSTALL_ROOT_COMPONENTS, MAX_INSTALL_ROOT_COMPONENT_BYTES, MAX_INSTALL_ROOT_RELATION_BYTES,
 };
 #[cfg(test)]
-use super::executable_trust::{InstallRootDigest, ReviewedSignerDigest};
+use super::executable_trust::{InstallRootDigest, ReviewedExecutableDigest, ReviewedSignerDigest};
 use super::FileVersion;
+
+// The documented szOID_CERT_STRONG_SIGN_OS_1 value. A module-owned static is
+// used instead of comparing addresses of an inlinable generated `const`, so
+// the exact same NUL-terminated pointer remains stable through VERIFY/CLOSE.
+static STRONG_SIGN_OS_1_OID: &[u8] = b"1.3.6.1.4.1.311.72.1.1\0";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WinTrustStrongSignPolicy {
+    OsSha2Only,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct WinTrustCallPolicy {
@@ -89,6 +102,7 @@ struct WinTrustCallPolicy {
     provider_flags: WINTRUST_DATA_PROVIDER_FLAGS,
     ui_context: WINTRUST_DATA_UICONTEXT,
     signature_flags: WINTRUST_SIGNATURE_SETTINGS_FLAGS,
+    strong_sign_policy: WinTrustStrongSignPolicy,
 }
 
 impl WinTrustCallPolicy {
@@ -106,6 +120,7 @@ impl WinTrustCallPolicy {
                 | WTD_DISABLE_MD2_MD4,
             ui_context: WTD_UICONTEXT_EXECUTE,
             signature_flags: WSS_GET_SECONDARY_SIG_COUNT,
+            strong_sign_policy: WinTrustStrongSignPolicy::OsSha2Only,
         }
     }
 
@@ -123,6 +138,7 @@ impl WinTrustCallPolicy {
                     | WTD_DISABLE_MD2_MD4)
             && self.ui_context == WTD_UICONTEXT_EXECUTE
             && self.signature_flags == WSS_GET_SECONDARY_SIG_COUNT
+            && self.strong_sign_policy == WinTrustStrongSignPolicy::OsSha2Only
     }
 
     fn expected_provider_flags(self) -> u32 {
@@ -144,6 +160,7 @@ impl fmt::Debug for WinTrustCallPolicy {
             .field("network", &"cache_only")
             .field("revocation", &"whole_chain_excluding_root")
             .field("weak_hashes", &"disabled")
+            .field("strong_sign_policy", &"sha2_only")
             .field("secondary_signature_count", &"required")
             .finish()
     }
@@ -182,12 +199,14 @@ struct NativePathObservation {
     final_path_source: FinalPathSource,
     path_is_absolute_and_normalized: bool,
     volume_kind: VolumeKind,
+    file_system_kind: FileSystemKind,
     reparse_state: ReparseState,
-    process_image_handle_bound: bool,
+    process_image_path_requeried_and_guarded: bool,
     process_creation_time_bound: bool,
     process_file_identity: Option<FileIdentity>,
     verified_file_identity: Option<FileIdentity>,
     version: Option<FileVersion>,
+    executable_digest: Option<TrustDigest>,
     install_root_digest: Option<TrustDigest>,
 }
 
@@ -198,12 +217,17 @@ impl fmt::Debug for NativePathObservation {
             .field("final_path_source", &self.final_path_source)
             .field("normalized", &self.path_is_absolute_and_normalized)
             .field("volume_kind", &self.volume_kind)
+            .field("file_system_kind", &self.file_system_kind)
             .field("reparse_state", &self.reparse_state)
-            .field("process_handle_bound", &self.process_image_handle_bound)
+            .field(
+                "process_image_path_requeried_and_guarded",
+                &self.process_image_path_requeried_and_guarded,
+            )
             .field("creation_bound", &self.process_creation_time_bound)
             .field("process_identity", &presence(self.process_file_identity))
             .field("verified_identity", &presence(self.verified_file_identity))
             .field("version_observed", &self.version.is_some())
+            .field("executable_digest", &presence(self.executable_digest))
             .field("root_digest", &presence(self.install_root_digest))
             .finish()
     }
@@ -258,7 +282,7 @@ fn bounded_count(value: usize) -> &'static str {
 }
 
 trait NativeExecutableTrustApi {
-    /// Opaque state that keeps the original process-image handle and canonical
+    /// Opaque state that keeps the first guarded path candidate and canonical
     /// path binding alive until verification closes and the path is reopened.
     type PathState;
     type TrustState;
@@ -348,7 +372,7 @@ fn observe_and_verify<A: NativeExecutableTrustApi>(
         .map_err(NativeTrustFailure::into_ui_error)?;
     // The third identity is intentionally observed only after WinTrust state
     // is closed. This catches path replacement during verification while the
-    // original process-image handle/path state is still alive for comparison.
+    // original guarded candidate/path state is still alive for comparison.
     let reopened_file_identity =
         catch_unwind(AssertUnwindSafe(|| api.reopen_file_identity(&path_state)))
             .map_err(|_| NativeTrustFailure::ReopenedIdentity.into_ui_error())?
@@ -361,13 +385,15 @@ fn observe_and_verify<A: NativeExecutableTrustApi>(
         final_path_source: path.final_path_source,
         path_is_absolute_and_normalized: path.path_is_absolute_and_normalized,
         volume_kind: path.volume_kind,
+        file_system_kind: path.file_system_kind,
         reparse_state: path.reparse_state,
-        process_image_handle_bound: path.process_image_handle_bound,
+        process_image_path_requeried_and_guarded: path.process_image_path_requeried_and_guarded,
         process_creation_time_bound: path.process_creation_time_bound,
         process_file_identity: path.process_file_identity,
         verified_file_identity: path.verified_file_identity,
         reopened_file_identity,
         version: path.version,
+        executable_digest: path.executable_digest,
         authenticode_status: if authenticode.winverifytrust_status == 0 {
             AuthenticodeStatus::Trusted
         } else {
@@ -375,6 +401,10 @@ fn observe_and_verify<A: NativeExecutableTrustApi>(
         },
         trust_ui_forbidden: policy.noninteractive_hwnd && policy.ui_choice == WTD_UI_NONE,
         cache_only_url_retrieval: policy.provider_flags.contains(WTD_CACHE_ONLY_URL_RETRIEVAL),
+        sha2_strong_signature_policy: matches!(
+            policy.strong_sign_policy,
+            WinTrustStrongSignPolicy::OsSha2Only
+        ),
         catalog_ambiguous: authenticode.catalog_choice_used
             || authenticode.secondary_signature_count != 0,
         signer_count,
@@ -389,6 +419,8 @@ const MAX_PATH_ANCESTORS: usize = 64;
 const MAX_VOLUME_ROOT_UNITS: usize = 64;
 const MAX_CERTIFICATE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SPKI_DER_BYTES: usize = 64 * 1024;
+const MAX_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
+const EXECUTABLE_HASH_BUFFER_BYTES: usize = 64 * 1024;
 const DRIVE_FIXED_VALUE: u32 = 3;
 const FIXED_FILE_INFO_SIGNATURE: u32 = 0xFEEF_04BD;
 const FILE_ID_DOMAIN: &[u8] = b"openkakao.windows.executable-file-id.v1\0";
@@ -456,7 +488,7 @@ impl Drop for OwnedNativeHandle {
 }
 
 struct WindowsPathState {
-    process_image_file: OwnedNativeHandle,
+    initial_candidate_file: OwnedNativeHandle,
     verification_file: OwnedNativeHandle,
     /// Keeps every canonical parent directory open without write/delete
     /// sharing until VERIFY, CLOSE, and the final identity reopen complete.
@@ -538,9 +570,9 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         // its independently guarded parent chain have both been established.
         let _source_parent_guards = open_reparse_free_parent_chain(&source_path)?;
 
-        let process_image_file = open_regular_file_no_follow(&source_path)?;
-        validate_regular_file_handle(&process_image_file)?;
-        let canonical_path = canonical_file_path(&process_image_file)?;
+        let initial_candidate_file = open_regular_file_no_follow(&source_path)?;
+        validate_regular_file_handle(&initial_candidate_file)?;
+        let canonical_path = canonical_file_path(&initial_candidate_file)?;
         if !is_fixed_local_volume(&canonical_path)? {
             return Err(NativeTrustFailure::PathObservation);
         }
@@ -553,6 +585,25 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         let verification_file = open_guarded_regular_file_no_follow(&canonical_path)?;
         validate_regular_file_handle(&verification_file)?;
         if canonical_file_path(&verification_file)? != canonical_path {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let file_system_kind = file_system_kind(&verification_file)?;
+        if file_system_kind != FileSystemKind::Ntfs {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+
+        // Query the process image again only after the first candidate file is
+        // held without write/delete sharing. On NTFS a source rename updates
+        // the process image name. If the first path was replaced between the
+        // process query and guarded open, it remains locked in place while this
+        // second independently opened candidate resolves to the actual renamed
+        // backing file and the comparison below refuses.
+        let rebound_source_path = query_process_image_path(self.process.raw())?;
+        validate_absolute_path(&rebound_source_path)?;
+        let _rebound_parent_guards = open_reparse_free_parent_chain(&rebound_source_path)?;
+        let rebound_candidate_file = open_guarded_regular_file_no_follow(&rebound_source_path)?;
+        validate_regular_file_handle(&rebound_candidate_file)?;
+        if canonical_file_path(&rebound_candidate_file)? != canonical_path {
             return Err(NativeTrustFailure::PathObservation);
         }
 
@@ -578,12 +629,19 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
         )?;
 
         let process_identity =
-            file_identity(&process_image_file, self.expected_creation_time_100ns)?;
+            file_identity(&initial_candidate_file, self.expected_creation_time_100ns)?;
         let verified_identity =
             file_identity(&verification_file, self.expected_creation_time_100ns)?;
-        if process_identity != verified_identity {
+        let rebound_identity =
+            file_identity(&rebound_candidate_file, self.expected_creation_time_100ns)?;
+        if process_identity != verified_identity || rebound_identity != verified_identity {
             return Err(NativeTrustFailure::PathObservation);
         }
+        // Hash the complete target executable through the same guarded handle
+        // that WinTrust will verify. Write/delete sharing remains excluded for
+        // this handle's full lifetime, and the helper restores its file pointer
+        // before any provider consumes it.
+        let executable_digest = file_content_digest(&verification_file)?;
         let version = query_file_version(&canonical_path);
         // The version API is path-based. Reopen immediately after it and bind
         // the result back to the held verification handle so a replacement
@@ -600,7 +658,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
 
         let canonical_path = wide_path(&canonical_path)?;
         let state = WindowsPathState {
-            process_image_file,
+            initial_candidate_file,
             verification_file,
             _canonical_parent_guards: canonical_parent_guards,
             known_folder_root,
@@ -610,15 +668,17 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             identity: verified_identity,
         };
         let observation = NativePathObservation {
-            final_path_source: FinalPathSource::OpenedProcessImageHandle,
+            final_path_source: FinalPathSource::RequeriedProcessImagePathGuarded,
             path_is_absolute_and_normalized: true,
             volume_kind: VolumeKind::FixedLocal,
+            file_system_kind,
             reparse_state: ReparseState::Absent,
-            process_image_handle_bound: true,
+            process_image_path_requeried_and_guarded: true,
             process_creation_time_bound: true,
             process_file_identity: Some(process_identity),
             verified_file_identity: Some(verified_identity),
             version,
+            executable_digest: Some(executable_digest),
             install_root_digest: Some(install_root_digest),
         };
         Ok((state, observation))
@@ -633,7 +693,7 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             return Err(NativeTrustFailure::VerifyBegin);
         }
         self.validate_process_binding()?;
-        validate_regular_file_handle(&path.process_image_file)?;
+        validate_regular_file_handle(&path.initial_candidate_file)?;
         validate_regular_file_handle(&path.verification_file)?;
         validate_known_folder_binding(path)?;
         if file_identity(&path.verification_file, self.expected_creation_time_100ns)?
@@ -880,6 +940,7 @@ struct WindowsTrustState {
     file_path: Zeroizing<Vec<u16>>,
     file_handle: OwnedNativeHandle,
     file_info: Box<WINTRUST_FILE_INFO>,
+    crypto_policy: Box<CERT_STRONG_SIGN_PARA>,
     signature_settings: Box<WINTRUST_SIGNATURE_SETTINGS>,
     data: Box<WINTRUST_DATA>,
     verify_status: i32,
@@ -904,13 +965,20 @@ impl WindowsTrustState {
             hFile: file_handle.raw(),
             pgKnownSubject: ptr::null_mut(),
         });
+        let mut crypto_policy = Box::new(CERT_STRONG_SIGN_PARA {
+            cbSize: checked_struct_size::<CERT_STRONG_SIGN_PARA>()?,
+            dwInfoChoice: CERT_STRONG_SIGN_OID_INFO_CHOICE,
+            Anonymous: CERT_STRONG_SIGN_PARA_0 {
+                pszOID: PSTR(STRONG_SIGN_OS_1_OID.as_ptr().cast_mut()),
+            },
+        });
         let mut signature_settings = Box::new(WINTRUST_SIGNATURE_SETTINGS {
             cbStruct: checked_struct_size::<WINTRUST_SIGNATURE_SETTINGS>()?,
             dwIndex: 0,
             dwFlags: policy.signature_flags,
             cSecondarySigs: 0,
             dwVerifiedSigIndex: 0,
-            pCryptoPolicy: ptr::null_mut(),
+            pCryptoPolicy: ptr::from_mut(&mut *crypto_policy),
         });
         let data = Box::new(WINTRUST_DATA {
             cbStruct: checked_struct_size::<WINTRUST_DATA>()?,
@@ -934,6 +1002,7 @@ impl WindowsTrustState {
             file_path,
             file_handle,
             file_info,
+            crypto_policy,
             signature_settings,
             data,
             verify_status: i32::MIN,
@@ -987,6 +1056,9 @@ impl WindowsTrustState {
         // SAFETY: dwUnionChoice is fixed to WTD_CHOICE_FILE before this union
         // member is read, and the pointer is compared only, never dereferenced.
         let subject = unsafe { self.data.Anonymous.pFile };
+        // SAFETY: dwInfoChoice is required to be the OID choice and this union
+        // member is compared only against the process-static SDK OID pointer.
+        let strong_sign_oid = unsafe { self.crypto_policy.Anonymous.pszOID };
         let policy = WinTrustCallPolicy::offline_embedded();
         *self.action == policy.action
             && self.data.cbStruct as usize == size_of::<WINTRUST_DATA>()
@@ -1012,7 +1084,11 @@ impl WindowsTrustState {
                 self.signature_settings.dwFlags,
                 policy.signature_flags,
             )
-            && self.signature_settings.pCryptoPolicy.is_null()
+            && self.signature_settings.pCryptoPolicy
+                == ptr::from_ref(&*self.crypto_policy).cast_mut()
+            && self.crypto_policy.cbSize as usize == size_of::<CERT_STRONG_SIGN_PARA>()
+            && self.crypto_policy.dwInfoChoice == CERT_STRONG_SIGN_OID_INFO_CHOICE
+            && strong_sign_oid.0 == STRONG_SIGN_OS_1_OID.as_ptr().cast_mut()
     }
 }
 
@@ -1537,6 +1613,27 @@ fn validate_regular_file_handle(handle: &OwnedNativeHandle) -> Result<(), Native
     Ok(())
 }
 
+fn file_system_kind(handle: &OwnedNativeHandle) -> Result<FileSystemKind, NativeTrustFailure> {
+    let mut name = [0_u16; 32];
+    // SAFETY: the guarded file handle remains live and `name` is a bounded,
+    // initialized writable output. No volume label or serial is requested.
+    unsafe { GetVolumeInformationByHandleW(handle.raw(), None, None, None, None, Some(&mut name)) }
+        .map_err(|_| NativeTrustFailure::PathObservation)?;
+    let length = name
+        .iter()
+        .position(|unit| *unit == 0)
+        .ok_or(NativeTrustFailure::PathObservation)?;
+    if length == 0 {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+    const NTFS: [u16; 4] = [b'N' as u16, b'T' as u16, b'F' as u16, b'S' as u16];
+    Ok(if ascii_units_equal(&name[..length], &NTFS) {
+        FileSystemKind::Ntfs
+    } else {
+        FileSystemKind::Other
+    })
+}
+
 fn validate_directory_handle(handle: &OwnedNativeHandle) -> Result<(), NativeTrustFailure> {
     let tags = file_attribute_tags(handle)?;
     if tags.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0
@@ -1692,6 +1789,61 @@ fn file_identity_digest(
     hasher.update(file_id);
     hasher.update(process_creation_time_100ns.to_le_bytes());
     hasher.finalize().into()
+}
+
+fn file_content_digest(handle: &OwnedNativeHandle) -> Result<TrustDigest, NativeTrustFailure> {
+    let mut size = 0_i64;
+    // SAFETY: `size` is a live writable out parameter and the guarded file
+    // handle remains owned for this entire synchronous operation.
+    unsafe { GetFileSizeEx(handle.raw(), ptr::from_mut(&mut size)) }
+        .map_err(|_| NativeTrustFailure::PathObservation)?;
+    let size = u64::try_from(size).map_err(|_| NativeTrustFailure::PathObservation)?;
+    if size == 0 || size > MAX_EXECUTABLE_BYTES {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+
+    // This handle is not shared with another thread before WinTrust begins.
+    // Rewind it explicitly, hash exactly the reported bytes, and rewind again
+    // even when reading fails so no provider observes attacker-controlled file
+    // position state.
+    unsafe { SetFilePointerEx(handle.raw(), 0, None, FILE_BEGIN) }
+        .map_err(|_| NativeTrustFailure::PathObservation)?;
+    let read_result = (|| {
+        let mut remaining = size;
+        let mut buffer = Zeroizing::new(vec![0_u8; EXECUTABLE_HASH_BUFFER_BYTES]);
+        let mut hasher = Sha256::new();
+        while remaining != 0 {
+            let requested = usize::try_from(remaining.min(buffer.len() as u64))
+                .map_err(|_| NativeTrustFailure::PathObservation)?;
+            let mut read = 0_u32;
+            // SAFETY: the bounded initialized slice and writable byte-count
+            // remain live. A synchronous handle requires no OVERLAPPED value.
+            unsafe {
+                ReadFile(
+                    handle.raw(),
+                    Some(&mut buffer[..requested]),
+                    Some(ptr::from_mut(&mut read)),
+                    None,
+                )
+            }
+            .map_err(|_| NativeTrustFailure::PathObservation)?;
+            let read = usize::try_from(read).map_err(|_| NativeTrustFailure::PathObservation)?;
+            if read == 0 || read > requested {
+                return Err(NativeTrustFailure::PathObservation);
+            }
+            hasher.update(&buffer[..read]);
+            remaining = remaining
+                .checked_sub(read as u64)
+                .ok_or(NativeTrustFailure::PathObservation)?;
+        }
+        let digest: [u8; 32] = hasher.finalize().into();
+        TrustDigest::from_bytes(digest).map_err(|_| NativeTrustFailure::PathObservation)
+    })();
+    let rewind = unsafe { SetFilePointerEx(handle.raw(), 0, None, FILE_BEGIN) };
+    if rewind.is_err() {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+    read_result
 }
 
 fn query_file_version(path: &Path) -> Option<FileVersion> {
@@ -2005,9 +2157,9 @@ mod tests {
         validate_absolute_path(&fixture_path).unwrap();
 
         let _source_parent_guards = open_reparse_free_parent_chain(&fixture_path).unwrap();
-        let process_image_file = open_regular_file_no_follow(&fixture_path).unwrap();
-        validate_regular_file_handle(&process_image_file).unwrap();
-        let canonical_path = canonical_file_path(&process_image_file).unwrap();
+        let initial_candidate_file = open_regular_file_no_follow(&fixture_path).unwrap();
+        validate_regular_file_handle(&initial_candidate_file).unwrap();
+        let canonical_path = canonical_file_path(&initial_candidate_file).unwrap();
         assert!(is_fixed_local_volume(&canonical_path).unwrap());
         let canonical_parent_guards = open_reparse_free_parent_chain(&canonical_path).unwrap();
         let verification_file = open_guarded_regular_file_no_follow(&canonical_path).unwrap();
@@ -2016,19 +2168,21 @@ mod tests {
             canonical_file_path(&verification_file).unwrap(),
             canonical_path
         );
-        let runtime_fixture = std::fs::read(&canonical_path).unwrap();
-        let runtime_digest: [u8; 32] = Sha256::digest(&runtime_fixture).into();
-        assert_eq!(runtime_digest, SIGNED_FIXTURE_SHA256);
+        let runtime_digest = file_content_digest(&verification_file).unwrap();
+        assert_eq!(
+            runtime_digest,
+            TrustDigest::from_bytes(SIGNED_FIXTURE_SHA256).unwrap()
+        );
 
         let identity = file_identity(&verification_file, 1).unwrap();
-        assert_eq!(file_identity(&process_image_file, 1).unwrap(), identity);
+        assert_eq!(file_identity(&initial_candidate_file, 1).unwrap(), identity);
         let fixture_parent = canonical_path.parent().unwrap();
         let known_folder_parent_guards = open_reparse_free_parent_chain(fixture_parent).unwrap();
         let known_folder_root = open_directory_no_follow(fixture_parent).unwrap();
         validate_directory_handle(&known_folder_root).unwrap();
         let canonical_known_folder = canonical_file_path(&known_folder_root).unwrap();
         let path_state = WindowsPathState {
-            process_image_file,
+            initial_candidate_file,
             verification_file,
             _canonical_parent_guards: canonical_parent_guards,
             known_folder_root,
@@ -2072,6 +2226,7 @@ mod tests {
     }
 
     static SYNTHETIC_SIGNER_BYTES: [u8; 32] = [1; 32];
+    static SYNTHETIC_EXECUTABLE_BYTES: [u8; 32] = [2; 32];
     static SYNTHETIC_ROOT_RELATION: &[&str] = &["SyntheticVendor", "SyntheticApp", "Synthetic.exe"];
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2180,7 +2335,17 @@ mod tests {
     }
 
     fn profile() -> ExecutableTrustProfile {
-        ExecutableTrustProfile::new(FileVersion::KNOWN, reviewed_signer(), root_digest()).unwrap()
+        ExecutableTrustProfile::new(
+            FileVersion::KNOWN,
+            reviewed_executable(),
+            reviewed_signer(),
+            root_digest(),
+        )
+        .unwrap()
+    }
+
+    fn reviewed_executable() -> ReviewedExecutableDigest {
+        ReviewedExecutableDigest::from_static_reviewed_bytes(&SYNTHETIC_EXECUTABLE_BYTES).unwrap()
     }
 
     fn reviewed_signer() -> ReviewedSignerDigest {
@@ -2197,15 +2362,17 @@ mod tests {
 
     fn path() -> NativePathObservation {
         NativePathObservation {
-            final_path_source: FinalPathSource::OpenedProcessImageHandle,
+            final_path_source: FinalPathSource::RequeriedProcessImagePathGuarded,
             path_is_absolute_and_normalized: true,
             volume_kind: VolumeKind::FixedLocal,
+            file_system_kind: FileSystemKind::Ntfs,
             reparse_state: ReparseState::Absent,
-            process_image_handle_bound: true,
+            process_image_path_requeried_and_guarded: true,
             process_creation_time_bound: true,
             process_file_identity: Some(identity(3)),
             verified_file_identity: Some(identity(3)),
             version: Some(FileVersion::KNOWN),
+            executable_digest: Some(digest(2)),
             install_root_digest: Some(root_digest().trust_digest()),
         }
     }
@@ -2249,9 +2416,17 @@ mod tests {
         file_info.cbStruct = size_of::<WINTRUST_FILE_INFO>() as u32;
         file_info.pcwszFilePath = PCWSTR(file_path.as_ptr());
         file_info.hFile = file_handle.raw();
+        let mut crypto_policy = Box::new(CERT_STRONG_SIGN_PARA {
+            cbSize: size_of::<CERT_STRONG_SIGN_PARA>() as u32,
+            dwInfoChoice: CERT_STRONG_SIGN_OID_INFO_CHOICE,
+            Anonymous: CERT_STRONG_SIGN_PARA_0 {
+                pszOID: PSTR(STRONG_SIGN_OS_1_OID.as_ptr().cast_mut()),
+            },
+        });
         let mut signature_settings = Box::new(WINTRUST_SIGNATURE_SETTINGS::default());
         signature_settings.cbStruct = size_of::<WINTRUST_SIGNATURE_SETTINGS>() as u32;
         signature_settings.dwFlags = WSS_GET_SECONDARY_SIG_COUNT;
+        signature_settings.pCryptoPolicy = ptr::from_mut(&mut *crypto_policy);
         let mut data = Box::new(WINTRUST_DATA::default());
         data.cbStruct = size_of::<WINTRUST_DATA>() as u32;
         data.dwUIChoice = WTD_UI_NONE;
@@ -2271,6 +2446,7 @@ mod tests {
             file_path,
             file_handle,
             file_info,
+            crypto_policy,
             signature_settings,
             data,
             verify_status: i32::MIN,
@@ -2503,6 +2679,15 @@ mod tests {
 
     #[test]
     fn signer_cardinality_digest_and_path_replacement_are_exact() {
+        let mut wrong_executable = api();
+        wrong_executable.path.as_mut().unwrap().executable_digest = Some(digest(9));
+        let (result, fake) = run(wrong_executable);
+        assert_eq!(
+            result.unwrap_err().operation,
+            "windows_executable_content_digest"
+        );
+        assert_eq!(fake.closes, 1);
+
         let mut no_signer = api();
         no_signer
             .authenticode
@@ -2727,6 +2912,24 @@ mod tests {
 
         let mut state = inert_windows_state();
         state.signature_settings.dwIndex = 1;
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.signature_settings.pCryptoPolicy = ptr::null_mut();
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.crypto_policy.cbSize -= 1;
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.crypto_policy.dwInfoChoice = 0;
+        assert!(!state.debug_invariants());
+
+        let mut state = inert_windows_state();
+        state.crypto_policy.Anonymous = CERT_STRONG_SIGN_PARA_0 {
+            pszOID: PSTR::null(),
+        };
         assert!(!state.debug_invariants());
 
         let mut state = inert_windows_state();

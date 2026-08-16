@@ -1,5 +1,12 @@
 # Root handoff: offline executable-trust scaffold
 
+> Superseded terminology: later unsafe review established that
+> `QueryFullProcessImageNameW` supplies a path, not a caller-owned process
+> backing-file handle. ADR-042 and
+> [`root-independent-safety-review.md`](root-independent-safety-review.md)
+> replace the handle claim with an NTFS-only guarded path-requery protocol and
+> retain hosted adversarial qualification as an activation blocker.
+
 ## Outcome
 
 This change implements the content-free decision portion of the Windows

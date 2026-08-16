@@ -2,10 +2,12 @@
 //!
 //! Native path, file-handle, and Authenticode APIs are intentionally absent
 //! here. The disconnected native observer reduces its results to this fixed,
-//! content-free evidence shape. Installation-root pins can be constructed only
-//! from the versioned reviewed root-relation codec below, never an observed
-//! absolute path. Production remains wired to [`UnavailableExecutableTrust`]
-//! until reviewed signer/root provenance and native wiring are available.
+//! path-free and redacted evidence shape. Installation-root pins can be
+//! constructed only from the versioned reviewed root-relation codec below,
+//! never an observed absolute path. The reviewed executable-byte digest is
+//! source-static and cannot be promoted from runtime evidence. Production
+//! remains wired to [`UnavailableExecutableTrust`] until complete target,
+//! signer, root, and activation-qualification evidence is available.
 
 #![cfg_attr(
     not(test),
@@ -56,6 +58,28 @@ impl ReviewedSignerDigest {
 
     fn trust_digest(self) -> TrustDigest {
         self.0
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct ReviewedExecutableDigest(TrustDigest);
+
+impl ReviewedExecutableDigest {
+    /// This is the SHA-256 of the complete reviewed target executable, not the
+    /// installer and not a runtime-promoted observation. Production bytes must
+    /// come from an independently reviewed, source-embedded provenance bundle.
+    pub(super) fn from_static_reviewed_bytes(bytes: &'static [u8; 32]) -> Result<Self, UiError> {
+        TrustDigest::from_bytes(*bytes).map(Self)
+    }
+
+    fn trust_digest(self) -> TrustDigest {
+        self.0
+    }
+}
+
+impl fmt::Debug for ReviewedExecutableDigest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ReviewedExecutableDigest(<redacted>)")
     }
 }
 
@@ -241,7 +265,7 @@ impl fmt::Debug for FileIdentity {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum FinalPathSource {
-    OpenedProcessImageHandle,
+    RequeriedProcessImagePathGuarded,
     TextOnly,
     Unknown,
 }
@@ -251,6 +275,13 @@ pub(super) enum VolumeKind {
     FixedLocal,
     Network,
     Removable,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FileSystemKind {
+    Ntfs,
+    Other,
     Unknown,
 }
 
@@ -270,6 +301,7 @@ pub(super) enum AuthenticodeStatus {
 
 pub(super) struct ExecutableTrustProfile {
     version: FileVersion,
+    executable_digest: TrustDigest,
     signer_digest: TrustDigest,
     install_root_kind: InstallRootKind,
     install_root_digest: TrustDigest,
@@ -278,17 +310,24 @@ pub(super) struct ExecutableTrustProfile {
 impl ExecutableTrustProfile {
     pub(super) fn new(
         version: FileVersion,
+        executable_digest: ReviewedExecutableDigest,
         signer_digest: ReviewedSignerDigest,
         install_root_digest: InstallRootDigest,
     ) -> Result<Self, UiError> {
+        let executable_digest = executable_digest.trust_digest();
         let signer_digest = signer_digest.trust_digest();
         let install_root_kind = install_root_digest.kind();
         let install_root_digest = install_root_digest.trust_digest();
-        if version != FileVersion::KNOWN || signer_digest == install_root_digest {
+        if version != FileVersion::KNOWN
+            || executable_digest == signer_digest
+            || executable_digest == install_root_digest
+            || signer_digest == install_root_digest
+        {
             return Err(invalid_trust_profile());
         }
         Ok(Self {
             version,
+            executable_digest,
             signer_digest,
             install_root_kind,
             install_root_digest,
@@ -305,6 +344,7 @@ impl fmt::Debug for ExecutableTrustProfile {
         formatter
             .debug_struct("ExecutableTrustProfile")
             .field("version", &self.version.to_string())
+            .field("executable_digest", &"<redacted>")
             .field("signer_digest", &"<redacted>")
             .field("install_root_digest", &"<redacted>")
             .finish()
@@ -315,16 +355,19 @@ pub(super) struct ExecutableTrustEvidence {
     pub final_path_source: FinalPathSource,
     pub path_is_absolute_and_normalized: bool,
     pub volume_kind: VolumeKind,
+    pub file_system_kind: FileSystemKind,
     pub reparse_state: ReparseState,
-    pub process_image_handle_bound: bool,
+    pub process_image_path_requeried_and_guarded: bool,
     pub process_creation_time_bound: bool,
     pub process_file_identity: Option<FileIdentity>,
     pub verified_file_identity: Option<FileIdentity>,
     pub reopened_file_identity: Option<FileIdentity>,
     pub version: Option<FileVersion>,
+    pub executable_digest: Option<TrustDigest>,
     pub authenticode_status: AuthenticodeStatus,
     pub trust_ui_forbidden: bool,
     pub cache_only_url_retrieval: bool,
+    pub sha2_strong_signature_policy: bool,
     pub catalog_ambiguous: bool,
     pub signer_count: usize,
     pub signer_digest: Option<TrustDigest>,
@@ -341,10 +384,11 @@ impl fmt::Debug for ExecutableTrustEvidence {
                 &self.path_is_absolute_and_normalized,
             )
             .field("volume_kind", &self.volume_kind)
+            .field("file_system_kind", &self.file_system_kind)
             .field("reparse_state", &self.reparse_state)
             .field(
-                "process_image_handle_bound",
-                &self.process_image_handle_bound,
+                "process_image_path_requeried_and_guarded",
+                &self.process_image_path_requeried_and_guarded,
             )
             .field(
                 "process_creation_time_bound",
@@ -363,9 +407,17 @@ impl fmt::Debug for ExecutableTrustEvidence {
                 &redacted_option(self.reopened_file_identity),
             )
             .field("version_observed", &self.version.is_some())
+            .field(
+                "executable_digest",
+                &redacted_option(self.executable_digest),
+            )
             .field("authenticode_status", &self.authenticode_status)
             .field("trust_ui_forbidden", &self.trust_ui_forbidden)
             .field("cache_only_url_retrieval", &self.cache_only_url_retrieval)
+            .field(
+                "sha2_strong_signature_policy",
+                &self.sha2_strong_signature_policy,
+            )
             .field("catalog_ambiguous", &self.catalog_ambiguous)
             .field("signer_count", &bounded_count(self.signer_count))
             .field("signer_digest", &redacted_option(self.signer_digest))
@@ -400,9 +452,10 @@ pub(super) fn verify_executable_trust(
     profile: &ExecutableTrustProfile,
     evidence: &ExecutableTrustEvidence,
 ) -> Result<VerifiedExecutableTrust, UiError> {
-    if evidence.final_path_source != FinalPathSource::OpenedProcessImageHandle
+    if evidence.final_path_source != FinalPathSource::RequeriedProcessImagePathGuarded
         || !evidence.path_is_absolute_and_normalized
         || evidence.volume_kind != VolumeKind::FixedLocal
+        || evidence.file_system_kind != FileSystemKind::Ntfs
         || evidence.reparse_state != ReparseState::Absent
     {
         return Err(UiError::new(
@@ -411,7 +464,7 @@ pub(super) fn verify_executable_trust(
         ));
     }
 
-    if !evidence.process_image_handle_bound || !evidence.process_creation_time_bound {
+    if !evidence.process_image_path_requeried_and_guarded || !evidence.process_creation_time_bound {
         return Err(UiError::new(
             UiErrorKind::StaleSnapshot,
             "windows_executable_process_binding",
@@ -440,9 +493,17 @@ pub(super) fn verify_executable_trust(
         ));
     }
 
+    if evidence.executable_digest != Some(profile.executable_digest) {
+        return Err(UiError::new(
+            UiErrorKind::UnknownUiProfile,
+            "windows_executable_content_digest",
+        ));
+    }
+
     if evidence.authenticode_status != AuthenticodeStatus::Trusted
         || !evidence.trust_ui_forbidden
         || !evidence.cache_only_url_retrieval
+        || !evidence.sha2_strong_signature_policy
         || evidence.catalog_ambiguous
     {
         return Err(UiError::new(
@@ -488,7 +549,9 @@ mod tests {
     use super::*;
 
     static SYNTHETIC_SIGNER_BYTES: [u8; 32] = [1; 32];
+    static SYNTHETIC_EXECUTABLE_BYTES: [u8; 32] = [2; 32];
     static ZERO_SIGNER_BYTES: [u8; 32] = [0; 32];
+    static ZERO_EXECUTABLE_BYTES: [u8; 32] = [0; 32];
     static SYNTHETIC_ROOT_RELATION: &[&str] = &["SyntheticVendor", "SyntheticApp", "Synthetic.exe"];
 
     fn digest(value: u8) -> TrustDigest {
@@ -500,7 +563,17 @@ mod tests {
     }
 
     fn profile() -> ExecutableTrustProfile {
-        ExecutableTrustProfile::new(FileVersion::KNOWN, reviewed_signer(), root_digest()).unwrap()
+        ExecutableTrustProfile::new(
+            FileVersion::KNOWN,
+            reviewed_executable(),
+            reviewed_signer(),
+            root_digest(),
+        )
+        .unwrap()
+    }
+
+    fn reviewed_executable() -> ReviewedExecutableDigest {
+        ReviewedExecutableDigest::from_static_reviewed_bytes(&SYNTHETIC_EXECUTABLE_BYTES).unwrap()
     }
 
     fn reviewed_signer() -> ReviewedSignerDigest {
@@ -517,19 +590,22 @@ mod tests {
 
     fn evidence() -> ExecutableTrustEvidence {
         ExecutableTrustEvidence {
-            final_path_source: FinalPathSource::OpenedProcessImageHandle,
+            final_path_source: FinalPathSource::RequeriedProcessImagePathGuarded,
             path_is_absolute_and_normalized: true,
             volume_kind: VolumeKind::FixedLocal,
+            file_system_kind: FileSystemKind::Ntfs,
             reparse_state: ReparseState::Absent,
-            process_image_handle_bound: true,
+            process_image_path_requeried_and_guarded: true,
             process_creation_time_bound: true,
             process_file_identity: Some(identity(3)),
             verified_file_identity: Some(identity(3)),
             reopened_file_identity: Some(identity(3)),
             version: Some(FileVersion::KNOWN),
+            executable_digest: Some(digest(2)),
             authenticode_status: AuthenticodeStatus::Trusted,
             trust_ui_forbidden: true,
             cache_only_url_retrieval: true,
+            sha2_strong_signature_policy: true,
             catalog_ambiguous: false,
             signer_count: 1,
             signer_digest: Some(digest(1)),
@@ -557,6 +633,8 @@ mod tests {
             "network",
             "removable",
             "unknown_volume",
+            "other_file_system",
+            "unknown_file_system",
             "reparse",
             "unknown_reparse",
         ] {
@@ -568,6 +646,8 @@ mod tests {
                 "network" => observed.volume_kind = VolumeKind::Network,
                 "removable" => observed.volume_kind = VolumeKind::Removable,
                 "unknown_volume" => observed.volume_kind = VolumeKind::Unknown,
+                "other_file_system" => observed.file_system_kind = FileSystemKind::Other,
+                "unknown_file_system" => observed.file_system_kind = FileSystemKind::Unknown,
                 "reparse" => observed.reparse_state = ReparseState::Present,
                 "unknown_reparse" => observed.reparse_state = ReparseState::Unknown,
                 _ => unreachable!(),
@@ -579,7 +659,7 @@ mod tests {
     #[test]
     fn process_replacement_and_file_identity_disagreement_fail_closed() {
         for mutation in [
-            "handle_unbound",
+            "path_guard_unbound",
             "creation_unbound",
             "process_absent",
             "verified_absent",
@@ -589,7 +669,7 @@ mod tests {
         ] {
             let mut observed = evidence();
             match mutation {
-                "handle_unbound" => observed.process_image_handle_bound = false,
+                "path_guard_unbound" => observed.process_image_path_requeried_and_guarded = false,
                 "creation_unbound" => observed.process_creation_time_bound = false,
                 "process_absent" => observed.process_file_identity = None,
                 "verified_absent" => observed.verified_file_identity = None,
@@ -598,7 +678,7 @@ mod tests {
                 "reopened_changed" => observed.reopened_file_identity = Some(identity(4)),
                 _ => unreachable!(),
             }
-            let operation = if matches!(mutation, "handle_unbound" | "creation_unbound") {
+            let operation = if matches!(mutation, "path_guard_unbound" | "creation_unbound") {
                 "windows_executable_process_binding"
             } else {
                 "windows_executable_file_identity"
@@ -614,6 +694,7 @@ mod tests {
             "unknown",
             "ui_allowed",
             "network_allowed",
+            "weak_signature_policy",
             "catalog_ambiguous",
         ] {
             let mut observed = evidence();
@@ -622,6 +703,7 @@ mod tests {
                 "unknown" => observed.authenticode_status = AuthenticodeStatus::Unknown,
                 "ui_allowed" => observed.trust_ui_forbidden = false,
                 "network_allowed" => observed.cache_only_url_retrieval = false,
+                "weak_signature_policy" => observed.sha2_strong_signature_policy = false,
                 "catalog_ambiguous" => observed.catalog_ambiguous = true,
                 _ => unreachable!(),
             }
@@ -634,6 +716,12 @@ mod tests {
         let mut version = evidence();
         version.version = None;
         assert_refusal(version, "windows_executable_trust_version");
+
+        for value in [None, Some(digest(9))] {
+            let mut observed = evidence();
+            observed.executable_digest = value;
+            assert_refusal(observed, "windows_executable_content_digest");
+        }
 
         for mutation in ["zero_signers", "multiple_signers", "wrong_signer"] {
             let mut observed = evidence();
@@ -664,9 +752,13 @@ mod tests {
     fn invalid_or_colliding_profile_digests_are_refused() {
         assert!(TrustDigest::from_bytes([0; 32]).is_err());
         assert!(ReviewedSignerDigest::from_static_reviewed_bytes(&ZERO_SIGNER_BYTES).is_err());
+        assert!(
+            ReviewedExecutableDigest::from_static_reviewed_bytes(&ZERO_EXECUTABLE_BYTES).is_err()
+        );
         assert!(FileIdentity::from_bytes([0; 32]).is_err());
         assert!(ExecutableTrustProfile::new(
             FileVersion::KNOWN,
+            ReviewedExecutableDigest(root_digest().trust_digest()),
             ReviewedSignerDigest(root_digest().trust_digest()),
             root_digest()
         )
@@ -678,6 +770,7 @@ mod tests {
                 patch: 0,
                 build: 1,
             },
+            reviewed_executable(),
             reviewed_signer(),
             root_digest(),
         )

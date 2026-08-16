@@ -76,3 +76,11 @@ extraction and the still-missing independent positive-provider qualification.
 the fakeable WTHelper seam, exact provider-to-signer-to-leaf SPKI traversal,
 nested error/pointer-substitution refusals, and the still-external real-provider
 qualification.
+[`root-public-kakao-installer-provenance.md`](root-public-kakao-installer-provenance.md)
+records the independently reproduced public 26.7 x86/x64 installer hashes and
+the explicit reasons those installer facts cannot become runtime
+executable-trust pins.
+[`root-independent-safety-review.md`](root-independent-safety-review.md)
+records the independent CI/native/provenance audits, exact target-byte and
+strong-sign hardening, the NTFS rename/replacement experiment, and the
+activation gates that deliberately remain disconnected.

@@ -568,3 +568,74 @@ successful fixture-SPKI path, both nested error fields, and both helper pointer
 substitutions without calling WinTrust or opening a file. This qualifies local
 traversal logic only; real provider output, the helper ABI, independent unsafe
 review, production provenance, and wiring remain separate gates.
+
+## ADR-041: Bind executable trust to every reviewed target byte and SHA-2 policy
+
+Add a distinct source-static `ReviewedExecutableDigest` to every executable
+trust profile. It represents `whole-file-sha256-v1` for the installed target,
+not the installer and not the Authenticode PE digest. Stream the complete
+guarded file through a bounded zeroizing buffer, restore the handle position on
+every path, and require the runtime digest, exact version, target leaf SPKI,
+and root relation independently. Runtime evidence cannot construct any
+reviewed profile value.
+
+Populate `WINTRUST_SIGNATURE_SETTINGS.pCryptoPolicy` with a stable
+`CERT_STRONG_SIGN_PARA` selecting `szOID_CERT_STRONG_SIGN_OS_1`. Retain and
+revalidate the allocation and OID pointer through VERIFY and CLOSE. This makes
+the intended OS policy explicitly SHA-2-only instead of relying on
+`WTD_DISABLE_MD2_MD4`, which does not exclude MD5 or SHA-1. Pure and inert-
+state tests cover missing/mismatched target bytes and every mutable policy
+field. A trusted SHA-2 success plus MD5/SHA-1 rejection on an isolated pinned
+Windows image remains an activation gate. Production stays disconnected.
+
+## ADR-042: Describe and qualify the NTFS path-requery guard honestly
+
+`QueryFullProcessImageNameW` returns text derived from a process handle; it
+does not provide a caller-owned backing-file handle or a documented atomic
+file identity. Rename/replace testing proved that an executing synthetic PE
+can be renamed on NTFS while the original name is replaced. Therefore hold the
+first candidate without write/delete sharing, query the image path again,
+independently guard the second candidate, and require exact canonical path and
+file-ID agreement before any version, hash, or WinTrust decision. Restrict the
+pure verifier to NTFS on a fixed local volume.
+
+Name the evidence `RequeriedProcessImagePathGuarded` and
+`process_image_path_requeried_and_guarded`; never call either candidate a
+process-image backing handle. This supersedes that inaccurate wording in
+ADR-020 and ADR-021. The guarded protocol closes races during observation, but
+the API contract does not promise rename freshness. Production wiring remains
+blocked until before/between/after-query substitution tests pass on every
+supported Windows/NTFS image. The stronger long-term option is a backing-file
+handle retained from launch or another documented kernel identity.
+
+## ADR-043: Treat WinTrust provider high-word flags as activation evidence
+
+Keep the disconnected adapter fail-closed while provider ABI qualification is
+incomplete. The current exact `CRYPT_PROVIDER_DATA.dwProvFlags` comparison
+accepts the caller low word plus `CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT` and
+rejects all other high-word bits. That cannot weaken verification, but it may
+refuse a valid RFC3161-timestamped target because the provider may add
+`CPD_RFC3161v21` or another documented flag.
+
+Before activation, exercise a trusted timestamped target on the pinned Windows
+image. The final policy must preserve the caller low word exactly, select only
+chain-excluding-root revocation, explicitly review any RFC3161 or lower-quality
+chain bit, and reject `CPD_USE_NT5_CHAIN_FLAG` and unknown bits. Do not loosen
+the comparison merely to make the self-signed untimestamped fixture pass.
+
+## ADR-044: Keep every branch-push CI workflow inside the non-live boundary
+
+Both workflows triggered by an integration-branch push must be safe together.
+Replace the legacy broad cross-platform `cargo test` with explicit synthetic
+library/binary/compatibility suites and the same fourteen exact parser cases as
+Windows CI. Never execute the product on macOS. Pin Rust, lock dependencies,
+pin every third-party action by full commit SHA, grant only read-only contents
+permission, disable checkout credential persistence, reference no secret, and
+upload no artifact.
+
+The Windows validator scans both non-release workflows for mutable action
+references and local documentation links. A validator running in a parallel
+workflow does not prevent future bad action code from starting first, so a
+same-workflow validate/`needs` topology remains optional hardening. The
+tag/manual release workflow is outside this non-release claim and requires its
+own review before use.

@@ -672,6 +672,30 @@ where
 }
 
 #[cfg(target_os = "windows")]
+const REDACTED_WINDOWS_LOCAL_SEND_PARSE_ERROR: &str =
+    "error: invalid local-send arguments (details redacted)";
+
+#[cfg(target_os = "windows")]
+fn redacted_windows_local_send_parse_failure<I>(
+    args: I,
+    error_kind: clap::error::ErrorKind,
+) -> Option<(&'static str, ExitCode)>
+where
+    I: IntoIterator,
+    I::Item: AsRef<OsStr>,
+{
+    if matches!(
+        error_kind,
+        clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+    ) || !contains_windows_local_send_arg(args)
+    {
+        return None;
+    }
+
+    Some((REDACTED_WINDOWS_LOCAL_SEND_PARSE_ERROR, ExitCode::Usage))
+}
+
+#[cfg(target_os = "windows")]
 fn parse_cli() -> Cli {
     match Cli::try_parse() {
         Ok(cli) => cli,
@@ -683,11 +707,15 @@ fn parse_cli() -> Cli {
         {
             error.exit()
         }
-        Err(_error) if contains_windows_local_send_arg(std::env::args_os().skip(1)) => {
-            eprintln!("error: invalid local-send arguments (details redacted)");
-            std::process::exit(ExitCode::Usage.as_i32());
+        Err(error) => {
+            if let Some((message, exit_code)) =
+                redacted_windows_local_send_parse_failure(std::env::args_os().skip(1), error.kind())
+            {
+                eprintln!("{message}");
+                std::process::exit(exit_code.as_i32());
+            }
+            error.exit()
         }
-        Err(error) => error.exit(),
     }
 }
 
@@ -3029,6 +3057,28 @@ mod tests {
             "--ui",
             "SENSITIVE_TARGET"
         ]));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn rejected_legacy_argv_message_maps_to_a_static_redacted_failure() {
+        const ARGV_CANARY: &str = "SENSITIVE_ARGV_MESSAGE_CANARY";
+        let arguments = [
+            "openkakao-cli",
+            "local-send",
+            "SYNTHETIC_SELF_CHAT",
+            ARGV_CANARY,
+            "--stdin",
+            "--opened-only",
+        ];
+        let error = Cli::try_parse_from(arguments).expect_err("legacy argv message must refuse");
+        let (message, exit_code) =
+            redacted_windows_local_send_parse_failure(arguments.into_iter().skip(1), error.kind())
+                .expect("local-send parse failures must be redacted");
+
+        assert_eq!(message, REDACTED_WINDOWS_LOCAL_SEND_PARSE_ERROR);
+        assert_eq!(exit_code, ExitCode::Usage);
+        assert!(!message.contains(ARGV_CANARY));
     }
 
     #[test]

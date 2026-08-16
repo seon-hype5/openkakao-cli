@@ -1,7 +1,6 @@
 #![cfg(target_os = "windows")]
 
 use std::io::Cursor;
-use std::process::Command;
 
 use clap::{Parser, Subcommand};
 use openkakao_cli::cli::windows::{prepare_local_send, LocalSendOptions, ReaderMessageInput};
@@ -99,26 +98,4 @@ fn public_cli_seam_defaults_to_a_zero_mutation_dry_run() {
     assert_eq!(backend.inspect_calls(), 1);
     assert_eq!(backend.stage_calls(), 0);
     assert_eq!(backend.commit_calls(), 0);
-}
-
-#[test]
-fn rejected_legacy_argv_message_is_not_echoed_by_the_binary() {
-    const ARGV_CANARY: &str = "SENSITIVE_ARGV_MESSAGE_CANARY";
-    let output = Command::new(env!("CARGO_BIN_EXE_openkakao-cli"))
-        .args([
-            "local-send",
-            TARGET_CANARY,
-            ARGV_CANARY,
-            "--stdin",
-            "--opened-only",
-        ])
-        .output()
-        .expect("binary should start and reject legacy syntax");
-
-    assert_eq!(output.status.code(), Some(2));
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stdout.contains(ARGV_CANARY));
-    assert!(!stderr.contains(ARGV_CANARY));
-    assert!(stderr.contains("details redacted"));
 }
