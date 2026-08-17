@@ -9,7 +9,9 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $expectedRepository = "seon-hype5/openkakao-cli"
-$installerUri = "https://lk.kakaocdn.net/talk/win32/x64/KakaoTalk_Setup.exe"
+# The corporate-page lk alias rejects hosted-runner traffic. This app-pc alias
+# is the byte-identical URL pinned by the reviewed Microsoft winget manifest.
+$installerUri = "https://app-pc.kakaocdn.net/talk/win32/x64/KakaoTalk_Setup.exe"
 $installerLength = [int64]94763296
 $installerSha256 = "57dc1e9aaa56df4354b5bbf4daa60728375b08b834434777c28e60888e821882"
 $sevenZipUri = "https://github.com/ip7z/7zip/releases/download/26.02/7z2602-x64.msi"
