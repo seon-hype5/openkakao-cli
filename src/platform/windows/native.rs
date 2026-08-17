@@ -2,11 +2,12 @@
 //!
 //! Inspection reads UIA Value only after an exact request-scoped self-target
 //! binding and reduces it to an empty/nonempty bit; the private BSTR is scrubbed
-//! in place. Inspection never mutates UI state. Production SetValue and Invoke
-//! calls exist only with the `windows-ui-write` build feature and behind the
-//! transaction state machine. No function sends a window message, changes
-//! focus/Z-order, synthesizes input, or touches the clipboard. COM objects stay
-//! on the dedicated MTA thread that created them.
+//! in place. Inspection never mutates UI state. Production SetValue and the
+//! single profile-bound submit call exist only with the `windows-ui-write`
+//! build feature and behind the transaction state machine. Submission sends
+//! one synchronous Enter window message to the exact composer HWND; it never
+//! changes focus/Z-order, global keyboard state, or the clipboard. COM objects
+//! stay on the dedicated MTA thread that created them.
 
 use std::ffi::{c_void, OsStr, OsString};
 use std::mem::{align_of, size_of};
@@ -24,7 +25,9 @@ use windows::Win32::Foundation::{
     LPARAM, RPC_E_CALL_CANCELED, RPC_E_CALL_COMPLETE, RPC_E_CHANGED_MODE,
 };
 #[cfg(feature = "windows-ui-write")]
-use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
+use windows::Win32::Foundation::{
+    WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT, WPARAM,
+};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, IsValidSid,
     TokenIntegrityLevel, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
@@ -53,11 +56,14 @@ use windows::Win32::UI::Accessibility::{
     UIA_ClassNamePropertyId, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId,
     UIA_ValuePatternId, UIA_E_ELEMENTNOTAVAILABLE, UIA_E_TIMEOUT,
 };
-#[cfg(feature = "windows-ui-write")]
-use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW,
     GetWindowThreadProcessId, IsWindowVisible, GA_ROOTOWNER, GWL_STYLE, GW_OWNER, WS_DISABLED,
+};
+#[cfg(feature = "windows-ui-write")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, SendMessageTimeoutW, SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG,
+    SMTO_BLOCK, SMTO_ERRORONEXIT, WM_KEYDOWN,
 };
 
 use zeroize::Zeroize;
@@ -77,7 +83,7 @@ use super::{
     ledger::{LedgerRecord, MutationLedger, RecordCorrelation},
     ledger_native::LazyProductionLedger,
     transaction::{self, CommitSelectorState, DraftState, ExpectedState, FreshState, MutationPort},
-    unix_now_ms, KNOWN_PROFILE,
+    unix_now_ms, SubmitStrategy, KNOWN_PROFILE,
 };
 use crate::platform::contract::MAX_TARGET_LABEL_UTF16_UNITS;
 #[cfg(feature = "windows-ui-write")]
@@ -1615,6 +1621,7 @@ struct NativeMutationPort<'operation> {
     composer_element: Option<IUIAutomationElement>,
     value_pattern: Option<IUIAutomationValuePattern>,
     invoke_pattern: Option<IUIAutomationInvokePattern>,
+    submit_strategy: Option<SubmitStrategy>,
     prepared: PreparedMutation,
 }
 
@@ -1647,6 +1654,7 @@ impl<'operation> NativeMutationPort<'operation> {
             composer_element: None,
             value_pattern: None,
             invoke_pattern: None,
+            submit_strategy: None,
             prepared: PreparedMutation::None,
         }
     }
@@ -1819,6 +1827,7 @@ impl MutationPort for NativeMutationPort<'_> {
         self.composer_element = None;
         self.value_pattern = None;
         self.invoke_pattern = None;
+        self.submit_strategy = None;
         self.prepared = PreparedMutation::None;
 
         let now_unix_ms = unix_now_ms();
@@ -1918,9 +1927,13 @@ impl MutationPort for NativeMutationPort<'_> {
             DraftState::Unobserved
         };
 
-        // No send-button selector has completed the required measured profile
-        // validation, so an InvokePattern is never acquired or guessed.
-        fresh.commit_selector = CommitSelectorState::Unconfigured;
+        self.submit_strategy = profile.submit_strategy;
+        fresh.commit_selector = match self.submit_strategy {
+            Some(SubmitStrategy::ComposerEnterMessageV1) => {
+                CommitSelectorState::UniqueSynchronousComposerEnter
+            }
+            None => CommitSelectorState::Unconfigured,
+        };
         self.identity = Some(NativeMutationIdentity {
             hwnd,
             composer_hwnd: opened.hwnd,
@@ -1999,7 +2012,7 @@ impl MutationPort for NativeMutationPort<'_> {
 
     fn prepare_invoke(&mut self) -> Result<(), UiError> {
         self.prepared = PreparedMutation::None;
-        if self.invoke_pattern.is_none() {
+        if self.invoke_pattern.is_none() && self.submit_strategy.is_none() {
             return Err(UiError::new(
                 UiErrorKind::UnsupportedCapability,
                 "windows_commit_selector_unconfigured",
@@ -2022,12 +2035,7 @@ impl MutationPort for NativeMutationPort<'_> {
         // Repeat the complete bracketed target/draft preflight immediately at
         // the Invoke boundary before borrowing the selector interface.
         self.revalidate_before_mutation(DraftState::ExactMessage)?;
-        let pattern = self.invoke_pattern.as_ref().ok_or_else(|| {
-            UiError::new(
-                UiErrorKind::UnsupportedCapability,
-                "windows_commit_selector_unconfigured",
-            )
-        })?;
+        let submit_strategy = self.submit_strategy;
         let identity = self.identity.as_ref().ok_or_else(|| {
             UiError::new(
                 UiErrorKind::StaleSnapshot,
@@ -2037,11 +2045,87 @@ impl MutationPort for NativeMutationPort<'_> {
         ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
         ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
-        // SAFETY: this interface can only be stored after an exact, unique,
-        // profile-bound send selector and InvokePattern are verified. The
-        // current profile stores none, so production cannot reach this call.
-        unsafe { pattern.Invoke() }
-            .map_err(|error| map_windows_error(error, "windows_commit_invoke"))
+        if let Some(pattern) = self.invoke_pattern.as_ref() {
+            // SAFETY: a future InvokePattern can be stored only after an exact,
+            // unique, profile-bound send selector is verified.
+            return unsafe { pattern.Invoke() }
+                .map_err(|error| map_windows_error(error, "windows_commit_invoke"));
+        }
+        match submit_strategy {
+            Some(SubmitStrategy::ComposerEnterMessageV1) => {
+                submit_profile_bound_composer_enter(identity.composer_hwnd)
+            }
+            None => Err(UiError::new(
+                UiErrorKind::UnsupportedCapability,
+                "windows_commit_selector_unconfigured",
+            )),
+        }
+    }
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn submit_profile_bound_composer_enter(composer_hwnd: HWND) -> Result<(), UiError> {
+    submit_profile_bound_composer_enter_with(
+        composer_hwnd,
+        |hwnd, message, wparam, lparam, flags, timeout_ms, message_result| {
+            // SAFETY: the caller established that `hwnd` is the freshly
+            // revalidated composer. `message_result` remains valid for this
+            // synchronous call and no pointer is retained by user32.
+            unsafe {
+                SendMessageTimeoutW(
+                    hwnd,
+                    message,
+                    wparam,
+                    lparam,
+                    flags,
+                    timeout_ms,
+                    Some(ptr::from_mut(message_result)),
+                )
+                .0 != 0
+            }
+        },
+    )
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn submit_profile_bound_composer_enter_with(
+    composer_hwnd: HWND,
+    dispatch_once: impl FnOnce(
+        HWND,
+        u32,
+        WPARAM,
+        LPARAM,
+        SEND_MESSAGE_TIMEOUT_FLAGS,
+        u32,
+        &mut usize,
+    ) -> bool,
+) -> Result<(), UiError> {
+    const VK_RETURN_WPARAM: usize = 0x0D;
+    const RETURN_SCAN_CODE: isize = 0x1C;
+    const ENTER_KEYDOWN_LPARAM: isize = 1 | (RETURN_SCAN_CODE << 16);
+    const SUBMIT_TIMEOUT_MS: u32 = 1_000;
+
+    let mut message_result = 0_usize;
+    // `composer_hwnd` was freshly revalidated as the exact profile-bound
+    // RICHEDIT50W/1006 Document composer in this process, with matching PID,
+    // target permit, draft, focus, modal, and executable evidence. The FnOnce
+    // seam structurally permits exactly one synchronous dispatch.
+    let delivered = dispatch_once(
+        composer_hwnd,
+        WM_KEYDOWN,
+        WPARAM(VK_RETURN_WPARAM),
+        LPARAM(ENTER_KEYDOWN_LPARAM),
+        SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT,
+        SUBMIT_TIMEOUT_MS,
+        &mut message_result,
+    );
+    if !delivered {
+        Err(UiError::new(
+            UiErrorKind::SubmissionUncertain,
+            "windows_commit_enter_message_uncertain",
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -2449,6 +2533,33 @@ fn map_windows_error(error: WindowsError, operation: &'static str) -> UiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "windows-ui-write")]
+    #[test]
+    fn composer_enter_dispatch_is_exact_single_call_and_fail_closed() {
+        let hwnd = HWND::default();
+        let result = submit_profile_bound_composer_enter_with(
+            hwnd,
+            |actual_hwnd, message, wparam, lparam, flags, timeout_ms, result| {
+                assert_eq!(actual_hwnd, hwnd);
+                assert_eq!(message, WM_KEYDOWN);
+                assert_eq!(wparam.0, 0x0D);
+                assert_eq!(lparam.0, 1 | (0x1C << 16));
+                assert_eq!(flags, SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT);
+                assert_eq!(timeout_ms, 1_000);
+                assert_eq!(*result, 0);
+                *result = 7;
+                true
+            },
+        );
+        assert!(result.is_ok());
+
+        let error = submit_profile_bound_composer_enter_with(hwnd, |_, _, _, _, _, _, _| false)
+            .expect_err("a failed or timed-out dispatch must remain uncertain");
+        assert_eq!(error.kind, UiErrorKind::SubmissionUncertain);
+        assert_eq!(error.operation, "windows_commit_enter_message_uncertain");
+        assert!(!error.retry_safe);
+    }
 
     #[test]
     fn cancellation_classifier_accepts_only_completed_or_already_cancelled_calls() {

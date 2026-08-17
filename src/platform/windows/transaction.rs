@@ -33,6 +33,7 @@ pub(super) enum CommitSelectorState {
     Absent,
     Ambiguous,
     UniqueInvokable,
+    UniqueSynchronousComposerEnter,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -630,7 +631,8 @@ fn validate_fresh(
     }
     if require_commit_selector {
         let (kind, operation) = match fresh.commit_selector {
-            CommitSelectorState::UniqueInvokable => return Ok(()),
+            CommitSelectorState::UniqueInvokable
+            | CommitSelectorState::UniqueSynchronousComposerEnter => return Ok(()),
             CommitSelectorState::Unconfigured => (
                 UiErrorKind::UnsupportedCapability,
                 "windows_commit_selector_unconfigured",
@@ -1294,39 +1296,47 @@ mod tests {
     }
 
     #[test]
-    fn verified_commit_stages_and_invokes_exactly_once() {
-        let claim = FakeClaim::accepting();
-        let mut port =
-            FakePort::with_states([valid(DraftState::Empty), valid(DraftState::ExactMessage)]);
+    fn verified_commit_stages_and_submits_exactly_once_for_each_supported_strategy() {
+        for selector in [
+            CommitSelectorState::UniqueInvokable,
+            CommitSelectorState::UniqueSynchronousComposerEnter,
+        ] {
+            let claim = FakeClaim::accepting();
+            let mut before = valid(DraftState::Empty);
+            before.commit_selector = selector;
+            let mut staged = valid(DraftState::ExactMessage);
+            staged.commit_selector = selector;
+            let mut port = FakePort::with_states([before, staged]);
 
-        assert_eq!(
-            run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap(),
-            SendOutcome::CommitIssued
-        );
-        assert_eq!(claim.calls.get(), 1);
-        assert_eq!(port.set_calls, 1);
-        assert_eq!(port.clear_calls, 0);
-        assert_eq!(port.invoke_calls, 1);
-        assert_eq!(port.ledger_begin_calls, 1);
-        assert_eq!(port.ledger_commit_calls, 1);
-        assert_eq!(port.ledger_indeterminate_calls, 1);
-        assert_eq!(port.ledger_resolve_calls, 0);
-        assert_eq!(
-            port.events,
-            [
-                "trust_preflight",
-                "ledger_preflight",
-                "observe",
-                "ledger_stage",
-                "prepare_set",
-                "set",
-                "observe",
-                "ledger_commit",
-                "prepare_invoke",
-                "invoke",
-                "ledger_indeterminate",
-            ]
-        );
+            assert_eq!(
+                run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap(),
+                SendOutcome::CommitIssued
+            );
+            assert_eq!(claim.calls.get(), 1);
+            assert_eq!(port.set_calls, 1);
+            assert_eq!(port.clear_calls, 0);
+            assert_eq!(port.invoke_calls, 1);
+            assert_eq!(port.ledger_begin_calls, 1);
+            assert_eq!(port.ledger_commit_calls, 1);
+            assert_eq!(port.ledger_indeterminate_calls, 1);
+            assert_eq!(port.ledger_resolve_calls, 0);
+            assert_eq!(
+                port.events,
+                [
+                    "trust_preflight",
+                    "ledger_preflight",
+                    "observe",
+                    "ledger_stage",
+                    "prepare_set",
+                    "set",
+                    "observe",
+                    "ledger_commit",
+                    "prepare_invoke",
+                    "invoke",
+                    "ledger_indeterminate",
+                ]
+            );
+        }
     }
 
     #[test]

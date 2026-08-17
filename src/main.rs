@@ -2921,7 +2921,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(all(target_os = "windows", not(feature = "windows-ui-write")))]
     #[test]
     fn windows_production_write_capability_refuses_before_stdin_or_ui() {
         for mode in ["--stage-only", "--commit"] {

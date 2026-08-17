@@ -7,12 +7,13 @@ an already-open KakaoTalk self-chat. It does not log in, access KakaoTalk files
 or databases, inspect process memory, select or open rooms, synthesize keys,
 use the clipboard, or force focus or Z-order.
 
-Wave 2 adds a guarded transaction implementation, but not a usable production
-send profile. The default build excludes native UI write call sites. Even an
-all-feature build advertises `send_open_chat=false` because the new private
-self-target selector candidate is not yet measurement-qualified and there is
-no measured unique send-button selector. Production stage and commit therefore
-refuse before stdin or UI inspection.
+The default build excludes native UI write call sites and remains read-only.
+The default-off `windows-ui-write` build exposes a guarded send capability for
+the exact known executable/UI profile. KakaoTalk `26.7.0.5255` exposes no
+separate send element or InvokePattern, so that profile submits with one
+bounded synchronous Enter window message sent directly to the freshly
+revalidated composer HWND. Runtime opt-in and every policy/transaction gate
+remain mandatory.
 
 ```text
 Windows CLI / redacted output
@@ -36,7 +37,7 @@ Windows safety policy --> dry-run report
                    v
         final native revalidation
           /                  \
-  stage/readback/restore   one Invoke attempt
+  stage/readback/restore   one submit attempt
 ```
 
 `src/platform` contains platform-neutral snapshots, outcomes, errors, and
@@ -143,9 +144,10 @@ graph. Write orchestration additionally requires all of the following:
 7. a fresh, fully validated policy snapshot whose exact observed target is
    bound to the requested allowlist entry by request-scoped evidence.
 
-The production backend intentionally fails item 3. The separate Windows
-configuration flag prevents a macOS `allow_ax_send` opt-in from silently
-authorizing Windows writes in a future profile.
+The default build fails item 3. The feature build passes it only as a static
+capability declaration; every later runtime gate can still refuse. The
+separate Windows configuration flag prevents a macOS `allow_ax_send` opt-in
+from silently authorizing Windows writes.
 
 `ApprovedOperation::execute` consumes the approval while retaining the policy
 mutex for the synchronous call. `MessageSender` is sealed to reviewed crate
@@ -216,14 +218,12 @@ Stage-only is designed as:
 6. require exact empty readback.
 
 If user activity changes the value, the transaction never clears the mixed or
-unknown draft. Commit performs the same preparation, requires an independently
-verified exact Invoke selector, and makes at most one `Invoke` call. Every
-failure or panic after that call begins is `SubmissionUncertain` with
+unknown draft. Commit performs the same preparation, requires the exact
+profile-bound submit strategy, and makes at most one submit call. The current
+profile uses `SendMessageTimeoutW` for one composer-targeted
+`WM_KEYDOWN/VK_RETURN`; it does not synthesize global input or change focus.
+Every failure or panic after that call begins is `SubmissionUncertain` with
 `retry_safe=false`; there is no automatic retry edge.
-
-The current native profile sets live self-target and target-binding evidence
-false and its commit selector to unconfigured. It therefore never reaches
-draft Value access, `SetValue`, or `Invoke` in production.
 
 ## Threading and native resource ownership
 

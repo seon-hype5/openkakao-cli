@@ -2,6 +2,14 @@
 
 Date: 2026-08-17 KST
 
+> Current successor update: a metadata-only live selector measurement found
+> the exact Document composer but no send element or InvokePattern. ADR-053
+> therefore binds the default-off `windows-ui-write` build to one synchronous,
+> composer-targeted Enter message after all existing trust, target, draft,
+> inactivity, modal, mutex, approval, and ledger gates. The default build stays
+> read-only. Earlier `send_open_chat=false` and unconfigured-submit statements
+> below describe predecessor checkpoints and are superseded for feature builds.
+
 > Latest successor update: the accepted x64 bundle is
 > [`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md), the exact
 > provider output is `0x80003080`, and the profile-bound native observer is now

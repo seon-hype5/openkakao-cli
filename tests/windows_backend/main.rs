@@ -4,12 +4,15 @@ use openkakao_cli::platform::windows::WindowsBackend;
 use openkakao_cli::platform::PlatformProbe;
 
 #[test]
-fn production_backend_keeps_send_disabled_without_verified_identity_and_selector() {
+fn production_backend_exposes_only_the_build_selected_capability_surface() {
     let backend = WindowsBackend::default();
     let capabilities = backend.capabilities();
 
     assert!(capabilities.inspect);
+    #[cfg(not(feature = "windows-ui-write"))]
     assert!(!capabilities.send_open_chat);
+    #[cfg(feature = "windows-ui-write")]
+    assert!(capabilities.send_open_chat);
     assert!(!capabilities.open_chat_by_name);
     assert!(!capabilities.read_visible);
     assert!(!capabilities.watch_unread);

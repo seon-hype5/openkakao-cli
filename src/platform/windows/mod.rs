@@ -46,6 +46,14 @@ const UIA_DOCUMENT_CONTROL_TYPE: i32 = 50_030;
 static READ_ONLY_PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum SubmitStrategy {
+    /// KakaoTalk 26.7 exposes no separate send element or InvokePattern. Send
+    /// one synchronous, profile-bound Enter message directly to the already
+    /// verified composer HWND without changing focus or global keyboard state.
+    ComposerEnterMessageV1,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct FileVersion {
     major: u16,
     minor: u16,
@@ -80,6 +88,7 @@ struct UiProfile {
     composer_class: &'static str,
     composer_automation_id: &'static str,
     composer_control_type: i32,
+    submit_strategy: Option<SubmitStrategy>,
 }
 
 impl UiProfile {
@@ -97,6 +106,7 @@ const KNOWN_PROFILE: UiProfile = UiProfile {
     composer_class: COMPOSER_CLASS,
     composer_automation_id: COMPOSER_AUTOMATION_ID,
     composer_control_type: UIA_DOCUMENT_CONTROL_TYPE,
+    submit_strategy: Some(SubmitStrategy::ComposerEnterMessageV1),
 };
 
 fn profile_for(version: Option<FileVersion>) -> Option<&'static UiProfile> {
@@ -588,7 +598,14 @@ impl WindowsBackend {
 
 impl PlatformProbe for WindowsBackend {
     fn capabilities(&self) -> UiCapabilities {
-        UiCapabilities::windows_read_only()
+        #[cfg(feature = "windows-ui-write")]
+        {
+            UiCapabilities::windows_guarded_write()
+        }
+        #[cfg(not(feature = "windows-ui-write"))]
+        {
+            UiCapabilities::windows_read_only()
+        }
     }
 
     fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {
@@ -1279,7 +1296,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_version_gates_composer_and_write_capability() {
+    fn unknown_version_gates_composer_snapshot() {
         let snapshot = map_native(
             TargetKind::SelfChat,
             NativeInspection {
@@ -1301,7 +1318,6 @@ mod tests {
         assert!(!snapshot.input.present);
         assert!(!snapshot.input.writable);
         assert!(snapshot.input.selector_profile_id.is_none());
-        assert!(!WindowsBackend::default().capabilities().send_open_chat);
     }
 
     #[test]

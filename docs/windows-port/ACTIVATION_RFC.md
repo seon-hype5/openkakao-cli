@@ -1,10 +1,12 @@
 # Windows production-activation RFC
 
-Status: **proposal only; no live gate or production write is authorized**
+Status: **implemented behind the default-off `windows-ui-write` feature**
 
 Applies after: I20 and the failed-closed first L10 attempt
 
-Current production capability: `send_open_chat=false`
+Current default-build capability: `send_open_chat=false`
+
+Current feature-build capability: guarded `send_open_chat=true`
 
 ## Purpose
 
@@ -24,9 +26,9 @@ independent activation requirements.
   empty/nonempty bit. Both BSTR allocations are scrubbed before release.
 - Do not infer self-chat from process, window class, composer presence, focus,
   screen position, or a caller-supplied boolean.
-- Do not use keyboard input, Enter, clipboard, focus/Z-order changes, OCR,
-  window messages, hooks, injection, or a second submit attempt.
-- Do not activate stage or commit merely because this proposal is merged.
+- Do not use global keyboard input, clipboard, focus/Z-order changes, OCR,
+  hooks, injection, or a second submit attempt. The sole exception is the
+  profile-bound synchronous Enter message in section B.
 
 ## A. Requested self-chat binding
 
@@ -162,18 +164,18 @@ capability, or live authorization.
 
 ## B. Exact submit selector
 
-A submit profile may be proposed only after target binding is accepted. Its
-measurement session is metadata-only: it must not call `Invoke`.
+A metadata-only measurement found no send element or InvokePattern in the
+supported `26.7.0.5255` profile. The exact composer remains fixed by class,
+AutomationId, Document control type, native HWND/PID, bounded ancestry,
+enabled/writable state, and executable profile.
 
-The profile must fix the exact class, AutomationId, control type, bounded
-ancestor relation to the already selected composer window, enabled state, and
-`InvokePattern` availability for one supported KakaoTalk file version. It must
-produce one candidate in 20 positive observations and zero in wrong-room,
-disabled, modal, popup, duplicate, absent, and version-mismatch negatives.
-
-Zero or multiple candidates, an unreadable property, provider timeout, process
-replacement, or selector drift disables commit. There is no Enter, key-input,
-clipboard, hit-test, coordinate, or default-button fallback.
+After all normal target, draft, activity, modal, mutex, deadline, approval, and
+ledger checks, the profile dispatches one synchronous
+`WM_KEYDOWN/VK_RETURN` to that composer HWND with a one-second
+`SendMessageTimeoutW`. Zero or multiple composers, an unreadable property,
+provider timeout, process replacement, selector drift, or failed dispatch is
+terminal refusal/uncertainty. There is no global key input, clipboard,
+hit-test, coordinate, default-button fallback, key-up, or retry.
 
 ## C. Durable replay and crash-recovery ledger
 

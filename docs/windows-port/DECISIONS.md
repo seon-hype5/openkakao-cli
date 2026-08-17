@@ -839,3 +839,27 @@ This is an implemented selector candidate, not activation. It has not passed
 20 separately opened self-chat observations or the complete direct/group/open/
 main/popup/duplicate negative matrix. It adds no submit selector, keeps
 `send_open_chat=false`, and authorizes no stage, commit, or message send.
+
+## ADR-053: Bind submission to the exact composer with one synchronous Enter message
+
+A metadata-only live observation of KakaoTalk `26.7.0.5255` found exactly three
+UIA descendants. The exact reviewed composer (`RICHEDIT50W`, AutomationId
+`1006`, Document) exposed ValuePattern and TextPattern, but no descendant
+exposed InvokePattern and there was no separate send HWND. Consequently an
+Invoke-only profile cannot submit on this version.
+
+For the default-off `windows-ui-write` build only, bind the known UI profile to
+`ComposerEnterMessageV1`. After the complete process, executable, window,
+target-label, composer, empty/exact-draft, inactivity, modal, deadline, mutex,
+one-shot approval, and durable-ledger checks, dispatch exactly one synchronous
+`WM_KEYDOWN/VK_RETURN` directly to the freshly revalidated composer HWND with
+`SendMessageTimeoutW`. Fix the scan code, keydown state bits, timeout, and
+`SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT`; do not change focus, use
+global input, touch the clipboard, send key-up, or retry.
+
+The default build remains read-only. The feature build advertises only
+`inspect` and `send_open_chat`; runtime `allow_windows_ui_write=true`, exact
+self-chat allowlisting, stdin input, explicit `--yes`, and all fresh gates are
+still mandatory. Any failure after the sole dispatch boundary is terminal
+submission uncertainty, and an existing draft is never overwritten or
+cleared.

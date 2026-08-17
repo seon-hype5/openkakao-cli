@@ -28,10 +28,10 @@ A Windows UI write is unavailable unless every independent layer permits it:
 - final native PID/HWND/path/process-creation/session/UIA evidence still
   matches immediately before the atomic execution claim.
 
-The current production backend deliberately advertises no send capability.
-Its privacy-bounded target identity selector is an unqualified candidate and it
-has no measured commit selector, so no amount of CLI flags or configuration can
-currently reach `SetValue` or `Invoke`.
+The default production backend advertises no send capability. A binary built
+with the default-off `windows-ui-write` feature advertises the narrow guarded
+send capability, but cannot reach `SetValue` or submission without the
+independent runtime opt-in and every exact fresh-state gate below.
 
 ## Target, state, and replay rules
 
@@ -157,14 +157,17 @@ memory, injection, hook, unofficial login, or telemetry is used by this port.
 
 ## Mutation and uncertainty rules
 
-The guarded implementation uses UIA ValuePattern and InvokePattern only. It
-does not use the clipboard, global keys, forced focus/Z-order, guessed window
-messages, or retries.
+The guarded implementation uses UIA ValuePattern for stage/readback/restore.
+The exact `26.7.0.5255` profile has no send InvokePattern, so its reviewed
+submission strategy sends one synchronous `WM_KEYDOWN/VK_RETURN` directly to
+the freshly revalidated composer HWND with `SendMessageTimeoutW`. It does not
+use the clipboard, global keys, forced focus/Z-order, guessed targets, or
+retries.
 
 Stage clears only an exactly read-back value that remains byte-for-byte owned
 by the transaction. If the user or provider changes it, the code leaves it
-untouched. Commit requires an exact unique Invoke selector and issues at most
-one Invoke. Every error or panic after Invoke begins is normalized to
+untouched. Commit requires an exact profile-bound submit strategy and issues at
+most one submit call. Every error or panic after submission begins is normalized to
 `SubmissionUncertain`; commit-attempt outcomes and errors are always
 `retry_safe=false` and exit 21. A sender result incompatible with the approved
 mode is treated the same way.
@@ -182,17 +185,17 @@ method has been entered after the claim, the existing conservative
 before the OS call. A failed relevant relationship query is never proof of
 absence.
 
-## Remaining security blockers
+## Residual qualification work
 
 The proposed contracts and activation order are in
 [`ACTIVATION_RFC.md`](ACTIVATION_RFC.md). Merging that proposal grants no live
 or write authority.
 
-- The privacy-safe request/proof and fresh-state gates exist synthetically,
-  but no approved, measured native selector or ephemeral UTF-16 observer can
-  yet prove that the current room is the requested self-chat.
-- No live-measured exact unique send-button selector/InvokePattern is
-  configured.
+- The exact target and composer are version-gated; future KakaoTalk versions
+  require a new source-static profile and live qualification rather than a
+  fallback.
+- The composer-targeted Enter strategy has a single-attempt live smoke gate;
+  its result must never be used to justify an automatic retry.
 - A pure executable-trust verifier, fakeable VERIFY/extract/CLOSE
   orchestration, and a profile-bound native process/path/file/WinTrust/SPKI
   adapter exist. Distinct source-static target-byte, signer, and root-relation

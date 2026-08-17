@@ -41,8 +41,9 @@ allowlist-ordering, and CI allowlist findings.
   or panic are non-retryable uncertainty.
 - Secret stdin, nonce, UTF-16, outgoing BSTR, and CurrentValue BSTR buffers are
   bounded/redacted/zeroized according to their ownership.
-- No focus/Z-order change, keys, clipboard, window messages, screenshots,
-  hooks, injection, process-memory access, or retry edge exists.
+- No focus/Z-order change, global keys, clipboard, screenshots, hooks,
+  injection, process-memory access, or retry edge exists. The known profile's
+  only window message is one composer-bound synchronous Enter submission.
 
 ## Automated I20 gates
 
@@ -76,14 +77,16 @@ behavior, redaction, exact configuration/capability refusal order, and the
 absence of automatic retry. It does not prove live KakaoTalk selector
 compatibility, target identity, draft safety, or submission correctness.
 
-Production mutation must remain unreachable:
+Default-build production mutation must remain unreachable:
 
 - `windows-ui-write` defaults off;
 - `allow_windows_ui_write` defaults false;
-- the Windows backend advertises `send_open_chat=false`;
-- the native target candidate remains unqualified by the required live
-  positive/negative matrix; and
-- the commit selector remains unconfigured.
+- the Windows backend advertises `send_open_chat=false`; and
+- native UI write call sites are not compiled.
+
+The feature build may advertise guarded send only when the exact target and
+composer profile plus its single-attempt submission strategy are compiled in.
+Runtime configuration still defaults to refusal.
 
 ## Exit evidence
 

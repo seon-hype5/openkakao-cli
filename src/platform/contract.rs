@@ -42,6 +42,20 @@ impl UiCapabilities {
             watch_unread: false,
         }
     }
+
+    /// Feature-gated Windows capability after the exact native transaction
+    /// boundary, executable profile, target binding, and profile-bound submit
+    /// strategy have all been compiled in. Runtime configuration and a fresh
+    /// policy approval remain independently mandatory.
+    pub const fn windows_guarded_write() -> Self {
+        Self {
+            inspect: true,
+            send_open_chat: true,
+            open_chat_by_name: false,
+            read_visible: false,
+            watch_unread: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1118,6 +1132,23 @@ mod tests {
     use super::*;
 
     const TARGET_CANARY: &str = "SYNTHETIC_TARGET_CANARY";
+
+    #[test]
+    fn windows_capability_profiles_are_narrow_and_feature_independent() {
+        let read_only = UiCapabilities::windows_read_only();
+        assert!(read_only.inspect);
+        assert!(!read_only.send_open_chat);
+        assert!(!read_only.open_chat_by_name);
+        assert!(!read_only.read_visible);
+        assert!(!read_only.watch_unread);
+
+        let guarded_write = UiCapabilities::windows_guarded_write();
+        assert!(guarded_write.inspect);
+        assert!(guarded_write.send_open_chat);
+        assert!(!guarded_write.open_chat_by_name);
+        assert!(!guarded_write.read_visible);
+        assert!(!guarded_write.watch_unread);
+    }
 
     fn executable_unverified_blocker() -> ReadOnlyCandidateBlockers {
         ReadOnlyCandidateBlockers::from_observation(false, false, true, true, false, true, true)
