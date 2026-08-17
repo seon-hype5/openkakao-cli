@@ -867,8 +867,9 @@ if ($relativeComponents.Count -lt 1 -or $relativeComponents.Count -gt 8 -or
 }
 
 $lastModified = "absent"
-if ($installerResponse.Headers.Contains("Last-Modified")) {
-    $lastModified = [string]$installerResponse.Headers.GetValues("Last-Modified")[0]
+$headerText = $installerResponse.Headers.ToString()
+if ($headerText -match '(?im)^Last-Modified:\s*(?<value>[^\r\n]+)') {
+    $lastModified = $Matches["value"].Trim()
 }
 $providerCompatibility = $winTrustEvidence.ProviderFlags -eq [uint32]0x00083080
 
