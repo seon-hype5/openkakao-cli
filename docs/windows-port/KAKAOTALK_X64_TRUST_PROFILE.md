@@ -5,16 +5,24 @@ Date: 2026-08-17 KST
 ## Acceptance boundary
 
 This is the accepted public, architecture-specific executable-trust bundle for
-source profile `kakaotalk-windows-x64-stable-26.7.0.5255-v1`. It authorizes
+source profile `kakaotalk-windows-x64-stable-26.7.0.5255-v2`. It authorizes
 embedding only the target whole-file digest, target leaf-SPKI digest,
 `ProgramFiles64` root relation, exact file version, and the qualified WinTrust
 provider policy. It does **not** authorize a live UI observation, composer
 mutation, submit-selector choice, `send_open_chat=true`, or a message send.
 
+Selector profile v2 reuses the same executable-trust bytes as v1 and changes
+only the exact composer control type from Edit to Document. That revision is
+based on a bounded live result showing the reviewed class/AutomationId pair but
+no Edit triple, plus Microsoft's published
+[RichEdit-to-Document UI Automation mapping](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-controlsupport).
+It adds no alternate selector or fallback and does not itself
+authorize a live retry or mutation.
+
 The schema is `openkakao.windows.executable-trust-profile.v1`, the channel is
-`stable`, the architecture is `x64`, and there is no predecessor production
-profile. Rollback means restoring `UnavailableExecutableTrust`; it never means
-falling back to a version-only, signer-only, or alternate-root match.
+`stable`, the architecture is `x64`, and there is no predecessor executable-
+trust bundle. Rollback means restoring `UnavailableExecutableTrust`; it never
+means falling back to a version-only, signer-only, or alternate-root match.
 
 ## Distribution artifact
 

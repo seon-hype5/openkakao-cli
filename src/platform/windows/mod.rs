@@ -38,11 +38,11 @@ use super::{
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(8);
 const SNAPSHOT_TTL_MS: u64 = 5_000;
-const KNOWN_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v1";
+const KNOWN_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v2";
 const TOP_LEVEL_CLASS: &str = "EVA_Window_Dblclk";
 const COMPOSER_CLASS: &str = "RICHEDIT50W";
 const COMPOSER_AUTOMATION_ID: &str = "1006";
-const UIA_EDIT_CONTROL_TYPE: i32 = 50_004;
+const UIA_DOCUMENT_CONTROL_TYPE: i32 = 50_030;
 static READ_ONLY_PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -96,7 +96,7 @@ const KNOWN_PROFILE: UiProfile = UiProfile {
     top_level_class: TOP_LEVEL_CLASS,
     composer_class: COMPOSER_CLASS,
     composer_automation_id: COMPOSER_AUTOMATION_ID,
-    composer_control_type: UIA_EDIT_CONTROL_TYPE,
+    composer_control_type: UIA_DOCUMENT_CONTROL_TYPE,
 };
 
 fn profile_for(version: Option<FileVersion>) -> Option<&'static UiProfile> {
@@ -807,15 +807,20 @@ mod tests {
 
     #[test]
     fn selector_is_exact_and_case_sensitive() {
-        assert!(KNOWN_PROFILE.matches_selector("RICHEDIT50W", "1006", 50_004));
-        assert!(!KNOWN_PROFILE.matches_selector("richedit50w", "1006", 50_004));
-        assert!(!KNOWN_PROFILE.matches_selector("RICHEDIT50W", "1006 ", 50_004));
+        assert_eq!(
+            KNOWN_PROFILE.id,
+            crate::safety::SUPPORTED_SELECTOR_PROFILE_ID
+        );
+        assert!(KNOWN_PROFILE.matches_selector("RICHEDIT50W", "1006", 50_030));
+        assert!(!KNOWN_PROFILE.matches_selector("richedit50w", "1006", 50_030));
+        assert!(!KNOWN_PROFILE.matches_selector("RICHEDIT50W", "1006 ", 50_030));
+        assert!(!KNOWN_PROFILE.matches_selector("RICHEDIT50W", "1006", 50_004));
         assert!(!KNOWN_PROFILE.matches_selector("RICHEDIT50W", "1006", 50_000));
 
         let candidates = [
-            ("RICHEDIT50W", "1006", 50_004),
-            ("richedit50w", "1006", 50_004),
-            ("RICHEDIT50W", "1006", 50_004),
+            ("RICHEDIT50W", "1006", 50_030),
+            ("richedit50w", "1006", 50_030),
+            ("RICHEDIT50W", "1006", 50_030),
         ];
         let exact_count = candidates
             .into_iter()

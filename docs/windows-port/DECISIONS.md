@@ -782,3 +782,26 @@ are forged as acceptable. It does not read Name or Value and does not alter the
 mutation selector, target proof, draft proof, or send capability. Mutation
 preflight explicitly skips the three diagnostic queries. This authorizes no
 live retry or mutation.
+
+## ADR-051: Revise the exact RichEdit selector to Document without fallback
+
+The separately approved successor to ADR-050 ran exactly one guarded read-only
+probe against commit `54c1381`. It returned the fixed
+`read_only_composer_near_match_without_expected_control_type` code: at least
+one descendant matched exact class `RICHEDIT50W` plus AutomationId `1006`,
+while the full triple using Edit returned none. The diagnostic retained no
+element, count, association, or actual property value. Every external guard
+was stable and no retry or UI mutation followed.
+
+Microsoft's published
+[UI Automation support table](https://learn.microsoft.com/en-us/windows/win32/winauto/uiauto-controlsupport)
+maps the standard RichEdit control to the Document control type. Replace Edit
+with Document in the exact three-property composer selector and bump the
+combined selector ID from v1 to v2. Read-only discovery, policy, target
+fingerprints, and mutation-time revalidation all require v2. Do not accept v1
+or add an Edit/Document OR condition: zero or multiple exact Document matches
+remain refusals.
+
+This is an evidence-backed candidate correction, not proof of a unique live
+composer, self-chat identity, draft state, or send control. It authorizes no
+live retry, stage, commit, or message send.

@@ -49,8 +49,8 @@ use windows::Win32::UI::Accessibility::IUIAutomationInvokePattern;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
     IUIAutomationValuePattern, TreeScope_Descendants, UIA_AutomationIdPropertyId,
-    UIA_ClassNamePropertyId, UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_ValuePatternId,
-    UIA_E_ELEMENTNOTAVAILABLE, UIA_E_TIMEOUT,
+    UIA_ClassNamePropertyId, UIA_ControlTypePropertyId, UIA_DocumentControlTypeId,
+    UIA_ValuePatternId, UIA_E_ELEMENTNOTAVAILABLE, UIA_E_TIMEOUT,
 };
 #[cfg(feature = "windows-ui-write")]
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
@@ -1062,7 +1062,7 @@ fn discover_composer(
         &class_name.to_string(),
         &automation_id.to_string(),
         control_type.0,
-    ) || control_type != UIA_EditControlTypeId
+    ) || control_type != UIA_DocumentControlTypeId
         || profile.top_level_class != TOP_LEVEL_CLASS
     {
         return Err(UiError::new(
@@ -2015,7 +2015,7 @@ fn validate_mutation_composer_element(
         &class_name.to_string(),
         &automation_id.to_string(),
         control_type.0,
-    ) || control_type != UIA_EditControlTypeId
+    ) || control_type != UIA_DocumentControlTypeId
         || u32::try_from(element_pid).ok() != Some(identity.pid)
         || element_hwnd != identity.composer_hwnd
     {
@@ -2145,7 +2145,9 @@ mod tests {
 
     #[test]
     fn file_version_profile_is_exact() {
-        assert!(profile_for(Some(FileVersion::KNOWN)).is_some());
+        let profile = profile_for(Some(FileVersion::KNOWN))
+            .expect("the reviewed version must select one exact profile");
+        assert_eq!(profile.composer_control_type, UIA_DocumentControlTypeId.0);
         assert!(profile_for(Some(FileVersion {
             major: 26,
             minor: 7,

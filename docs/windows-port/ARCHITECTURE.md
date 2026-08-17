@@ -80,7 +80,10 @@ worker remains joined and does not use this cancellation path.
 
 The known profile is KakaoTalk `26.7.0.5255`, top-level class
 `EVA_Window_Dblclk`, and composer class `RICHEDIT50W`, AutomationId `1006`,
-with edit-control metadata. Unknown or ambiguous profiles fail closed.
+with Document-control metadata. The selector is profile revision v2; it has no
+Edit fallback. This matches Microsoft's standard-control mapping of RichEdit
+to the UI Automation Document control type. Unknown or ambiguous profiles fail
+closed.
 
 The normal inspection path does not read window titles, UIA Name or Value
 properties, room/profile labels, or draft text. It consequently leaves

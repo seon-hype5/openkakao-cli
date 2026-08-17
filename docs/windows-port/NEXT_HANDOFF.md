@@ -22,7 +22,7 @@ cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-`L10` was subsequently approved and attempted in six separate read-only
+`L10` was subsequently approved and attempted in seven separate read-only
 sessions; all failed closed and it is not complete. Not completed or
 authorized now: a new `L10` attempt, `L20`, `L30`, `L40`, and final post-live
 task `R00`. A green I20 does not carry authority into any live gate.
@@ -192,6 +192,28 @@ All before/after guards were stable and focus observation was available. No
 input, stage, commit, send, content read, screenshot, trace, or retry followed.
 This sixth failure supplied no authority for another live attempt.
 
+### Seventh L10 with fixed composer near-match evidence
+
+The composer-diagnostic successor `54c1381` passed Windows run `32004418562`
+and Linux/macOS run `32004418502`. Under a fresh one-session L10 approval,
+root reverified the clean local/fork head and exact default-feature release
+binary (14,246,912 bytes; SHA-256
+`7dccedb15773df107e1c36aa9200e76c9bf2d54d3e2445bf284df79b42ab8dd2`),
+then ran one guarded `doctor --ui --json`.
+
+The report remained `attempted=false` / `not_submitted` and established the
+reviewed process/profile, one exact-class top-level window, and no modal. It
+emitted `read_only_composer_selector_mismatch` plus only
+`read_only_composer_near_match_without_expected_control_type`. This proves
+only that at least one descendant matched exact `RICHEDIT50W` plus AutomationId
+`1006`, while the full Edit triple matched none. It retained no element,
+count, association, actual control type, Name, or Value.
+
+Foreground, focus, Z-order neighbors, and clipboard sequence were stable;
+focus observation was available. No input, stage, commit, send, content read,
+screenshot, trace, or retry followed. This seventh result supplied no authority
+for another live attempt.
+
 ## Offline remediation after the failed L10
 
 The failed sessions retained only fixed booleans, so they did not preserve a
@@ -249,6 +271,14 @@ control-type codes, or a no-two-property-near-match code, can be emitted. The
 private three-bit value is serde-skipped, Debug-redacted, target-bound, and an
 independent policy refusal;
 no actual property value, element, count, or association is retained.
+
+The seventh result isolated the changed property without reading its value.
+Microsoft's official standard-control table maps RichEdit to UI Automation
+Document, so the next offline successor changes the exact triple to
+`RICHEDIT50W` / `1006` / Document and bumps the combined selector profile from
+v1 to v2. Read-only discovery, policy, target fingerprints, and mutation-time
+revalidation require the same v2. There is no Edit fallback or OR condition;
+zero or multiple exact Document matches still fail closed.
 
 This is not a self-chat selector and does not authorize a live retry. All
 target-identity booleans remain false, `send_open_chat` remains false, and the
@@ -493,7 +523,7 @@ must not be weakened merely to make a live test possible.
 ## Final non-live verification
 
 The Rust and static-documentation rows below were rerun locally for the
-content-free ambiguity-diagnostic successor. The native-assumption PowerShell
+exact Document-selector successor. The native-assumption PowerShell
 qualification remains the separately recorded predecessor/hosted result; no
 execution-policy bypass or trust-store change was made for this documentation
 and snapshot-only change.
@@ -532,6 +562,8 @@ and snapshot-only change.
 | hosted cross-platform CI at `caed3f2` | run `31996648201` passed Linux and macOS jobs |
 | hosted Windows safe CI at `b7df418` | run `32000123935` passed every step |
 | hosted cross-platform CI at `b7df418` | run `32000123938` passed Linux and macOS jobs |
+| hosted Windows safe CI at `54c1381` | run `32004418562` passed every step |
+| hosted cross-platform CI at `54c1381` | run `32004418502` passed Linux and macOS jobs |
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -549,12 +581,12 @@ uses read-only repository permissions, disables checkout credential
 persistence, uploads no artifact, and runs default plus explicitly scoped
 all-feature synthetic coverage in debug and release profiles. Its committed
 inline documentation/action/toolchain validator and every newly added command
-passed locally and in hosted run `32000123935`.
+passed locally and in hosted run `32004418562`.
 
 ## Safety ledger for this implementation session
 
-- live KakaoTalk/UIA doctor probes: 6;
-- documented live before/after read-only guard snapshots: 10;
+- live KakaoTalk/UIA doctor probes: 7;
+- documented live before/after read-only guard snapshots: 12;
 - KakaoTalk UI mutations: 0;
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
@@ -576,9 +608,9 @@ passed locally and in hosted run `32000123935`.
 - screenshots/UI dumps/process-memory reads/injection/hooks: 0;
 - automatic retries: 0;
 - GitHub forks created: 1 (`seon-hype5/openkakao-cli`);
-- push attempts: 4 (unauthenticated HTTPS, strict-host-key SSH, authenticated
-  upstream HTTPS rejected with 403, and authenticated fork HTTPS);
-- successful pushes: 1 (fork branch `integration/windows-mvp`); and
+- push attempts: 5 (unauthenticated HTTPS, strict-host-key SSH, authenticated
+  upstream HTTPS rejected with 403, and two authenticated fork HTTPS pushes);
+- successful pushes: 2 (fork branch `integration/windows-mvp`); and
 - pull requests/releases: 0.
 
 All mutation counts in automated tests belong to fake or in-memory synthetic
@@ -643,29 +675,29 @@ implementation; it likewise authorizes no probe or production wiring.
   provider.
 - Re-run both hosted workflows after the compile-parity successor and require
   green Windows, Linux, and macOS results before upstream release work.
-- Live read-only observation now proves that the reviewed composer selector is
-  incompatible with the visible input on this installed profile. Target
-  identity, empty-draft proof, stage restoration, and submission result remain
-  unmeasured.
+- Live read-only observation proves that the v1 Edit triple is incompatible
+  with the visible input and that exact class plus AutomationId still match at
+  least one descendant. The evidence-backed v2 Document triple has not yet
+  been live-tested. Target identity, empty-draft proof, stage restoration, and
+  submission result remain unmeasured.
 
 ## Next permissible step
 
-The candidate-blocker predecessor `b7df418` passes the fully executed hosted
-Windows safe matrix in run `32000123935` and the paired Linux/macOS workflow in
-run `32000123938`. GitHub authentication is stored through the platform
+The composer-diagnostic predecessor `54c1381` passes the fully executed hosted
+Windows safe matrix in run `32004418562` and the paired Linux/macOS workflow in
+run `32004418502`. GitHub authentication is stored through the platform
 credential manager, the fork exists, and that commit is pushed on
 `integration/windows-mvp`. The next safe step is to commit and push the fixed
-composer near-match diagnostic successor, then require its Windows, Linux, and
+Document-selector profile-v2 successor, then require its Windows, Linux, and
 macOS hosted runs to pass. That work does not require a desktop session,
 product installation, KakaoTalk path/signature observation, or a trust-store
 change.
 
-After hosted CI, the next activation work is isolated artifact qualification:
-select one architecture, reproduce the target bundle in a disposable VM, run
-the NTFS race matrix and strong-sign/provider fixtures, and accept or reject
-the resulting profile in a separate source change. It must keep production
-disconnected. The failed L10 result does not authorize another live
-observation.
+After hosted CI, the next activation work is a newly approved one-session L10
+against the exact v2 default-feature release binary. It may only determine
+whether the Document triple is absent, unique, or ambiguous and whether its
+non-content capability booleans are available. The seventh result does not
+authorize that new live observation.
 
 A future retry of DAG node L10, documented in
 [`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),

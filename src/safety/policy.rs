@@ -28,7 +28,7 @@ use crate::platform::{
 pub const SUPPORTED_APP_VERSION: &str = "26.7.0.5255";
 
 /// The only selector profile accepted by the frozen Windows MVP policy.
-pub const SUPPORTED_SELECTOR_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v1";
+pub const SUPPORTED_SELECTOR_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v2";
 
 /// Conservative maximum message length, counted as Unicode scalar values.
 pub const MAX_MESSAGE_SCALARS: usize = 1_000;

@@ -54,6 +54,8 @@ may additionally test only the three exact two-property subsets of the reviewed
 class/AutomationId/control-type selector. It retains existence booleans only
 and reports fixed near-match classes without values, counts, or element
 associations. This state is serde-skipped, target-bound, and policy-rejected.
+The supported v2 selector is exactly `RICHEDIT50W`, AutomationId `1006`, and
+Document control type. v1's Edit triple is not a fallback.
 
 Worker startup and native inspection share one eight-second budget. After the
 worker has enabled cancellation and published its pinned thread ID, expiry

@@ -356,6 +356,7 @@ fn ambiguous_discovery_wins_over_untrusted_absent_process_state() {
 #[test]
 fn unredacted_or_wrong_profile_evidence_is_refused_without_leaking_values() {
     const LEAK_CANARY: &str = "SYNTHETIC_PRIVATE_EVIDENCE_CANARY";
+    const RETIRED_EDIT_PROFILE: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v1";
     let mut cases = Vec::new();
 
     let mut state = safe_snapshot();
@@ -390,12 +391,22 @@ fn unredacted_or_wrong_profile_evidence_is_refused_without_leaking_values() {
         "policy_input_snapshot",
     ));
 
+    let mut state = safe_snapshot();
+    state.input.selector_profile_id = Some(RETIRED_EDIT_PROFILE.to_string());
+    cases.push((
+        state,
+        UiErrorKind::UnknownUiProfile,
+        "policy_input_snapshot",
+    ));
+
     for (state, expected_kind, expected_operation) in cases {
         let error = dry_run_error(state);
         assert_eq!(error.kind, expected_kind);
         assert_eq!(error.operation, expected_operation);
         assert!(!format!("{error}").contains(LEAK_CANARY));
         assert!(!format!("{error:?}").contains(LEAK_CANARY));
+        assert!(!format!("{error}").contains(RETIRED_EDIT_PROFILE));
+        assert!(!format!("{error:?}").contains(RETIRED_EDIT_PROFILE));
     }
 }
 

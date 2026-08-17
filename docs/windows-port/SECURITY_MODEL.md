@@ -115,6 +115,15 @@ bound into target evidence, and itself forces policy refusal. The mutation
 selector is unchanged, and mutation preflight explicitly skips these
 diagnostic queries.
 
+The bounded live successor established an exact reviewed
+class/AutomationId pair but no full Edit triple. Microsoft documents RichEdit
+as the UI Automation Document control type, so selector profile v2 replaces
+Edit with Document and rejects v1 rather than keeping a fallback. Both
+read-only discovery and mutation-time revalidation require the same exact v2
+triple; zero or multiple matches still fail closed. Default builds still
+contain no UI-write boundary, and the selector change grants no live or send
+authority.
+
 The modal scan begins only after exact executable-name verification and reads
 only HWND/PID, visibility, owner, and root-owner relationships. Its callback
 retains no candidate list, title, class, or UIA property and publishes only the
