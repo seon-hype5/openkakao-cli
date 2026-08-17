@@ -22,8 +22,8 @@ cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-`L10` was subsequently approved and attempted in two separate read-only
-sessions; both failed closed and it is not complete. Not completed or
+`L10` was subsequently approved and attempted in three separate read-only
+sessions; all failed closed and it is not complete. Not completed or
 authorized now: a new `L10` attempt, `L20`, `L30`, `L40`, and final post-live
 task `R00`. A green I20 does not carry authority into any live gate.
 
@@ -124,6 +124,24 @@ Selector ambiguity is an L10 abort condition, so no dry-run, retry, weaker
 matching, focus, input, clipboard operation, stage, or commit followed in that
 session. This second failure supplied no authority for another live attempt.
 
+### Third L10 after visibility-only narrowing
+
+After `caed3f2` and both hosted workflows passed, the user granted one fresh
+L10-only approval and kept the intended self-chat open with recording and
+screenshots disabled. Root reverified the clean exact commit and ran exactly
+one default-feature release `doctor --ui --json` from the reviewed artifact
+(SHA-256
+`0ca240a1d120a6647ed82202e8043cd808c6a1343f17713875bbb35a5f2f746a`).
+It exited 0 with schema v1, `ui_profile=null`, `attempted=false`,
+`not_submitted`, and the fixed `top_level_window_ambiguous` evidence. The
+predecessor schema did not retain which conservative ambiguity class applied.
+
+An in-memory read-only guard reported stable foreground, focus, Z-order
+neighbors, and clipboard sequence; focus observation was available. No raw
+handle/value, title, label, composer value, screenshot, or trace was printed or
+persisted. No dry-run, retry, input, stage, commit, or send followed. This third
+failure supplied no authority for another live attempt.
+
 ## Offline remediation after the failed L10
 
 The failed sessions retained only fixed booleans, so they did not preserve a
@@ -151,6 +169,16 @@ The mutation path retains a separate raw exact-class enumeration and still
 requires exactly one raw top-level window. A pure four-case test freezes both
 scopes. This is a conservative source diagnosis, not proof that an invisible
 window caused either observed failure.
+
+The third failed session showed that visibility-only narrowing was not enough,
+while the predecessor's fixed output could not identify the remaining
+fail-closed class. The next offline successor therefore carries one internal,
+content-free ambiguity reason and maps it to one allowlisted report code:
+candidate limit, duplicate composer, internally ambiguous composer, candidate
+not inspected, or no composer. The reason is omitted from snapshot serde,
+included in request-scoped target binding, and independently forces a policy
+refusal. Candidate order cannot change the chosen reason. No raw count or
+native/private value is emitted.
 
 This is not a self-chat selector and does not authorize a live retry. All
 target-identity booleans remain false, `send_open_chat` remains false, and the
@@ -394,20 +422,17 @@ must not be weakened merely to make a live test possible.
 
 ## Final non-live verification
 
-The fully executed local baseline below belongs to predecessor `f7d94c6`. All
-recorded final-matrix Rust commands used the ignored
-`C:\Users\ihvna\source\openkakao-dev\repo\.target\wave2-root` directory. The
-qualification predecessor compiles the two new trust tests and one ignored
-helper, but local Smart App Control refused the newly linked unsigned test
-executable before entry. The baseline counts therefore remain historical
-results, not a claim that those Rust tests executed locally. They did execute
-successfully on the pinned GitHub-hosted Windows runner.
+The Rust and static-documentation rows below were rerun locally for the
+content-free ambiguity-diagnostic successor. The native-assumption PowerShell
+qualification remains the separately recorded predecessor/hosted result; no
+execution-policy bypass or trust-store change was made for this documentation
+and snapshot-only change.
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 189 passed |
-| `cargo test --locked --lib --all-features platform::windows` | 113 passed |
+| `cargo test --locked --lib` | 196 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --lib --all-features platform::windows` | 118 passed; 1 bounded qualification child ignored |
 | `cargo test --locked --bin openkakao-cli` | 178 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -423,9 +448,9 @@ successfully on the pinned GitHub-hosted Windows runner.
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 113 passed |
+| release all-feature Windows synthetic tests | 118 passed; 1 bounded qualification child ignored |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 51 files, 63 local links, 0 broken; 12 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 52 files, 70 local links, 0 broken; 13 action refs pinned |
 | `actionlint` 1.7.12 on both non-release workflows | passed |
 | final `git diff --check` | passed |
 | successor `cargo test --locked --lib --no-run` | passed; test executable compiled only |
@@ -433,8 +458,8 @@ successfully on the pinned GitHub-hosted Windows runner.
 | successor PowerShell parser and `actionlint` 1.7.12 | passed |
 | successor native-assumption OS qualification | Windows `10.0.26200.0`/NTFS: strong hash and before/between/after timings passed |
 | qualification Rust trust-test execution | local entry blocked by Smart App Control error 4551; hosted Windows run passed |
-| hosted Windows safe CI at `e2f257d` | passed every step, including qualification, lint, synthetic tests, debug/release builds, and optimized all-feature tests |
-| initial hosted cross-platform CI at `e2f257d` | Linux synthetic job passed; Linux all-feature lint and macOS compile exposed the two defects fixed by this successor |
+| hosted Windows safe CI at `caed3f2` | run `31996648242` passed every step, including qualification, lint, synthetic tests, debug/release builds, and optimized all-feature tests |
+| hosted cross-platform CI at `caed3f2` | run `31996648201` passed Linux and macOS jobs |
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -452,12 +477,12 @@ uses read-only repository permissions, disables checkout credential
 persistence, uploads no artifact, and runs default plus explicitly scoped
 all-feature synthetic coverage in debug and release profiles. Its committed
 inline documentation/action/toolchain validator and every newly added command
-passed locally and in hosted run `31985013629`.
+passed locally and in hosted run `31996648242`.
 
 ## Safety ledger for this implementation session
 
-- live KakaoTalk/UIA doctor probes: 1;
-- live before/after read-only guard snapshots: 2;
+- live KakaoTalk/UIA doctor probes: 3;
+- documented live before/after read-only guard snapshots: 4;
 - KakaoTalk UI mutations: 0;
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
@@ -551,14 +576,13 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-The qualification predecessor passes the fully executed hosted Windows safe
-matrix, including the Rust tests that local Smart App Control correctly kept
-from entering. GitHub authentication is stored through the platform credential
-manager, the fork exists, and `e2f257d` is pushed on
-`integration/windows-mvp`. The paired cross-platform run provided a green Linux
-synthetic signal and identified two compile-only parity defects. The next safe
-step is to commit and push this successor, then require its Windows, Linux, and
-macOS hosted runs to pass. That work does not require a desktop session,
+The visibility-narrowed predecessor `caed3f2` passes the fully executed hosted
+Windows safe matrix in run `31996648242` and the paired Linux/macOS workflow in
+run `31996648201`. GitHub authentication is stored through the platform
+credential manager, the fork exists, and that commit is pushed on
+`integration/windows-mvp`. The next safe step is to commit and push the
+content-free ambiguity-diagnostic successor, then require its Windows, Linux,
+and macOS hosted runs to pass. That work does not require a desktop session,
 product installation, KakaoTalk path/signature observation, or a trust-store
 change.
 

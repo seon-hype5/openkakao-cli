@@ -91,6 +91,12 @@ operation strings are replaced with `redacted_operation` in both streams.
 A rejected legacy positional message is handled by generic parse output so
 clap cannot echo it.
 
+Read-only multi-window ambiguity is retained only as one fixed content-free
+class and translated to one allowlisted report code. The raw candidate count,
+HWND/PID, title, label, UIA identity, and selector value are not emitted. Any
+ambiguity class remains a policy refusal and is bound into target evidence; the
+diagnostic cannot become mutation authority.
+
 The modal scan begins only after exact executable-name verification and reads
 only HWND/PID, visibility, owner, and root-owner relationships. Its callback
 retains no candidate list, title, class, or UIA property and publishes only the

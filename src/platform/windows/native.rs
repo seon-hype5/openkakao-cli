@@ -74,8 +74,8 @@ use super::{
 };
 use super::{
     profile_for, select_read_only_window, ComposerDiscovery, FileVersion, FingerprintKey,
-    NativeComposer, NativeInspection, NativeProcess, NativeWindow, UiProfile, WindowDiscovery,
-    TOP_LEVEL_CLASS,
+    NativeComposer, NativeInspection, NativeProcess, NativeWindow, ReadOnlyWindowAmbiguity,
+    UiProfile, WindowDiscovery, TOP_LEVEL_CLASS,
 };
 #[cfg(feature = "windows-ui-write")]
 use crate::platform::{ApprovedSend, SendOutcome};
@@ -112,7 +112,10 @@ pub(super) fn inspect(
 
         let window = match windows.len() {
             0 => WindowDiscovery::Absent,
-            count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => WindowDiscovery::Ambiguous(count),
+            count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => WindowDiscovery::Ambiguous {
+                count,
+                reason: ReadOnlyWindowAmbiguity::CandidateLimit,
+            },
             _ => {
                 let mut inspected = Vec::with_capacity(windows.len());
                 for hwnd in windows {

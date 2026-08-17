@@ -48,6 +48,19 @@ pub struct ProcessFingerprint {
     pub session_id: Option<u32>,
 }
 
+/// Content-free reason why read-only Windows discovery could not select one
+/// diagnostic window. The value is internal snapshot state: public reports
+/// map it to a fixed allowlisted evidence code, while serde omits it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadOnlyWindowAmbiguity {
+    CandidateLimit,
+    DuplicateComposer,
+    ComposerAmbiguous,
+    CandidateNotInspected,
+    NoComposer,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppSnapshot {
     pub platform: UiPlatform,
@@ -61,6 +74,10 @@ pub struct AppSnapshot {
     /// non-content selector narrowing: zero is absent, one is unique, and
     /// more than one is ambiguous.
     pub top_level_window_count: usize,
+    /// Fixed, content-free diagnostic for a read-only ambiguous result. It is
+    /// excluded from snapshot serialization and cannot authorize mutation.
+    #[serde(skip)]
+    pub read_only_window_ambiguity: Option<ReadOnlyWindowAmbiguity>,
     pub modal_present: bool,
 }
 
@@ -337,6 +354,10 @@ fn update_snapshot_binding(mac: &mut HmacSha256, snapshot: &UiSnapshot) {
     update_bool(mac, snapshot.app.integrity_compatible);
     update_bool(mac, snapshot.app.known_ui_profile);
     mac.update(&u64_len(snapshot.app.top_level_window_count).to_le_bytes());
+    update_byte(
+        mac,
+        read_only_window_ambiguity_code(snapshot.app.read_only_window_ambiguity),
+    );
     update_bool(mac, snapshot.app.modal_present);
 
     update_byte(mac, target_code(snapshot.target.kind));
@@ -406,6 +427,17 @@ fn target_code(value: TargetKind) -> u8 {
     match value {
         TargetKind::SelfChat => 1,
         TargetKind::Other => 2,
+    }
+}
+
+const fn read_only_window_ambiguity_code(value: Option<ReadOnlyWindowAmbiguity>) -> u8 {
+    match value {
+        None => 0,
+        Some(ReadOnlyWindowAmbiguity::CandidateLimit) => 1,
+        Some(ReadOnlyWindowAmbiguity::DuplicateComposer) => 2,
+        Some(ReadOnlyWindowAmbiguity::ComposerAmbiguous) => 3,
+        Some(ReadOnlyWindowAmbiguity::CandidateNotInspected) => 4,
+        Some(ReadOnlyWindowAmbiguity::NoComposer) => 5,
     }
 }
 
@@ -905,6 +937,7 @@ mod tests {
                 integrity_compatible: true,
                 known_ui_profile: true,
                 top_level_window_count: 1,
+                read_only_window_ambiguity: None,
                 modal_present: false,
             },
             target: ChatTargetSnapshot {
@@ -1007,6 +1040,17 @@ mod tests {
     }
 
     #[test]
+    fn read_only_ambiguity_is_not_part_of_the_serialized_snapshot_schema() {
+        let mut snapshot = target_snapshot();
+        snapshot.app.read_only_window_ambiguity =
+            Some(ReadOnlyWindowAmbiguity::CandidateNotInspected);
+
+        let json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
+        assert!(!json.contains("read_only_window_ambiguity"));
+        assert!(!json.contains("candidate_not_inspected"));
+    }
+
+    #[test]
     fn target_binding_is_exact_redacted_nonserializing_and_state_bound() {
         let (request, permit) = InspectRequest::bound_self_chat(TARGET_CANARY, [0xab; 32]);
         assert!(request.requires_target_binding());
@@ -1099,6 +1143,10 @@ mod tests {
         });
         assert_binding_rejects_mutation(&permit, &bound, |value| {
             value.app.top_level_window_count += 1
+        });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.read_only_window_ambiguity =
+                Some(ReadOnlyWindowAmbiguity::CandidateNotInspected)
         });
         assert_binding_rejects_mutation(&permit, &bound, |value| value.app.modal_present = true);
 

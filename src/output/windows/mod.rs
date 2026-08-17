@@ -3,8 +3,8 @@
 use serde::Serialize;
 
 use crate::platform::{
-    ActionReport, BackendKind, ExitCode, SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform,
-    UiSnapshot,
+    ActionReport, BackendKind, ExitCode, ReadOnlyWindowAmbiguity, SendOutcome, TargetKind, UiError,
+    UiErrorKind, UiPlatform, UiSnapshot,
 };
 
 pub const SCHEMA_VERSION: u8 = 1;
@@ -125,6 +125,11 @@ const EVIDENCE_CODES: &[&str] = &[
     "top_level_window_absent",
     "top_level_window_unique",
     "top_level_window_ambiguous",
+    "read_only_candidate_limit",
+    "read_only_duplicate_composer",
+    "read_only_composer_ambiguous",
+    "read_only_candidate_not_inspected",
+    "read_only_no_composer",
     "modal_absent",
     "modal_present",
     "self_chat_verified",
@@ -361,7 +366,7 @@ fn safe_profile_id(backend: BackendKind, snapshot: &UiSnapshot) -> Option<String
 }
 
 fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
-    let mut evidence = Vec::with_capacity(19);
+    let mut evidence = Vec::with_capacity(20);
     push_state(
         &mut evidence,
         snapshot.app.app_running,
@@ -400,6 +405,20 @@ fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
         }
         .to_string(),
     );
+    if let Some(reason) = snapshot.app.read_only_window_ambiguity {
+        evidence.push(
+            match reason {
+                ReadOnlyWindowAmbiguity::CandidateLimit => "read_only_candidate_limit",
+                ReadOnlyWindowAmbiguity::DuplicateComposer => "read_only_duplicate_composer",
+                ReadOnlyWindowAmbiguity::ComposerAmbiguous => "read_only_composer_ambiguous",
+                ReadOnlyWindowAmbiguity::CandidateNotInspected => {
+                    "read_only_candidate_not_inspected"
+                }
+                ReadOnlyWindowAmbiguity::NoComposer => "read_only_no_composer",
+            }
+            .to_string(),
+        );
+    }
     push_state(
         &mut evidence,
         !snapshot.app.modal_present,

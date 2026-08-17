@@ -11,7 +11,7 @@ use crate::output::windows::{
 use crate::platform::fake::FakeBackend;
 use crate::platform::{
     AppSnapshot, BackendKind, ChatTargetSnapshot, ExitCode, InputSnapshot, ProcessFingerprint,
-    SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    ReadOnlyWindowAmbiguity, SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 
 const TARGET_CANARY: &str = "SENSITIVE_TARGET_CANARY";
@@ -53,6 +53,7 @@ fn safe_snapshot() -> UiSnapshot {
             integrity_compatible: true,
             known_ui_profile: true,
             top_level_window_count: 1,
+            read_only_window_ambiguity: None,
             modal_present: false,
         },
         target: ChatTargetSnapshot {
@@ -484,6 +485,48 @@ fn refusal_errors_map_to_stable_exit_codes_and_separate_streams() {
         assert!(!rendered.stdout.contains("windows_ui_error"));
         assert!(rendered.stderr.starts_with("windows_ui_error "));
         assert!(!rendered.stderr.contains('{'));
+    }
+}
+
+#[test]
+fn doctor_maps_each_read_only_ambiguity_to_one_fixed_evidence_code() {
+    let cases = [
+        (
+            ReadOnlyWindowAmbiguity::CandidateLimit,
+            "read_only_candidate_limit",
+        ),
+        (
+            ReadOnlyWindowAmbiguity::DuplicateComposer,
+            "read_only_duplicate_composer",
+        ),
+        (
+            ReadOnlyWindowAmbiguity::ComposerAmbiguous,
+            "read_only_composer_ambiguous",
+        ),
+        (
+            ReadOnlyWindowAmbiguity::CandidateNotInspected,
+            "read_only_candidate_not_inspected",
+        ),
+        (ReadOnlyWindowAmbiguity::NoComposer, "read_only_no_composer"),
+    ];
+
+    for (reason, expected) in cases {
+        let mut snapshot = safe_snapshot();
+        snapshot.app.top_level_window_count = 2;
+        snapshot.app.read_only_window_ambiguity = Some(reason);
+        let report = build_action_report(ReportAction::UiDoctor, BackendKind::Fake, &snapshot);
+
+        let reasons = report
+            .evidence
+            .iter()
+            .filter(|code| code.starts_with("read_only_"))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(reasons, vec![expected]);
+
+        let rendered = render_report(&report, OutputMode::Json);
+        assert!(rendered.stdout.contains(expected));
+        assert!(!rendered.stdout.contains("read_only_window_ambiguity"));
     }
 }
 

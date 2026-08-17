@@ -133,6 +133,7 @@ mod tests {
                 integrity_compatible: true,
                 known_ui_profile: true,
                 top_level_window_count: 1,
+                read_only_window_ambiguity: None,
                 modal_present: false,
             },
             target: ChatTargetSnapshot {

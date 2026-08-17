@@ -31,8 +31,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AppSnapshot, ApprovedSend, ChatTargetSnapshot, InputSnapshot, InspectRequest, MessageSender,
-    PlatformProbe, ProcessFingerprint, SendOutcome, TargetKind, UiCapabilities, UiError,
-    UiErrorKind, UiPlatform, UiSnapshot,
+    PlatformProbe, ProcessFingerprint, ReadOnlyWindowAmbiguity, SendOutcome, TargetKind,
+    UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(8);
@@ -207,7 +207,10 @@ struct NativeWindow {
 enum WindowDiscovery {
     Absent,
     Unique(NativeWindow),
-    Ambiguous(usize),
+    Ambiguous {
+        count: usize,
+        reason: ReadOnlyWindowAmbiguity,
+    },
 }
 
 /// Narrows read-only discovery without treating a shared KakaoTalk window
@@ -223,23 +226,48 @@ fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery
         1 => WindowDiscovery::Unique(candidates.remove(0)),
         candidate_count => {
             let mut selected_index = None;
+            let mut unique_count = 0_usize;
+            let mut composer_ambiguous = false;
+            let mut candidate_not_inspected = false;
             for (index, candidate) in candidates.iter().enumerate() {
                 match &candidate.composer {
-                    ComposerDiscovery::Unique(_) if selected_index.is_none() => {
-                        selected_index = Some(index);
+                    ComposerDiscovery::Unique(_) => {
+                        unique_count += 1;
+                        selected_index.get_or_insert(index);
                     }
-                    ComposerDiscovery::Unique(_)
-                    | ComposerDiscovery::Ambiguous(_)
-                    | ComposerDiscovery::NotInspected => {
-                        return WindowDiscovery::Ambiguous(candidate_count);
-                    }
+                    ComposerDiscovery::Ambiguous(_) => composer_ambiguous = true,
+                    ComposerDiscovery::NotInspected => candidate_not_inspected = true,
                     ComposerDiscovery::Absent => {}
                 }
             }
 
-            selected_index.map_or(WindowDiscovery::Ambiguous(candidate_count), |index| {
-                WindowDiscovery::Unique(candidates.swap_remove(index))
-            })
+            // Use a fixed priority independent of EnumWindows ordering. An
+            // internally ambiguous selector is strongest, followed by a
+            // duplicate exact selector, an uninspected candidate, and finally
+            // the all-absent case.
+            let reason = if composer_ambiguous {
+                Some(ReadOnlyWindowAmbiguity::ComposerAmbiguous)
+            } else if unique_count > 1 {
+                Some(ReadOnlyWindowAmbiguity::DuplicateComposer)
+            } else if candidate_not_inspected {
+                Some(ReadOnlyWindowAmbiguity::CandidateNotInspected)
+            } else if unique_count == 0 {
+                Some(ReadOnlyWindowAmbiguity::NoComposer)
+            } else {
+                None
+            };
+
+            reason.map_or_else(
+                || {
+                    WindowDiscovery::Unique(candidates.swap_remove(
+                        selected_index.expect("one unique composer has a selected index"),
+                    ))
+                },
+                |reason| WindowDiscovery::Ambiguous {
+                    count: candidate_count,
+                    reason,
+                },
+            )
         }
     }
 }
@@ -570,9 +598,9 @@ fn map_native(target_kind: TargetKind, native: NativeInspection, observed_at: u6
     let expires_at = observed_at.saturating_add(SNAPSHOT_TTL_MS);
 
     match native.window {
-        WindowDiscovery::Absent => empty_snapshot(target_kind, 0, observed_at, expires_at),
-        WindowDiscovery::Ambiguous(count) => {
-            empty_snapshot(target_kind, count, observed_at, expires_at)
+        WindowDiscovery::Absent => empty_snapshot(target_kind, 0, None, observed_at, expires_at),
+        WindowDiscovery::Ambiguous { count, reason } => {
+            empty_snapshot(target_kind, count, Some(reason), observed_at, expires_at)
         }
         WindowDiscovery::Unique(window) => {
             map_unique_window(target_kind, window, observed_at, expires_at)
@@ -583,6 +611,7 @@ fn map_native(target_kind: TargetKind, native: NativeInspection, observed_at: u6
 fn empty_snapshot(
     target_kind: TargetKind,
     window_count: usize,
+    read_only_window_ambiguity: Option<ReadOnlyWindowAmbiguity>,
     observed_at: u64,
     expires_at: u64,
 ) -> UiSnapshot {
@@ -596,6 +625,7 @@ fn empty_snapshot(
             integrity_compatible: false,
             known_ui_profile: false,
             top_level_window_count: window_count,
+            read_only_window_ambiguity,
             modal_present: false,
         },
         target: ChatTargetSnapshot {
@@ -684,6 +714,7 @@ fn map_unique_window(
             integrity_compatible: process_verified && window.process.integrity_compatible,
             known_ui_profile,
             top_level_window_count: 1,
+            read_only_window_ambiguity: None,
             modal_present,
         },
         target: ChatTargetSnapshot {
@@ -934,12 +965,19 @@ mod tests {
         let ambiguous = map_native(
             TargetKind::SelfChat,
             NativeInspection {
-                window: WindowDiscovery::Ambiguous(2),
+                window: WindowDiscovery::Ambiguous {
+                    count: 2,
+                    reason: ReadOnlyWindowAmbiguity::CandidateLimit,
+                },
             },
             10,
         );
         assert!(!ambiguous.app.app_running);
         assert_eq!(ambiguous.app.top_level_window_count, 2);
+        assert_eq!(
+            ambiguous.app.read_only_window_ambiguity,
+            Some(ReadOnlyWindowAmbiguity::CandidateLimit)
+        );
         assert!(ambiguous.target.window.is_none());
     }
 
@@ -1000,28 +1038,77 @@ mod tests {
             })
         };
 
-        for candidates in [
-            vec![
-                window(Some(FileVersion::KNOWN), exact_composer()),
-                window(Some(FileVersion::KNOWN), exact_composer()),
-            ],
-            vec![
-                window(Some(FileVersion::KNOWN), exact_composer()),
-                window(Some(FileVersion::KNOWN), ComposerDiscovery::Ambiguous(2)),
-            ],
-            vec![
-                window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
-                window(None, ComposerDiscovery::NotInspected),
-            ],
-            vec![
-                window(Some(FileVersion::KNOWN), exact_composer()),
-                window(None, ComposerDiscovery::NotInspected),
-            ],
+        for (candidates, expected_reason) in [
+            (
+                vec![
+                    window(Some(FileVersion::KNOWN), exact_composer()),
+                    window(Some(FileVersion::KNOWN), exact_composer()),
+                ],
+                ReadOnlyWindowAmbiguity::DuplicateComposer,
+            ),
+            (
+                vec![
+                    window(Some(FileVersion::KNOWN), exact_composer()),
+                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Ambiguous(2)),
+                ],
+                ReadOnlyWindowAmbiguity::ComposerAmbiguous,
+            ),
+            (
+                vec![
+                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                    window(None, ComposerDiscovery::NotInspected),
+                ],
+                ReadOnlyWindowAmbiguity::CandidateNotInspected,
+            ),
+            (
+                vec![
+                    window(Some(FileVersion::KNOWN), exact_composer()),
+                    window(None, ComposerDiscovery::NotInspected),
+                ],
+                ReadOnlyWindowAmbiguity::CandidateNotInspected,
+            ),
+            (
+                vec![
+                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                ],
+                ReadOnlyWindowAmbiguity::NoComposer,
+            ),
         ] {
-            assert!(matches!(
-                select_read_only_window(candidates),
-                WindowDiscovery::Ambiguous(2)
-            ));
+            let WindowDiscovery::Ambiguous { count, reason } = select_read_only_window(candidates)
+            else {
+                panic!("duplicate or uncertain composers must remain ambiguous");
+            };
+            assert_eq!(count, 2);
+            assert_eq!(reason, expected_reason);
+        }
+    }
+
+    #[test]
+    fn read_only_ambiguity_reason_priority_is_independent_of_candidate_order() {
+        let exact_composer = || {
+            ComposerDiscovery::Unique(NativeComposer {
+                fingerprint: "run:synthetic-composer".to_string(),
+                enabled: true,
+                value_pattern_present: true,
+                writable: true,
+                focused: false,
+            })
+        };
+        let candidates = vec![
+            window(Some(FileVersion::KNOWN), exact_composer()),
+            window(None, ComposerDiscovery::NotInspected),
+            window(Some(FileVersion::KNOWN), exact_composer()),
+            window(Some(FileVersion::KNOWN), ComposerDiscovery::Ambiguous(2)),
+        ];
+
+        for candidates in [candidates.clone(), candidates.into_iter().rev().collect()] {
+            let WindowDiscovery::Ambiguous { count, reason } = select_read_only_window(candidates)
+            else {
+                panic!("mixed uncertainty must remain ambiguous");
+            };
+            assert_eq!(count, 4);
+            assert_eq!(reason, ReadOnlyWindowAmbiguity::ComposerAmbiguous);
         }
     }
 

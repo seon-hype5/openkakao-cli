@@ -709,3 +709,25 @@ does not establish self-chat identity, and does not add a submit selector or
 send capability. The two failed L10 sessions retained no raw count, so this is
 a conservative remediation of a source-level false-ambiguity class rather than
 a claimed live root cause. It authorizes no L10 retry or later gate.
+
+## ADR-048: Classify read-only ambiguity with fixed content-free reasons
+
+A third separately approved L10 doctor on the visibility-narrowed successor
+still returned `top_level_window_ambiguous`. The existing ambiguous snapshot
+discarded every inspected aggregate, so that fixed output could not distinguish
+the candidate ceiling, duplicate composers, an internally ambiguous composer,
+an uninspected candidate, or the all-absent-composer case. It retained no
+private data, but it also could not guide a conservative offline correction.
+
+Carry exactly one `ReadOnlyWindowAmbiguity` value in internal snapshot state:
+`CandidateLimit`, `DuplicateComposer`, `ComposerAmbiguous`,
+`CandidateNotInspected`, or `NoComposer`. Select the reason with a fixed order
+independent of `EnumWindows` ordering. Snapshot serde skips the field; schema-v1
+reports map it only to one fixed allowlisted evidence code and never emit the
+raw candidate count, native identifiers, labels, titles, values, or paths.
+
+The policy treats any such reason as `AmbiguousTarget` even if other public
+fields are forged as acceptable, and the request-scoped target HMAC commits to
+the reason. This is diagnostic-only fail-closed state. It neither ignores an
+unknown candidate nor supplies self-chat, draft, submit-selector, or send
+evidence, and it authorizes no live retry or later gate.

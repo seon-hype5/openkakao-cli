@@ -48,7 +48,10 @@ At a separately approved session, root performs these steps:
    most eight remaining exact-class candidates: exactly one window with exactly
    one known-profile composer, and no duplicate or internally ambiguous
    composer. Keep counts and native identifiers in memory and never print or
-   persist them. This visibility narrowing is not used by the mutation path.
+   persist them. If narrowing fails, emit only one reviewed fixed reason code:
+   candidate limit, duplicate composer, internally ambiguous composer,
+   candidate not inspected, or no composer. This visibility narrowing and its
+   diagnostic reasons are not used by the mutation path.
 2. Run only `doctor --ui`; never run legacy `doctor` on Windows.
 3. Review the console report without persisting it. Confirm fixed schema,
    allowlisted evidence, and absence of private material.

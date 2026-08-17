@@ -591,7 +591,7 @@ fn validate_app_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
             OP_APP_SNAPSHOT,
         ));
     }
-    if app.top_level_window_count > 1 {
+    if app.read_only_window_ambiguity.is_some() || app.top_level_window_count > 1 {
         return Err(policy_error(UiErrorKind::AmbiguousTarget, OP_APP_SNAPSHOT));
     }
     if !app.app_running {
@@ -813,6 +813,7 @@ mod tests {
                 integrity_compatible: true,
                 known_ui_profile: true,
                 top_level_window_count: 1,
+                read_only_window_ambiguity: None,
                 modal_present: false,
             },
             target: crate::platform::ChatTargetSnapshot {

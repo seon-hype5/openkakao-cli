@@ -8,7 +8,8 @@ execution guards without changing serialized report fields.
 The platform facade exports:
 
 - `UiCapabilities`;
-- `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, and `UiSnapshot`;
+- `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, `UiSnapshot`, and the
+  fixed `ReadOnlyWindowAmbiguity` diagnostic enum;
 - `InspectRequest`, opaque `TargetBindingEvidence`, `TargetKind`, and
   `PlatformProbe`;
 - `MessageSender`, `SendIntent`, `SecretMessage`, and `ApprovedSend`;
@@ -19,6 +20,9 @@ Snapshots contain only process/window/composer fingerprints and bounded state.
 Raw room/profile names, draft text, message text, HWNDs, creation FILETIMEs, and
 UIA runtime IDs are excluded. Target-binding evidence has no byte accessor,
 formats only as redacted, and is skipped by serde, so schema v1 is unchanged.
+The read-only ambiguity enum is likewise skipped by snapshot serde. Reports
+translate it to exactly one allowlisted content-free evidence code; no raw
+candidate count or native identifier is added to the report schema.
 
 ## Inspection semantics
 
@@ -31,6 +35,13 @@ room/profile names, or draft text during normal inspection. It may return a
 diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
 states; native/COM failures remain `UiError`. Target identity and draft-empty
 claims stay false in the current production profile.
+
+When multiple visible exact-class candidates cannot be narrowed, the internal
+snapshot distinguishes only five content-free classes: candidate limit,
+duplicate exact composers, an internally ambiguous composer, an uninspected
+candidate, or no exact composer. The classification order is deterministic.
+Any class is policy-rejected as `AmbiguousTarget` and is included in the opaque
+target-binding HMAC, so it cannot be moved to an otherwise acceptable snapshot.
 
 Worker startup and native inspection share one eight-second budget. After the
 worker has enabled cancellation and published its pinned thread ID, expiry

@@ -6,8 +6,8 @@ use std::time::Duration;
 use openkakao_cli::platform::fake::FakeBackend;
 use openkakao_cli::platform::{
     AppSnapshot, ChatTargetSnapshot, InputSnapshot, InspectRequest, PlatformProbe,
-    ProcessFingerprint, SecretMessage, SendIntent, SendMode, SendOutcome, TargetKind,
-    UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    ProcessFingerprint, ReadOnlyWindowAmbiguity, SecretMessage, SendIntent, SendMode, SendOutcome,
+    TargetKind, UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 use openkakao_cli::safety::{
     PolicyClock, WindowsPolicyConfig, WindowsSafetyPolicy, MAX_MESSAGE_SCALARS,
@@ -97,6 +97,7 @@ fn safe_snapshot() -> UiSnapshot {
             integrity_compatible: true,
             known_ui_profile: true,
             top_level_window_count: 1,
+            read_only_window_ambiguity: None,
             modal_present: false,
         },
         target: ChatTargetSnapshot {
@@ -292,6 +293,10 @@ fn app_snapshot_refusal_mapping_is_deterministic() {
 
     let mut state = safe_snapshot();
     state.app.top_level_window_count = 2;
+    cases.push((state, UiErrorKind::AmbiguousTarget));
+
+    let mut state = safe_snapshot();
+    state.app.read_only_window_ambiguity = Some(ReadOnlyWindowAmbiguity::NoComposer);
     cases.push((state, UiErrorKind::AmbiguousTarget));
 
     let mut state = safe_snapshot();
