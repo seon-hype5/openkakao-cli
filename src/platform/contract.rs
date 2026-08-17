@@ -73,6 +73,9 @@ impl fmt::Debug for ReadOnlyCandidateBlockers {
     }
 }
 
+// These constructors and accessors are consumed only by the Windows backend
+// and renderer; the binding accessor remains active on every platform.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 impl ReadOnlyCandidateBlockers {
     const EXECUTABLE_UNVERIFIED: u8 = 1 << 0;
     const UI_PROFILE_UNKNOWN: u8 = 1 << 1;
