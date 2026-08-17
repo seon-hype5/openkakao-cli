@@ -95,6 +95,7 @@ struct UiProfile {
     composer_automation_id: &'static str,
     composer_control_type: i32,
     empty_placeholder_utf16_sha256: [u8; 32],
+    empty_control_utf16: [u16; 2],
     set_value_appends_carriage_return: bool,
     submit_strategy: Option<SubmitStrategy>,
 }
@@ -111,6 +112,10 @@ impl UiProfile {
         let matches = observed == self.empty_placeholder_utf16_sha256;
         observed.zeroize();
         matches
+    }
+
+    fn matches_empty_provider_value(&self, units: &[u16]) -> bool {
+        units == self.empty_control_utf16 || self.matches_empty_placeholder(units)
     }
 
     fn matches_staged_value(&self, current: &[u16], expected: &[u16]) -> bool {
@@ -140,6 +145,7 @@ const KNOWN_PROFILE: UiProfile = UiProfile {
     composer_automation_id: COMPOSER_AUTOMATION_ID,
     composer_control_type: UIA_DOCUMENT_CONTROL_TYPE,
     empty_placeholder_utf16_sha256: KNOWN_EMPTY_PLACEHOLDER_UTF16_SHA256,
+    empty_control_utf16: [0x000D, 0x000D],
     set_value_appends_carriage_return: true,
     submit_strategy: Some(SubmitStrategy::ComposerEnterMessageV1),
 };
@@ -1008,6 +1014,13 @@ mod tests {
         let changed: Vec<u16> = "SYNTHETIC_EMPTY_CHROME ".encode_utf16().collect();
         assert!(!profile.matches_empty_placeholder(&changed));
         assert!(!KNOWN_PROFILE.matches_empty_placeholder(&units));
+    }
+
+    #[test]
+    fn empty_provider_control_value_is_exactly_two_carriage_returns() {
+        assert!(KNOWN_PROFILE.matches_empty_provider_value(&[u16::from(b'\r'), u16::from(b'\r'),]));
+        assert!(!KNOWN_PROFILE.matches_empty_provider_value(&[u16::from(b'\r')]));
+        assert!(!KNOWN_PROFILE.matches_empty_provider_value(&[u16::from(b'\r'), u16::from(b'\n'),]));
     }
 
     #[test]

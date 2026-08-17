@@ -190,8 +190,10 @@ Name check through the approval-owned permit.
 
 For this exact profile, an empty composer may expose a UI-chrome placeholder as
 provider Value. The boundary accepts empty only when a bounded native
-`WM_GETTEXTLENGTH` query returns zero or the scrubbed UTF-16 Value matches the
-source-static domain-separated placeholder digest. SetValue ownership accepts
+`WM_GETTEXTLENGTH` query returns zero, the scrubbed UTF-16 Value matches the
+source-static domain-separated placeholder digest, or the provider Value is
+exactly the measured post-submit pair of carriage returns. One carriage return,
+CRLF, and every other control shape remain nonempty. SetValue ownership accepts
 only the exact requested UTF-16 value or that value plus one provider carriage
 return; control characters are forbidden in authorized messages. No content,
 length-derived text, or digest input is emitted.

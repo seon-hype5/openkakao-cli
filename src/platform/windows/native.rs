@@ -953,7 +953,9 @@ fn read_exact_composer_draft_empty(
             unsafe { pattern.CurrentValue() }
                 .map_err(|error| map_windows_error(error, "windows_draft_uia_current_value"))?,
         );
-        context.profile.matches_empty_placeholder(current.units())
+        context
+            .profile
+            .matches_empty_provider_value(current.units())
     };
     revalidate_read_only_target_context(context, fingerprints)?;
     Ok(empty)
@@ -2592,7 +2594,7 @@ fn classify_current_value(
     Ok(
         if profile.matches_staged_value(current.units(), expected_message_utf16) {
             DraftState::ExactMessage
-        } else if profile.matches_empty_placeholder(current.units()) {
+        } else if profile.matches_empty_provider_value(current.units()) {
             DraftState::Empty
         } else {
             DraftState::Different

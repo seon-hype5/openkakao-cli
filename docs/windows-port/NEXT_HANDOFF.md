@@ -19,6 +19,14 @@ Date: 2026-08-17 KST
 > terminal sequence 3 before one Enter dispatch. Normal commits cannot consume
 > that record; focus/foreground activity still blocks.
 
+> One live recovery submit was issued after both hosted workflows passed. The
+> record reached terminal sequence 3 first, the CLI returned `commit_issued`,
+> and no retry occurred. Post-submit composer inspection found no canary and
+> exactly two provider carriage returns; conversation history was not read, so
+> delivery/echo remains unclaimed. One externally authorized focus transfer to
+> Windows Terminal was used after 2,950 seconds of desktop idle time, so this is
+> functional evidence and not a formal no-focus-change L40 pass.
+
 > Latest successor update: the accepted x64 bundle is
 > [`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md), the exact
 > provider output is `0x80003080`, and the profile-bound native observer is now
@@ -647,8 +655,10 @@ Successor live addendum for the composer/recovery measurement: one authorized
 stage-only backend call entered `SetValue` once, performed no clear and no
 submit, and left the exact synthetic draft with a durable sequence-2
 indeterminate record. One later commit command was refused by policy as
-`user_active` before backend dispatch. At this checkpoint there have been zero
-Enter submit calls and zero actual messages from this successor.
+`user_active` before backend dispatch. After both hosted workflows passed, one
+recovery commit promoted the record to terminal sequence 3 and issued exactly
+one Enter submit call. The canary then disappeared from the composer; no chat
+history was read, so delivery remains unverified. Automatic submit retries: 0.
 
 - live KakaoTalk/UIA doctor probes: 7;
 - documented live before/after read-only guard snapshots: 12;

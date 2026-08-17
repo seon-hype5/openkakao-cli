@@ -98,9 +98,10 @@ command line, requires exactly one configured allowlist entry, and reads only
 the selected root's `CurrentName` BSTR for an exact UTF-16 comparison. The
 process/root/modal/composer path is revalidated on both sides of that read. A
 successful match alone permits one exact-composer `CurrentValue` read, reduced
-to `draft_empty`. For the exact profile, empty means either native text length
-zero or the source-static domain-separated UTF-16 placeholder digest; no
-placeholder text is retained or emitted. The root Name is read and bound again
+to `draft_empty`. For the exact profile, empty means native text length zero,
+the source-static domain-separated UTF-16 placeholder digest, or the exact
+post-submit two-carriage-return provider value; all other control shapes fail
+closed. No provider text is retained or emitted. The root Name is read and bound again
 afterward; a mismatch discards the bit and refuses. All BSTRs are scrubbed
 without decoding or output.
 

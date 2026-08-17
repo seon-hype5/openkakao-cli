@@ -94,10 +94,11 @@ proven to have occurred. Plain doctor, mismatch, focus, or any other skipped
 read emits `draft_unobserved`; the fail-closed internal false bit is not
 misreported as evidence of a real draft.
 
-The exact profile treats a zero native text length or one source-static
-placeholder UTF-16 digest as empty. SetValue ownership accepts only the exact
-message or that message plus one provider carriage return. Neither provider
-text form is serialized or formatted.
+The exact profile treats a zero native text length, one source-static
+placeholder UTF-16 digest, or the exact post-submit two-carriage-return value as
+empty. SetValue ownership accepts only the exact message or that message plus
+one provider carriage return. Other control-only shapes remain nonempty.
+Neither provider text form is serialized or formatted.
 
 ## Mutation capability semantics
 

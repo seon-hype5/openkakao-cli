@@ -870,8 +870,10 @@ A separately authorized live stage-only exercise on KakaoTalk `26.7.0.5255`
 established three profile details without retaining or emitting draft text.
 First, the empty RichEdit provider exposes its UI-chrome placeholder as a
 nonempty ValuePattern value. The profile therefore accepts empty only when the
-native `WM_GETTEXTLENGTH` result is zero or the scrubbed UTF-16 value matches
-the source-static, domain-separated placeholder SHA-256 exactly. Second,
+native `WM_GETTEXTLENGTH` result is zero, the scrubbed UTF-16 value matches the
+source-static domain-separated placeholder SHA-256 exactly, or the post-submit
+provider value is exactly two carriage returns. One carriage return, CRLF, and
+every other control shape remain nonempty. Second,
 `SetValue` readback normalizes the requested value to either the exact UTF-16
 message or that message followed by one carriage return. Accept only those two
 forms; message validation already rejects control characters, so this cannot
@@ -893,3 +895,24 @@ terminal sequence 3, and only then issues the single profile-bound Enter call.
 Normal commit approvals never consume a recoverable record. A missing record,
 changed draft, focus/foreground activity, or any other mismatch refuses before
 submission; once sequence 3 is durable, no retry path exists.
+
+## ADR-055: Record the one-shot recovery submit without claiming delivery
+
+The fork commit `e5fc59a` passed both hosted safe workflows before the live
+submit. The approved desktop had been idle for 2,950 seconds while KakaoTalk
+remained foreground from the earlier stage. One external `SetForegroundWindow`
+call moved focus to the existing Windows Terminal; it synthesized no key or
+mouse input. This establishes the product precondition but violates the formal
+L40 manual's no-focus-change procedure, so this session is functional evidence,
+not an activation-gate pass.
+
+Immediately before submit, one KakaoTalk process, one exact composer, no
+composer focus/foreground, and the exact profile-normalized staged canary were
+reconfirmed without emitting content. Recovery promoted the durable stage-only
+sequence-2 record to terminal sequence 3 before issuing exactly one
+composer-targeted Enter call. The CLI returned `commit_issued`,
+`attempted=true`, and `retry_safe=false` (exit 21 by contract). Post-submit
+inspection read no conversation history: it proved only that the canary was
+absent from the composer and the provider value was exactly two carriage
+returns. Therefore record one submit call and no retry, but do not claim server
+delivery or echo confirmation without separate user-visible evidence.

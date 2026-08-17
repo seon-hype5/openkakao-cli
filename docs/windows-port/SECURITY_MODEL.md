@@ -58,6 +58,9 @@ independent runtime opt-in and every exact fresh-state gate below.
   may read only the selected root Name as UTF-16 for exact comparison and, only
   after success, reduce the exact composer Value to an empty/nonempty bit. Both
   BSTRs are scrubbed before COM release; neither is decoded, output, or stored.
+- The exact profile accepts only native zero length, its source-static
+  placeholder digest, or the measured post-submit two-carriage-return provider
+  value as empty. Other control-only shapes fail closed.
 - Output distinguishes an unobserved fail-closed draft bit from an observed
   nonempty draft: only a successfully bound guarded read may emit
   `draft_empty`/`draft_present`; all skipped reads emit `draft_unobserved`.
