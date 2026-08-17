@@ -33,7 +33,7 @@ pub(super) enum CommitSelectorState {
     Absent,
     Ambiguous,
     UniqueInvokable,
-    UniqueSynchronousComposerEnter,
+    UniqueFocusedQueuedComposerEnter,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -676,7 +676,7 @@ fn validate_fresh(
     if require_commit_selector {
         let (kind, operation) = match fresh.commit_selector {
             CommitSelectorState::UniqueInvokable
-            | CommitSelectorState::UniqueSynchronousComposerEnter => return Ok(()),
+            | CommitSelectorState::UniqueFocusedQueuedComposerEnter => return Ok(()),
             CommitSelectorState::Unconfigured => (
                 UiErrorKind::UnsupportedCapability,
                 "windows_commit_selector_unconfigured",
@@ -1362,7 +1362,7 @@ mod tests {
     fn verified_commit_stages_and_submits_exactly_once_for_each_supported_strategy() {
         for selector in [
             CommitSelectorState::UniqueInvokable,
-            CommitSelectorState::UniqueSynchronousComposerEnter,
+            CommitSelectorState::UniqueFocusedQueuedComposerEnter,
         ] {
             let claim = FakeClaim::accepting();
             let mut before = valid(DraftState::Empty);

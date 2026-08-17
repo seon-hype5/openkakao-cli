@@ -39,7 +39,7 @@ use super::{
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(8);
 const SNAPSHOT_TTL_MS: u64 = 5_000;
-const KNOWN_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v2";
+const KNOWN_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v3";
 const TOP_LEVEL_CLASS: &str = "EVA_Window_Dblclk";
 const COMPOSER_CLASS: &str = "RICHEDIT50W";
 const COMPOSER_AUTOMATION_ID: &str = "1006";
@@ -53,10 +53,10 @@ static READ_ONLY_PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SubmitStrategy {
-    /// KakaoTalk 26.7 exposes no separate send element or InvokePattern. Send
-    /// one synchronous, profile-bound Enter message directly to the already
-    /// verified composer HWND without changing focus or global keyboard state.
-    ComposerEnterMessageV1,
+    /// KakaoTalk 26.7 exposes no separate send element or InvokePattern. Focus
+    /// the exact verified composer, then enqueue one complete Enter keystroke
+    /// to that HWND's owning thread without synthesizing global keyboard input.
+    FocusedQueuedComposerEnterV2,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -147,7 +147,7 @@ const KNOWN_PROFILE: UiProfile = UiProfile {
     empty_placeholder_utf16_sha256: KNOWN_EMPTY_PLACEHOLDER_UTF16_SHA256,
     empty_control_utf16: [0x000D, 0x000D],
     set_value_appends_carriage_return: true,
-    submit_strategy: Some(SubmitStrategy::ComposerEnterMessageV1),
+    submit_strategy: Some(SubmitStrategy::FocusedQueuedComposerEnterV2),
 };
 
 fn profile_for(version: Option<FileVersion>) -> Option<&'static UiProfile> {

@@ -25,11 +25,12 @@
 > [!IMPORTANT]
 > **The Windows port is currently a fail-closed release candidate.** Windows
 > builds, synthetic tests, and a redacted `doctor --ui` diagnostic path are in
-> place, but production `local-send` writes are not enabled. Default builds
-> exclude UI write call sites, and feature-enabled builds still advertise no
-> send capability because no verified self-chat identity or send-button
-> selector is configured. The Windows port does not use KakaoTalk databases,
-> credentials, clipboard input, or synthetic keys. See the
+> place. Default builds exclude UI write call sites. A default-off feature build
+> contains an experimental profile-v3 self-chat sender, but it has not completed
+> the full live activation matrix and is not a generally supported capability.
+> It uses no KakaoTalk database, credential, clipboard, or global synthetic-key
+> input; immediately before submit it focuses only the verified KakaoTalk target
+> and composer. See the
 > [Windows architecture](docs/windows-port/ARCHITECTURE.md) and
 > [current handoff](docs/windows-port/NEXT_HANDOFF.md).
 

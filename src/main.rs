@@ -2879,7 +2879,7 @@ mod tests {
                 draft_empty: true,
                 focused: false,
                 selector_profile_id: Some(
-                    "kakaotalk-windows-x64-stable-26.7.0.5255-v2".to_string(),
+                    "kakaotalk-windows-x64-stable-26.7.0.5255-v3".to_string(),
                 ),
             },
         }

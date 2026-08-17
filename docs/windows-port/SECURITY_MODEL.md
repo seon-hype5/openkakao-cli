@@ -81,7 +81,7 @@ independent runtime opt-in and every exact fresh-state gate below.
 - The monotonic deadline is private, process-local, nonserializing, omitted
   from Debug, and checked before sender dispatch, native observation, final
   preflight, and each actual Value/Invoke call.
-- One approval is consumed by one synchronous reviewed sender call. A
+- One approval is consumed by one reviewed sender call. A
   crate-private atomic claim prevents a second native write attempt.
 - Policy nonce tracking is process-local and hashed. The content-free ledger is
   stored under a verified current-user LocalAppData directory with exact ACL,
@@ -168,11 +168,11 @@ memory, injection, hook, unofficial login, or telemetry is used by this port.
 ## Mutation and uncertainty rules
 
 The guarded implementation uses UIA ValuePattern for stage/readback/restore.
-The exact `26.7.0.5255` profile has no send InvokePattern, so its reviewed
-submission strategy sends one synchronous `WM_KEYDOWN/VK_RETURN` directly to
-the freshly revalidated composer HWND with `SendMessageTimeoutW`. It does not
-use the clipboard, global keys, forced focus/Z-order, guessed targets, or
-retries.
+The exact `26.7.0.5255` profile has no send InvokePattern. Profile v3 activates
+the exact top-level target, focuses the exact composer, revalidates the exact
+foreground/focus/draft binding, and queues one Enter keydown/key-up pair to
+that composer HWND. It does not use the clipboard, global keys, guessed
+targets, coordinate input, or retries.
 
 Stage clears only an exactly read-back value that remains byte-for-byte owned
 by the transaction. If the user or provider changes it, the code leaves it

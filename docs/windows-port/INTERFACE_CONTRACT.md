@@ -124,8 +124,8 @@ dispatched mode. An incompatible successful result is normalized to
 `SubmissionUncertain`.
 
 Fresh observation and final native preflight repeat the owner-group modal
-scan. The native port repeats it once more at each actual `SetValue` or
-`Invoke` boundary, followed by the two-clock freshness check and native call.
+scan. The native port repeats it once more at each actual `SetValue` or submit
+boundary, followed by the two-clock freshness check and native call.
 A positive final preflight returns `ModalPresent` with the fixed allowlisted
 operation `windows_mutation_modal`; uncertainty never becomes modal absence.
 After the one-shot claim and entry into a Value/Invoke method, the transaction's
@@ -179,8 +179,10 @@ exit 21 and override any incorrectly supplied retry flag.
 
 Once the first `SetValue` method is entered, every error or panic through
 readback, validation, clear, restore, or commit preparation is non-retryable
-uncertainty. Once `Invoke` is entered, every returned error or panic is
-submission uncertainty. There is no automatic retry.
+uncertainty. Once submit is entered, every returned error or panic is
+submission uncertainty. Profile v3 focuses the exact target/composer, repeats
+the foreground/focus/draft proof, and queues one Enter keydown/key-up pair to
+that exact composer HWND. There is no global input or automatic retry.
 
 A commit approval derived from a nonempty snapshot is marked for stage-only
 recovery and is valid only when the sealed backend advertises that capability.
@@ -201,8 +203,9 @@ openkakao-cli local-send --stdin --opened-only \
 
 Dry-run is the default. Staging and commit are guarded requests, not a promise
 of availability. They fail before stdin or UI inspection unless both the
-Windows-specific runtime gate and backend capability are present. The current
-backend capability is absent, so production writes remain unavailable.
+Windows-specific runtime gate and backend capability are present. The default
+build remains read-only; the default-off feature build exposes only the guarded
+profile-v3 path.
 
 Stdin is the only Windows message path and is capped at 4,000 valid UTF-8 bytes
 and 1,000 Unicode scalar values. Windows accepts neither a target nor message

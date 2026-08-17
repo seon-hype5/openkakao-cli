@@ -26,9 +26,9 @@ independent activation requirements.
   empty/nonempty bit. Both BSTR allocations are scrubbed before release.
 - Do not infer self-chat from process, window class, composer presence, focus,
   screen position, or a caller-supplied boolean.
-- Do not use global keyboard input, clipboard, focus/Z-order changes, OCR,
-  hooks, injection, or a second submit attempt. The sole exception is the
-  profile-bound synchronous Enter message in section B.
+- Do not use global keyboard input, clipboard, OCR, hooks, injection, or a
+  second submit attempt. The sole focus/Z-order exception is the exact
+  profile-bound queued Enter strategy in section B.
 
 ## A. Requested self-chat binding
 
@@ -51,7 +51,7 @@ plain `doctor --ui` still reads no Name or Value. Windows accepts no target
 positional argument. Exactly one configured allowlist entry is HMAC-bound into
 the request without copying it into the command line; configured and observed
 labels are capped at 512 UTF-16 units. After executable trust,
-one selected exact-profile top-level root, one exact v2 composer, no modal,
+one selected exact-profile top-level root, one exact v3 composer, no modal,
 matching session/integrity, and pre-read revalidation, the worker reads only
 the root element's `CurrentName` BSTR. It never decodes or formats that BSTR.
 An exact UTF-16 match creates state-bound evidence; a mismatch retains only a
@@ -170,12 +170,13 @@ AutomationId, Document control type, native HWND/PID, bounded ancestry,
 enabled/writable state, and executable profile.
 
 After all normal target, draft, activity, modal, mutex, deadline, approval, and
-ledger checks, the profile dispatches one synchronous
-`WM_KEYDOWN/VK_RETURN` to that composer HWND with a one-second
-`SendMessageTimeoutW`. Zero or multiple composers, an unreadable property,
-provider timeout, process replacement, selector drift, or failed dispatch is
-terminal refusal/uncertainty. There is no global key input, clipboard,
-hit-test, coordinate, default-button fallback, key-up, or retry.
+ledger checks, profile v3 activates the exact target, focuses the exact
+composer, repeats the foreground/focus/draft/target proof, and queues
+`WM_KEYDOWN/VK_RETURN` plus its matching `WM_KEYUP` to that composer HWND.
+Zero or multiple composers, an unreadable property, provider timeout, process
+replacement, selector drift, focus mismatch, or failed enqueue is terminal
+refusal/uncertainty. There is no global key input, clipboard, hit-test,
+coordinate, default-button fallback, or retry.
 
 ## C. Durable replay and crash-recovery ledger
 

@@ -4,16 +4,17 @@
 
 The Windows release-candidate path is a fail-closed, UI-only integration for
 an already-open KakaoTalk self-chat. It does not log in, access KakaoTalk files
-or databases, inspect process memory, select or open rooms, synthesize keys,
-use the clipboard, or force focus or Z-order.
+or databases, inspect process memory, select or open rooms, synthesize global
+keys, or use the clipboard. The v3 submit strategy deliberately focuses only
+the already verified target/composer immediately before targeted queue input.
 
 The default build excludes native UI write call sites and remains read-only.
 The default-off `windows-ui-write` build exposes a guarded send capability for
 the exact known executable/UI profile. KakaoTalk `26.7.0.5255` exposes no
-separate send element or InvokePattern, so that profile submits with one
-bounded synchronous Enter window message sent directly to the freshly
-revalidated composer HWND. Runtime opt-in and every policy/transaction gate
-remain mandatory.
+separate send element or InvokePattern, so that profile v3 focuses the freshly
+revalidated composer and queues one complete Enter press to that exact HWND's
+owning thread. Runtime opt-in and every policy/transaction gate remain
+mandatory.
 
 ```text
 Windows CLI / redacted output
@@ -84,7 +85,7 @@ worker remains joined and does not use this cancellation path.
 
 The known profile is KakaoTalk `26.7.0.5255`, top-level class
 `EVA_Window_Dblclk`, and composer class `RICHEDIT50W`, AutomationId `1006`,
-with Document-control metadata. The selector is profile revision v2; it has no
+with Document-control metadata. The selector is profile revision v3; it has no
 Edit fallback. This matches Microsoft's standard-control mapping of RichEdit
 to the UI Automation Document control type. Unknown or ambiguous profiles fail
 closed.
@@ -223,9 +224,11 @@ Stage-only is designed as:
 If user activity changes the value, the transaction never clears the mixed or
 unknown draft. Commit performs the same preparation, requires the exact
 profile-bound submit strategy, and makes at most one submit call. The current
-profile uses `SendMessageTimeoutW` for one composer-targeted
-`WM_KEYDOWN/VK_RETURN`; it does not synthesize global input or change focus.
-Every failure or panic after that call begins is `SubmissionUncertain` with
+profile activates the exact top-level target, focuses the exact composer, fully
+revalidates the resulting foreground/focus pair and exact draft, then queues
+`WM_KEYDOWN/VK_RETURN` followed by the matching `WM_KEYUP` to that composer.
+This enters KakaoTalk's normal message loop without synthesizing global input.
+Every failure or panic after queueing begins is `SubmissionUncertain` with
 `retry_safe=false`; there is no automatic retry edge.
 
 A recovery-marked commit is distinct from the normal pipeline. It is minted

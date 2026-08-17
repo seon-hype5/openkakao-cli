@@ -2,9 +2,17 @@
 
 Date: 2026-08-17 KST
 
-> Current successor update: a metadata-only live selector measurement found
+> Latest correction: the user visually confirmed that the v1 staged draft was
+> visible but no message appeared in the self-chat. The earlier
+> `commit_issued` result was therefore a failed submit, and the post-call two
+> carriage returns prove only local composer state. ADR-056/profile v3 replaces
+> direct `SendMessageTimeoutW` with exact-target activation, exact-composer
+> focus, a repeated foreground/focus/draft proof, and one target-queued Enter
+> keydown/key-up pair. No global input or automatic retry is introduced.
+
+> Historical v2 update: a metadata-only live selector measurement found
 > the exact Document composer but no send element or InvokePattern. ADR-053
-> therefore binds the default-off `windows-ui-write` build to one synchronous,
+> bound the default-off `windows-ui-write` build to one synchronous,
 > composer-targeted Enter message after all existing trust, target, draft,
 > inactivity, modal, mutex, approval, and ledger gates. The default build stays
 > read-only. Earlier `send_open_chat=false` and unconfigured-submit statements
@@ -23,7 +31,8 @@ Date: 2026-08-17 KST
 > record reached terminal sequence 3 first, the CLI returned `commit_issued`,
 > and no retry occurred. Post-submit composer inspection found no canary and
 > exactly two provider carriage returns; conversation history was not read, so
-> delivery/echo remains unclaimed. One externally authorized focus transfer to
+> delivery/echo was initially unclaimed and was later visually confirmed not
+> to have occurred. One externally authorized focus transfer to
 > Windows Terminal was used after 2,950 seconds of desktop idle time, so this is
 > functional evidence and not a formal no-focus-change L40 pass.
 
@@ -657,14 +666,15 @@ submit, and left the exact synthetic draft with a durable sequence-2
 indeterminate record. One later commit command was refused by policy as
 `user_active` before backend dispatch. After both hosted workflows passed, one
 recovery commit promoted the record to terminal sequence 3 and issued exactly
-one Enter submit call. The canary then disappeared from the composer; no chat
-history was read, so delivery remains unverified. Automatic submit retries: 0.
+one direct Enter call. The canary then disappeared from the composer, but the
+user visually confirmed that no message appeared in the self-chat. Treat that
+v1 call as a failed submit. Automatic submit retries: 0.
 
 - live KakaoTalk/UIA doctor probes: 7;
 - documented live before/after read-only guard snapshots: 12;
-- KakaoTalk UI mutations: 0;
-- production backend stage calls: 0;
-- production backend commit/Invoke calls: 0;
+- KakaoTalk UI mutations: 2 (one SetValue and one failed direct Enter call);
+- production backend stage calls: 1;
+- production backend commit/submit calls: 1, visually confirmed unsuccessful;
 - actual messages sent: 0;
 - committed Authenticode fixture executable launches: 0;
 - OS-supplied System32 loopback helper launches: 3, all stopped and waited;

@@ -916,3 +916,34 @@ inspection read no conversation history: it proved only that the canary was
 absent from the composer and the provider value was exactly two carriage
 returns. Therefore record one submit call and no retry, but do not claim server
 delivery or echo confirmation without separate user-visible evidence.
+
+The user subsequently supplied that missing visual evidence: the staged text
+had been visible, but no message appeared in the self-chat. Classify the v1
+direct-dispatch attempt as a failed submit, not merely unverified delivery. The
+two-carriage-return provider value proves only local composer state and must
+never be used as delivery evidence.
+
+## ADR-056: Replace direct Enter dispatch with focused queued input
+
+`SendMessageTimeoutW` invokes the composer window procedure directly and
+bypasses the owning thread's normal queued-input path. Windows translates a
+queued `WM_KEYDOWN` through the application message loop, where accelerators
+and application filters can observe it. The visually confirmed v1 failure is
+therefore consistent with the direct call bypassing KakaoTalk's send handler.
+
+Bump the combined selector/submit profile to v3 and remove
+`ComposerEnterMessageV1`. After the existing unfocused/background preflight and
+durable commit transition, activate only the exact approved top-level HWND and
+call UIA `SetFocus` on the exact composer. Before enqueueing anything, repeat
+the process/window/modal/target/draft proof and additionally require that exact
+top-level window to be foreground and that exact composer to own keyboard
+focus. Then enqueue one complete Enter press—`WM_KEYDOWN/VK_RETURN` followed by
+the matching `WM_KEYUP`—to the exact composer HWND with `PostMessageW`.
+
+This strategy deliberately changes target focus but never synthesizes global
+input, uses coordinates, touches the clipboard, or posts to a thread or HWND
+selected after approval. A failed first enqueue and a failed key-up after a
+successful keydown are both terminal submission uncertainty. There is no
+automatic retry. The old sequence-3 ledger remains evidence for the failed v1
+attempt; user-confirmed non-delivery must be resolved explicitly before a new
+v3 live transaction rather than silently aging out or replaying it.

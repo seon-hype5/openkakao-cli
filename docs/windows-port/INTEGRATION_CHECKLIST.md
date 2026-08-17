@@ -41,9 +41,10 @@ allowlist-ordering, and CI allowlist findings.
   or panic are non-retryable uncertainty.
 - Secret stdin, nonce, UTF-16, outgoing BSTR, and CurrentValue BSTR buffers are
   bounded/redacted/zeroized according to their ownership.
-- No focus/Z-order change, global keys, clipboard, screenshots, hooks,
-  injection, process-memory access, or retry edge exists. The known profile's
-  only window message is one composer-bound synchronous Enter submission.
+- No global keys, clipboard, screenshots, hooks, injection, process-memory
+  access, or retry edge exists. The v3 profile's sole focus/Z-order change is
+  activation of the exact revalidated target/composer immediately before one
+  composer-queued Enter keydown/key-up pair.
 
 ## Automated I20 gates
 
