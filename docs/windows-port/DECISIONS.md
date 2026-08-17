@@ -935,9 +935,10 @@ Bump the combined selector/submit profile to v3 and remove
 `ComposerEnterMessageV1`. After the existing unfocused/background preflight and
 durable commit transition, activate only the exact approved top-level HWND and
 call UIA `SetFocus` on the exact composer. Before enqueueing anything, repeat
-the process/window/modal/target/draft proof and additionally require that exact
-top-level window to be foreground and that exact composer to own keyboard
-focus. Then enqueue one complete Enter press—`WM_KEYDOWN/VK_RETURN` followed by
+the process/window/modal/target/draft proof and additionally require the
+foreground HWND's `GA_ROOT` to equal that exact top-level window and that exact
+composer to own keyboard focus. Then enqueue one complete Enter
+press—`WM_KEYDOWN/VK_RETURN` followed by
 the matching `WM_KEYUP`—to the exact composer HWND with `PostMessageW`.
 
 This strategy deliberately changes target focus but never synthesizes global

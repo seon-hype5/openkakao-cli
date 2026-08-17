@@ -62,7 +62,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 #[cfg(feature = "windows-ui-write")]
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, PostMessageW, SetForegroundWindow, WM_KEYDOWN, WM_KEYUP,
+    GetForegroundWindow, PostMessageW, SetForegroundWindow, GA_ROOT, WM_KEYDOWN, WM_KEYUP,
 };
 
 use zeroize::Zeroize;
@@ -1814,9 +1814,13 @@ impl<'operation> NativeMutationPort<'operation> {
                 }
             }
             SubmissionFocus::FocusedForeground => {
-                // SAFETY: this is a read-only comparison against the exact
-                // top-level HWND retained by the current mutation identity.
-                if unsafe { GetForegroundWindow() } != identity.hwnd {
+                // SAFETY: these are read-only queries. UIA focus may make the
+                // child composer the foreground HWND, so normalize it to its
+                // top-level root before comparing it with the approved root.
+                let foreground = unsafe { GetForegroundWindow() };
+                if foreground.0.is_null()
+                    || unsafe { GetAncestor(foreground, GA_ROOT) } != identity.hwnd
+                {
                     return Err(UiError::new(
                         UiErrorKind::UserActive,
                         "windows_mutation_submit_foreground",

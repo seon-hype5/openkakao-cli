@@ -225,7 +225,7 @@ If user activity changes the value, the transaction never clears the mixed or
 unknown draft. Commit performs the same preparation, requires the exact
 profile-bound submit strategy, and makes at most one submit call. The current
 profile activates the exact top-level target, focuses the exact composer, fully
-revalidates the resulting foreground/focus pair and exact draft, then queues
+revalidates the resulting root-normalized foreground/focus pair and exact draft, then queues
 `WM_KEYDOWN/VK_RETURN` followed by the matching `WM_KEYUP` to that composer.
 This enters KakaoTalk's normal message loop without synthesizing global input.
 Every failure or panic after queueing begins is `SubmissionUncertain` with
