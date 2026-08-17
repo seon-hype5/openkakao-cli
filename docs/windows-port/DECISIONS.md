@@ -947,7 +947,9 @@ input queues and calling native `SetActiveWindow`/`SetFocus` also left
 version. A separately bounded manual continuation verified the exact owned
 draft in memory, activated the exact root, queued one keydown/key-up pair to the
 sole exact composer, and observed the composer return to the profile's empty
-state. Delivery still requires the user's visual confirmation.
+state. On 2026-08-18 KST, the user visually confirmed that the exact test
+payload appeared in the self-chat. This establishes one live v3 delivery with
+no automatic retry; conversation history was not read.
 
 This strategy deliberately activates the exact target but never synthesizes
 global input, uses coordinates, touches the clipboard, or posts to a thread or HWND

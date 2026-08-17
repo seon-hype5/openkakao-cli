@@ -1,6 +1,15 @@
 # Windows port handoff after Wave 2 / I20
 
-Date: 2026-08-17 KST
+Date: 2026-08-18 KST
+
+> Profile v3 live result: after exact target/draft revalidation, one targeted
+> `WM_KEYDOWN/VK_RETURN` plus matching `WM_KEYUP` pair was queued to the sole
+> exact composer. The composer returned to the profile's empty state, and the
+> user visually confirmed that the exact payload
+> `OpenKakao actual send verification 2026-08-17 v3` appeared in the self-chat.
+> No retry occurred and conversation history was not read. This is one
+> successful live delivery observation, not completion of the remaining
+> production activation matrix.
 
 > Latest correction: the user visually confirmed that the v1 staged draft was
 > visible but no message appeared in the self-chat. The earlier
