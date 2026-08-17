@@ -11,8 +11,8 @@ use crate::output::windows::{
 use crate::platform::fake::FakeBackend;
 use crate::platform::{
     AppSnapshot, BackendKind, ChatTargetSnapshot, ExitCode, InputSnapshot, ProcessFingerprint,
-    ReadOnlyCandidateBlockers, ReadOnlyWindowAmbiguity, SendOutcome, TargetKind, UiError,
-    UiErrorKind, UiPlatform, UiSnapshot,
+    ReadOnlyCandidateBlockers, ReadOnlyComposerSelectorEvidence, ReadOnlyWindowAmbiguity,
+    SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 
 const TARGET_CANARY: &str = "SENSITIVE_TARGET_CANARY";
@@ -55,6 +55,7 @@ fn safe_snapshot() -> UiSnapshot {
             known_ui_profile: true,
             top_level_window_count: 1,
             read_only_window_ambiguity: None,
+            read_only_composer_selector_evidence: None,
             modal_present: false,
         },
         target: ChatTargetSnapshot {
@@ -566,6 +567,56 @@ fn doctor_maps_candidate_blockers_only_to_fixed_aggregate_evidence_codes() {
     }
     assert!(!rendered.stdout.contains("read_only_window_ambiguity"));
     assert!(!rendered.stdout.contains("binding_bits"));
+}
+
+#[test]
+fn doctor_maps_composer_near_matches_only_to_fixed_evidence_codes() {
+    let cases = [
+        (
+            ReadOnlyComposerSelectorEvidence::from_near_matches(true, true, true),
+            vec![
+                "read_only_composer_selector_mismatch",
+                "read_only_composer_near_match_without_expected_class_name",
+                "read_only_composer_near_match_without_expected_automation_id",
+                "read_only_composer_near_match_without_expected_control_type",
+            ],
+        ),
+        (
+            ReadOnlyComposerSelectorEvidence::from_near_matches(false, false, false),
+            vec![
+                "read_only_composer_selector_mismatch",
+                "read_only_composer_no_two_property_near_match",
+            ],
+        ),
+    ];
+
+    for (selector_evidence, expected) in cases {
+        let mut snapshot = safe_snapshot();
+        snapshot.app.read_only_composer_selector_evidence = Some(selector_evidence);
+        snapshot.input.present = false;
+        snapshot.input.unique = false;
+        snapshot.input.enabled = false;
+        snapshot.input.writable = false;
+        snapshot.target.composer = None;
+
+        let report = build_action_report(ReportAction::UiDoctor, BackendKind::Fake, &snapshot);
+        let actual = report
+            .evidence
+            .iter()
+            .filter(|code| code.starts_with("read_only_composer_"))
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+
+        let rendered = render_report(&report, OutputMode::Json);
+        for code in expected {
+            assert!(rendered.stdout.contains(code));
+        }
+        assert!(!rendered
+            .stdout
+            .contains("read_only_composer_selector_evidence"));
+        assert!(!rendered.stdout.contains("near_matches"));
+    }
 }
 
 #[test]

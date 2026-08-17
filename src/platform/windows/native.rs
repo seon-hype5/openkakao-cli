@@ -44,13 +44,14 @@ use windows::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::System::Variant::VARIANT;
-use windows::Win32::UI::Accessibility::{
-    CUIAutomation8, IUIAutomation, IUIAutomationValuePattern, TreeScope_Descendants,
-    UIA_AutomationIdPropertyId, UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
-    UIA_EditControlTypeId, UIA_ValuePatternId, UIA_E_ELEMENTNOTAVAILABLE, UIA_E_TIMEOUT,
-};
 #[cfg(feature = "windows-ui-write")]
-use windows::Win32::UI::Accessibility::{IUIAutomationElement, IUIAutomationInvokePattern};
+use windows::Win32::UI::Accessibility::IUIAutomationInvokePattern;
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation8, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
+    IUIAutomationValuePattern, TreeScope_Descendants, UIA_AutomationIdPropertyId,
+    UIA_ClassNamePropertyId, UIA_ControlTypePropertyId, UIA_EditControlTypeId, UIA_ValuePatternId,
+    UIA_E_ELEMENTNOTAVAILABLE, UIA_E_TIMEOUT,
+};
 #[cfg(feature = "windows-ui-write")]
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -75,7 +76,8 @@ use super::{
 use super::{
     profile_for, select_read_only_window, ComposerDiscovery, FileVersion, FingerprintKey,
     NativeComposer, NativeInspection, NativeProcess, NativeWindow, ReadOnlyCandidateBlockers,
-    ReadOnlyWindowAmbiguity, UiProfile, WindowDiscovery, TOP_LEVEL_CLASS,
+    ReadOnlyComposerSelectorEvidence, ReadOnlyWindowAmbiguity, UiProfile, WindowDiscovery,
+    TOP_LEVEL_CLASS,
 };
 #[cfg(feature = "windows-ui-write")]
 use crate::platform::{ApprovedSend, SendOutcome};
@@ -85,6 +87,12 @@ const CLASS_BUFFER_UNITS: usize = 256;
 const PROCESS_PATH_BUFFER_UNITS: usize = 32_768;
 const FIXED_FILE_INFO_SIGNATURE: u32 = 0xFEEF_04BD;
 const MAX_READ_ONLY_WINDOW_CANDIDATES: usize = 8;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ComposerNearMatchDiagnostics {
+    Skip,
+    Collect,
+}
 
 pub(super) fn inspect(
     fingerprints: FingerprintKey,
@@ -119,7 +127,11 @@ pub(super) fn inspect(
             _ => {
                 let mut inspected = Vec::with_capacity(windows.len());
                 for hwnd in windows {
-                    inspected.push(inspect_unique_window(hwnd, fingerprints)?);
+                    inspected.push(inspect_unique_window(
+                        hwnd,
+                        fingerprints,
+                        ComposerNearMatchDiagnostics::Collect,
+                    )?);
                 }
                 select_read_only_window(inspected)
             }
@@ -564,6 +576,7 @@ fn window_has_exact_class(hwnd: HWND) -> bool {
 fn inspect_unique_window(
     hwnd: HWND,
     fingerprints: FingerprintKey,
+    composer_diagnostics: ComposerNearMatchDiagnostics,
 ) -> Result<NativeWindow, UiError> {
     if !window_has_exact_class(hwnd) {
         return Err(stale_window_error());
@@ -632,6 +645,7 @@ fn inspect_unique_window(
             pid,
             fingerprints,
             profile.expect("empty composer blockers require a known UI profile"),
+            composer_diagnostics,
         )?
     } else {
         ComposerDiscovery::NotInspected(blockers)
@@ -963,6 +977,7 @@ fn discover_composer(
     pid: u32,
     fingerprints: FingerprintKey,
     profile: &UiProfile,
+    diagnostics: ComposerNearMatchDiagnostics,
 ) -> Result<ComposerDiscovery, UiError> {
     // SAFETY: COM is initialized MTA on this thread; no aggregation is used.
     // Every returned interface remains local to this function/apartment.
@@ -1008,7 +1023,25 @@ fn discover_composer(
         )
     })?;
     if count == 0 {
-        return Ok(ComposerDiscovery::Absent);
+        if diagnostics == ComposerNearMatchDiagnostics::Skip {
+            return Ok(ComposerDiscovery::Absent(None));
+        }
+        // The exact selector failed, so query only the three exact two-property
+        // combinations. Retain existence booleans only: no element, count,
+        // property value, Name, Value, or candidate association escapes.
+        let class_and_type =
+            unsafe { automation.CreateAndCondition(&class_condition, &control_type_condition) }
+                .map_err(|error| map_windows_error(error, "windows_uia_selector_condition"))?;
+        let id_and_type = unsafe {
+            automation.CreateAndCondition(&automation_id_condition, &control_type_condition)
+        }
+        .map_err(|error| map_windows_error(error, "windows_uia_selector_condition"))?;
+        let evidence = ReadOnlyComposerSelectorEvidence::from_near_matches(
+            exact_condition_has_any_descendant(&root, &class_and_id)?,
+            exact_condition_has_any_descendant(&root, &class_and_type)?,
+            exact_condition_has_any_descendant(&root, &id_and_type)?,
+        );
+        return Ok(ComposerDiscovery::Absent(Some(evidence)));
     }
     if count > 1 {
         return Ok(ComposerDiscovery::Ambiguous(count));
@@ -1077,6 +1110,26 @@ fn discover_composer(
         writable,
         focused,
     }))
+}
+
+fn exact_condition_has_any_descendant(
+    root: &IUIAutomationElement,
+    condition: &IUIAutomationCondition,
+) -> Result<bool, UiError> {
+    // SAFETY: root and condition remain in this MTA apartment. FindAll applies
+    // an exact server-side condition and returns no property values. Length is
+    // reduced immediately to one boolean and the element array is discarded.
+    let elements = unsafe { root.FindAll(TreeScope_Descendants, condition) }
+        .map_err(|error| map_windows_error(error, "windows_uia_find_composer"))?;
+    let raw_count = unsafe { elements.Length() }
+        .map_err(|error| map_windows_error(error, "windows_uia_composer_count"))?;
+    if raw_count < 0 {
+        return Err(UiError::new(
+            UiErrorKind::UnsupportedCapability,
+            "windows_uia_composer_count",
+        ));
+    }
+    Ok(raw_count != 0)
 }
 
 #[cfg(feature = "windows-ui-write")]
@@ -1486,7 +1539,7 @@ impl MutationPort for NativeMutationPort<'_> {
             modal_present,
             process,
             composer,
-        } = inspect_unique_window(hwnd, self.fingerprints)?;
+        } = inspect_unique_window(hwnd, self.fingerprints, ComposerNearMatchDiagnostics::Skip)?;
         let profile = process
             .executable_verified
             .then(|| profile_for(process.version))
@@ -1510,7 +1563,7 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.user_active = foreground_indicates_user_activity(hwnd, process.pid)?;
 
         match composer {
-            ComposerDiscovery::NotInspected(_) | ComposerDiscovery::Absent => return Ok(fresh),
+            ComposerDiscovery::NotInspected(_) | ComposerDiscovery::Absent(_) => return Ok(fresh),
             ComposerDiscovery::Ambiguous(count) => {
                 fresh.composer_count = count;
                 return Ok(fresh);

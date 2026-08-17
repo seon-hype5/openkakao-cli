@@ -98,6 +98,7 @@ fn safe_snapshot() -> UiSnapshot {
             known_ui_profile: true,
             top_level_window_count: 1,
             read_only_window_ambiguity: None,
+            read_only_composer_selector_evidence: None,
             modal_present: false,
         },
         target: ChatTargetSnapshot {

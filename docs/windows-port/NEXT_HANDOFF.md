@@ -22,7 +22,7 @@ cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-`L10` was subsequently approved and attempted in four separate read-only
+`L10` was subsequently approved and attempted in six separate read-only
 sessions; all failed closed and it is not complete. Not completed or
 authorized now: a new `L10` attempt, `L20`, `L30`, `L40`, and final post-live
 task `R00`. A green I20 does not carry authority into any live gate.
@@ -162,6 +162,36 @@ available. No label/title/value, handle, PID, raw count, screenshot, trace,
 input, stage, commit, or send occurred. The session ended without a retry and
 supplied no authority for another live attempt.
 
+### Fifth L10 with candidate blocker details
+
+The candidate-blocker successor and Unix lint follow-up `b7df418` passed
+Windows run `32000123935` and Linux/macOS run `32000123938`. Under a fresh
+L10-only approval, root reverified the clean local/fork head and exact
+default-feature release binary (14,288,384 bytes; SHA-256
+`749ee4aa3821e84b35bab858f7e3d32a39ff3e8a5f4e33950e58e70d95367721`),
+then ran one guarded `doctor --ui --json`.
+
+The report remained `attempted=false` / `not_submitted` and identified
+`read_only_candidate_modal_present`. Foreground, focus, Z-order neighbors, and
+clipboard sequence were stable. No title, label, Value, raw identifier, input,
+stage, commit, or send occurred. The session ended without a retry.
+
+### Sixth L10 after the user closed the modal
+
+After the user closed the visible modal and granted a new one-session
+approval, root reverified the same binary and ran one guarded
+`doctor --ui --json`. This time the report established the app and process,
+interactive session, compatible integrity, reviewed `26.7.0.5255` profile,
+one exact-class top-level window, and no modal. The exact reviewed composer
+selector nevertheless returned absent. The report retained only fixed
+`composer_fingerprint_not_observed` / `composer_absent` state; it read no Name
+or Value. The user then confirmed that the self-chat message input was visible
+during this probe, so repeating the unchanged selector cannot add evidence.
+
+All before/after guards were stable and focus observation was available. No
+input, stage, commit, send, content read, screenshot, trace, or retry followed.
+This sixth failure supplied no authority for another live attempt.
+
 ## Offline remediation after the failed L10
 
 The failed sessions retained only fixed booleans, so they did not preserve a
@@ -207,6 +237,18 @@ for executable trust, UI profile, visibility, enabled/modal state, session,
 and integrity. It keeps no count or candidate association, performs no new
 native/UIA call, redacts the private bitset in Debug and serde, binds every bit
 into target evidence, and leaves the same `AmbiguousTarget` policy refusal.
+
+The fifth result identified an environmental modal; the user closed it without
+a code change. The sixth result then established one otherwise eligible
+known-profile window but no full composer match, while the user independently
+confirmed the input was visible. The next offline successor therefore runs
+only after a zero-result full selector and checks its three exact two-property
+subsets. Each returned array is reduced immediately to one existence boolean.
+Only fixed near-match-without-expected-class-name, AutomationId, or
+control-type codes, or a no-two-property-near-match code, can be emitted. The
+private three-bit value is serde-skipped, Debug-redacted, target-bound, and an
+independent policy refusal;
+no actual property value, element, count, or association is retained.
 
 This is not a self-chat selector and does not authorize a live retry. All
 target-identity booleans remain false, `send_open_chat` remains false, and the
@@ -459,8 +501,8 @@ and snapshot-only change.
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 200 passed; 1 bounded qualification child ignored |
-| `cargo test --locked --lib --all-features platform::windows` | 118 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --lib` | 205 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --lib --all-features platform::windows` | 119 passed; 1 bounded qualification child ignored |
 | `cargo test --locked --bin openkakao-cli` | 178 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
@@ -476,7 +518,7 @@ and snapshot-only change.
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 118 passed; 1 bounded qualification child ignored |
+| release all-feature Windows synthetic tests | 119 passed; 1 bounded qualification child ignored |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
 | Windows-port Markdown local links and pinned-action policy | 52 files, 70 local links, 0 broken; 13 action refs pinned |
 | `actionlint` 1.7.12 on both non-release workflows | passed |
@@ -488,6 +530,8 @@ and snapshot-only change.
 | qualification Rust trust-test execution | local entry blocked by Smart App Control error 4551; hosted Windows run passed |
 | hosted Windows safe CI at `caed3f2` | run `31996648242` passed every step, including qualification, lint, synthetic tests, debug/release builds, and optimized all-feature tests |
 | hosted cross-platform CI at `caed3f2` | run `31996648201` passed Linux and macOS jobs |
+| hosted Windows safe CI at `b7df418` | run `32000123935` passed every step |
+| hosted cross-platform CI at `b7df418` | run `32000123938` passed Linux and macOS jobs |
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -505,12 +549,12 @@ uses read-only repository permissions, disables checkout credential
 persistence, uploads no artifact, and runs default plus explicitly scoped
 all-feature synthetic coverage in debug and release profiles. Its committed
 inline documentation/action/toolchain validator and every newly added command
-passed locally and in hosted run `31996648242`.
+passed locally and in hosted run `32000123935`.
 
 ## Safety ledger for this implementation session
 
-- live KakaoTalk/UIA doctor probes: 4;
-- documented live before/after read-only guard snapshots: 6;
+- live KakaoTalk/UIA doctor probes: 6;
+- documented live before/after read-only guard snapshots: 10;
 - KakaoTalk UI mutations: 0;
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
@@ -599,17 +643,19 @@ implementation; it likewise authorizes no probe or production wiring.
   provider.
 - Re-run both hosted workflows after the compile-parity successor and require
   green Windows, Linux, and macOS results before upstream release work.
-- No live selector compatibility, target identity, empty-draft proof, stage
-  restoration, or submission result has been measured.
+- Live read-only observation now proves that the reviewed composer selector is
+  incompatible with the visible input on this installed profile. Target
+  identity, empty-draft proof, stage restoration, and submission result remain
+  unmeasured.
 
 ## Next permissible step
 
-The primary ambiguity predecessor `84955a8` passes the fully executed hosted
-Windows safe matrix in run `31998321030` and the paired Linux/macOS workflow in
-run `31998321066`. GitHub authentication is stored through the platform
+The candidate-blocker predecessor `b7df418` passes the fully executed hosted
+Windows safe matrix in run `32000123935` and the paired Linux/macOS workflow in
+run `32000123938`. GitHub authentication is stored through the platform
 credential manager, the fork exists, and that commit is pushed on
 `integration/windows-mvp`. The next safe step is to commit and push the fixed
-candidate-blocker diagnostic successor, then require its Windows, Linux, and
+composer near-match diagnostic successor, then require its Windows, Linux, and
 macOS hosted runs to pass. That work does not require a desktop session,
 product installation, KakaoTalk path/signature observation, or a trust-store
 change.

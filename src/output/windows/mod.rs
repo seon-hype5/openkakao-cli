@@ -137,6 +137,11 @@ const EVIDENCE_CODES: &[&str] = &[
     "read_only_candidate_modal_present",
     "read_only_candidate_session_mismatch",
     "read_only_candidate_integrity_incompatible",
+    "read_only_composer_selector_mismatch",
+    "read_only_composer_near_match_without_expected_class_name",
+    "read_only_composer_near_match_without_expected_automation_id",
+    "read_only_composer_near_match_without_expected_control_type",
+    "read_only_composer_no_two_property_near_match",
     "modal_absent",
     "modal_present",
     "self_chat_verified",
@@ -373,7 +378,7 @@ fn safe_profile_id(backend: BackendKind, snapshot: &UiSnapshot) -> Option<String
 }
 
 fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
-    let mut evidence = Vec::with_capacity(27);
+    let mut evidence = Vec::with_capacity(32);
     push_state(
         &mut evidence,
         snapshot.app.app_running,
@@ -462,6 +467,29 @@ fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
                 "read_only_candidate_integrity_incompatible",
             );
         }
+    }
+    if let Some(selector) = snapshot.app.read_only_composer_selector_evidence {
+        evidence.push("read_only_composer_selector_mismatch".to_string());
+        push_positive(
+            &mut evidence,
+            selector.near_match_without_class_name(),
+            "read_only_composer_near_match_without_expected_class_name",
+        );
+        push_positive(
+            &mut evidence,
+            selector.near_match_without_automation_id(),
+            "read_only_composer_near_match_without_expected_automation_id",
+        );
+        push_positive(
+            &mut evidence,
+            selector.near_match_without_control_type(),
+            "read_only_composer_near_match_without_expected_control_type",
+        );
+        push_positive(
+            &mut evidence,
+            selector.no_two_property_near_match(),
+            "read_only_composer_no_two_property_near_match",
+        );
     }
     push_state(
         &mut evidence,

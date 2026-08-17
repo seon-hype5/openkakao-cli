@@ -594,6 +594,12 @@ fn validate_app_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
     if app.read_only_window_ambiguity.is_some() || app.top_level_window_count > 1 {
         return Err(policy_error(UiErrorKind::AmbiguousTarget, OP_APP_SNAPSHOT));
     }
+    if app.read_only_composer_selector_evidence.is_some() {
+        return Err(policy_error(
+            UiErrorKind::ComposerNotFound,
+            OP_INPUT_SNAPSHOT,
+        ));
+    }
     if !app.app_running {
         return Err(policy_error(UiErrorKind::ProcessNotFound, OP_APP_SNAPSHOT));
     }
@@ -796,7 +802,10 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
-    use crate::platform::{AppSnapshot, InputSnapshot, ProcessFingerprint, SecretMessage};
+    use crate::platform::{
+        AppSnapshot, InputSnapshot, ProcessFingerprint, ReadOnlyComposerSelectorEvidence,
+        SecretMessage,
+    };
 
     fn snapshot() -> UiSnapshot {
         UiSnapshot {
@@ -814,6 +823,7 @@ mod tests {
                 known_ui_profile: true,
                 top_level_window_count: 1,
                 read_only_window_ambiguity: None,
+                read_only_composer_selector_evidence: None,
                 modal_present: false,
             },
             target: crate::platform::ChatTargetSnapshot {
@@ -850,6 +860,19 @@ mod tests {
                 .kind,
             UiErrorKind::InvalidInput
         );
+    }
+
+    #[test]
+    fn composer_selector_diagnostic_is_always_a_policy_refusal() {
+        let mut state = snapshot();
+        state.app.read_only_composer_selector_evidence = Some(
+            ReadOnlyComposerSelectorEvidence::from_near_matches(true, true, true),
+        );
+
+        let error = validate_app_snapshot(&state)
+            .expect_err("diagnostic evidence must never become mutation authority");
+        assert_eq!(error.kind, UiErrorKind::ComposerNotFound);
+        assert_eq!(error.operation, OP_INPUT_SNAPSHOT);
     }
 
     #[test]

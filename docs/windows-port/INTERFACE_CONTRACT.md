@@ -10,7 +10,8 @@ The platform facade exports:
 - `UiCapabilities`;
 - `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, `UiSnapshot`, the fixed
   `ReadOnlyWindowAmbiguity` diagnostic enum, and its opaque bounded
-  `ReadOnlyCandidateBlockers` detail;
+  `ReadOnlyCandidateBlockers` detail, plus opaque bounded
+  `ReadOnlyComposerSelectorEvidence`;
 - `InspectRequest`, opaque `TargetBindingEvidence`, `TargetKind`, and
   `PlatformProbe`;
 - `MessageSender`, `SendIntent`, `SecretMessage`, and `ApprovedSend`;
@@ -48,6 +49,11 @@ unioned across candidates into fixed blocker classes. Reports expose no count,
 candidate association, or raw bitset; they append only allowlisted codes for
 executable trust, UI profile, visibility, enabled/modal, session, and integrity
 failure classes. No additional native or UIA observation is performed.
+If one known-profile window has no full composer match, the read-only backend
+may additionally test only the three exact two-property subsets of the reviewed
+class/AutomationId/control-type selector. It retains existence booleans only
+and reports fixed near-match classes without values, counts, or element
+associations. This state is serde-skipped, target-bound, and policy-rejected.
 
 Worker startup and native inspection share one eight-second budget. After the
 worker has enabled cancellation and published its pinned thread ID, expiry

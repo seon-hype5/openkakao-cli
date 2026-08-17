@@ -31,8 +31,9 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AppSnapshot, ApprovedSend, ChatTargetSnapshot, InputSnapshot, InspectRequest, MessageSender,
-    PlatformProbe, ProcessFingerprint, ReadOnlyCandidateBlockers, ReadOnlyWindowAmbiguity,
-    SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    PlatformProbe, ProcessFingerprint, ReadOnlyCandidateBlockers, ReadOnlyComposerSelectorEvidence,
+    ReadOnlyWindowAmbiguity, SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind,
+    UiPlatform, UiSnapshot,
 };
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(8);
@@ -188,7 +189,7 @@ struct NativeComposer {
 #[derive(Clone, PartialEq, Eq)]
 enum ComposerDiscovery {
     NotInspected(ReadOnlyCandidateBlockers),
-    Absent,
+    Absent(Option<ReadOnlyComposerSelectorEvidence>),
     Unique(NativeComposer),
     Ambiguous(usize),
 }
@@ -242,7 +243,7 @@ fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery
                                 .map_or(*blockers, |aggregate| aggregate.union(*blockers)),
                         );
                     }
-                    ComposerDiscovery::Absent => {}
+                    ComposerDiscovery::Absent(_) => {}
                 }
             }
 
@@ -631,6 +632,7 @@ fn empty_snapshot(
             known_ui_profile: false,
             top_level_window_count: window_count,
             read_only_window_ambiguity,
+            read_only_composer_selector_evidence: None,
             modal_present: false,
         },
         target: ChatTargetSnapshot {
@@ -668,6 +670,7 @@ fn map_unique_window(
         session_id: Some(window.process.session_id),
     });
 
+    let mut composer_selector_evidence = None;
     let (input, composer) = if modal_present {
         (unavailable_input(profile.map(|profile| profile.id)), None)
     } else if let Some(profile) = profile {
@@ -698,9 +701,11 @@ fn map_unique_window(
                 },
                 None,
             ),
-            ComposerDiscovery::Absent | ComposerDiscovery::NotInspected(_) => {
+            ComposerDiscovery::Absent(evidence) => {
+                composer_selector_evidence = evidence;
                 (unavailable_input(Some(profile.id)), None)
             }
+            ComposerDiscovery::NotInspected(_) => (unavailable_input(Some(profile.id)), None),
         }
     } else {
         (unavailable_input(None), None)
@@ -720,6 +725,7 @@ fn map_unique_window(
             known_ui_profile,
             top_level_window_count: 1,
             read_only_window_ambiguity: None,
+            read_only_composer_selector_evidence: composer_selector_evidence,
             modal_present,
         },
         target: ChatTargetSnapshot {
@@ -776,6 +782,12 @@ mod tests {
 
     fn profile_unknown_blocker() -> ReadOnlyCandidateBlockers {
         ReadOnlyCandidateBlockers::from_observation(true, false, true, true, false, true, true)
+    }
+
+    fn absent_composer() -> ComposerDiscovery {
+        ComposerDiscovery::Absent(Some(ReadOnlyComposerSelectorEvidence::from_near_matches(
+            false, false, false,
+        )))
     }
 
     fn window_with_fingerprint(
@@ -996,7 +1008,7 @@ mod tests {
             window_with_fingerprint(
                 "run:non-composer-window",
                 Some(FileVersion::KNOWN),
-                ComposerDiscovery::Absent,
+                absent_composer(),
             ),
             window_with_fingerprint(
                 "run:exact-composer-window",
@@ -1012,7 +1024,7 @@ mod tests {
             window_with_fingerprint(
                 "run:second-non-composer-window",
                 Some(FileVersion::KNOWN),
-                ComposerDiscovery::Absent,
+                absent_composer(),
             ),
         ]);
 
@@ -1064,7 +1076,7 @@ mod tests {
             ),
             (
                 vec![
-                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                    window(Some(FileVersion::KNOWN), absent_composer()),
                     window(
                         None,
                         ComposerDiscovery::NotInspected(profile_unknown_blocker()),
@@ -1084,7 +1096,7 @@ mod tests {
             ),
             (
                 vec![
-                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                    window(Some(FileVersion::KNOWN), absent_composer()),
                     window(
                         Some(FileVersion::KNOWN),
                         ComposerDiscovery::NotInspected(
@@ -1102,8 +1114,8 @@ mod tests {
             ),
             (
                 vec![
-                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
-                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                    window(Some(FileVersion::KNOWN), absent_composer()),
+                    window(Some(FileVersion::KNOWN), absent_composer()),
                 ],
                 ReadOnlyWindowAmbiguity::NoComposer,
             ),
@@ -1195,6 +1207,7 @@ mod tests {
 
         assert!(snapshot.app.app_running);
         assert!(snapshot.app.known_ui_profile);
+        assert!(snapshot.app.read_only_composer_selector_evidence.is_none());
         assert_eq!(snapshot.app.app_version.as_deref(), Some("26.7.0.5255"));
         assert!(!snapshot.target.exact_match);
         assert!(!snapshot.target.unique_match);
@@ -1209,6 +1222,33 @@ mod tests {
         assert!(snapshot.input.writable);
         assert!(!snapshot.input.draft_empty);
         assert_eq!(snapshot.target.expires_at_unix_ms, 5_030);
+    }
+
+    #[test]
+    fn absent_composer_retains_only_bounded_selector_near_match_evidence() {
+        let evidence = ReadOnlyComposerSelectorEvidence::from_near_matches(true, false, true);
+        let snapshot = map_native(
+            TargetKind::SelfChat,
+            NativeInspection {
+                window: WindowDiscovery::Unique(window(
+                    Some(FileVersion::KNOWN),
+                    ComposerDiscovery::Absent(Some(evidence)),
+                )),
+            },
+            30,
+        );
+
+        assert_eq!(
+            snapshot.app.read_only_composer_selector_evidence,
+            Some(evidence)
+        );
+        assert!(snapshot.target.window.is_some());
+        assert!(snapshot.target.composer.is_none());
+        assert!(!snapshot.input.present);
+        assert_eq!(
+            snapshot.input.selector_profile_id.as_deref(),
+            Some(KNOWN_PROFILE.id)
+        );
     }
 
     #[test]
@@ -1235,6 +1275,7 @@ mod tests {
 
         assert!(snapshot.app.modal_present);
         assert!(snapshot.app.known_ui_profile);
+        assert!(snapshot.app.read_only_composer_selector_evidence.is_none());
         assert!(snapshot.target.composer.is_none());
         assert!(!snapshot.input.present);
         assert!(!snapshot.input.unique);
@@ -1261,6 +1302,7 @@ mod tests {
 
         assert!(snapshot.input.present);
         assert!(!snapshot.input.unique);
+        assert!(snapshot.app.read_only_composer_selector_evidence.is_none());
         assert!(!snapshot.input.writable);
         assert!(snapshot.target.composer.is_none());
     }

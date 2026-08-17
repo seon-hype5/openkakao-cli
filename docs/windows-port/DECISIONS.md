@@ -757,3 +757,28 @@ record is introduced. Snapshot serde omits the primary reason and its blocker
 set; Debug redacts the private bits. The target-binding HMAC commits to every
 blocker bit, and the primary ambiguity continues to force policy refusal. This
 diagnostic successor authorizes no live retry, UI mutation, or send gate.
+
+## ADR-050: Diagnose an absent composer with exact two-property conditions
+
+The first L10 after candidate-blocker reporting found a modal and stopped. A
+separately approved retry after the user closed it established the reviewed
+process, version, session, integrity, one exact-class window, and no modal, but
+the full `RICHEDIT50W` / `1006` / Edit selector returned no composer. The user
+then confirmed that the self-chat message input was visible during that probe.
+Repeating the unchanged selector cannot add evidence.
+
+Only after the full selector returns zero elements, query its three exact
+two-property combinations: class plus AutomationId, class plus control type,
+and AutomationId plus control type. Reduce each result immediately to an
+existence boolean. The snapshot retains a private three-bit value with no
+element, count, association, or observed property value. Reports emit only a
+generic mismatch code plus fixed near-match-without-expected-class-name,
+near-match-without-expected-AutomationId,
+near-match-without-expected-control-type, or no-two-property-near-match codes.
+
+The diagnostic is omitted from serde, redacted in Debug, committed into target
+binding, and independently rejected by policy even if all normal input fields
+are forged as acceptable. It does not read Name or Value and does not alter the
+mutation selector, target proof, draft proof, or send capability. Mutation
+preflight explicitly skips the three diagnostic queries. This authorizes no
+live retry or mutation.

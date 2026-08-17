@@ -56,6 +56,12 @@ At a separately approved session, root performs these steps:
    any applicable fixed aggregate blocker classes for executable trust, UI
    profile, visibility, enabled/modal state, session, and integrity. It must
    never emit a count, candidate association, raw bitset, or native value.
+   If one known-profile window reports `composer_absent`, the report may also
+   emit fixed near-match-without-expected-class-name, AutomationId, or
+   control-type codes, or a no-two-property-near-match code. These come only
+   from existence checks for the three exact two-property subsets of the
+   reviewed selector. They never
+   expose the observed value, element, count, association, Name, or Value.
 2. Run only `doctor --ui`; never run legacy `doctor` on Windows.
 3. Review the console report without persisting it. Confirm fixed schema,
    allowlisted evidence, and absence of private material.

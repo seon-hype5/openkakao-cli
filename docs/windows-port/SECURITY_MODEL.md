@@ -105,6 +105,16 @@ integrity. It emits neither the private bitset nor a count, and the blocker set
 is included in the target-evidence HMAC. This refinement makes no new OS/UIA
 query and does not relax selection.
 
+When the full reviewed composer selector returns no match for one otherwise
+eligible known-profile window, diagnosis is limited to three server-side exact
+conditions containing two reviewed non-content properties each. Returned
+arrays are reduced immediately to existence booleans; no element, count,
+actual class/AutomationId/control-type value, Name, or Value is retained. The
+private three-bit evidence is omitted from serde and redacted in Debug, is
+bound into target evidence, and itself forces policy refusal. The mutation
+selector is unchanged, and mutation preflight explicitly skips these
+diagnostic queries.
+
 The modal scan begins only after exact executable-name verification and reads
 only HWND/PID, visibility, owner, and root-owner relationships. Its callback
 retains no candidate list, title, class, or UIA property and publishes only the

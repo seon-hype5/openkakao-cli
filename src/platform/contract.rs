@@ -159,6 +159,66 @@ impl ReadOnlyCandidateBlockers {
     }
 }
 
+/// Bounded, content-free evidence collected only after the exact reviewed
+/// composer selector returned no match. Each private bit means that at least
+/// one descendant matched one exact pair of the three reviewed non-content
+/// properties. It retains no count, element association, or observed value.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ReadOnlyComposerSelectorEvidence(u8);
+
+impl fmt::Debug for ReadOnlyComposerSelectorEvidence {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ReadOnlyComposerSelectorEvidence(<fixed>)")
+    }
+}
+
+// Construction and reporting are Windows-only; target binding consumes the
+// opaque bits on every platform so forged diagnostic state stays detectable.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+impl ReadOnlyComposerSelectorEvidence {
+    const CLASS_AND_AUTOMATION_ID: u8 = 1 << 0;
+    const CLASS_AND_CONTROL_TYPE: u8 = 1 << 1;
+    const AUTOMATION_ID_AND_CONTROL_TYPE: u8 = 1 << 2;
+
+    pub(crate) const fn from_near_matches(
+        class_and_automation_id: bool,
+        class_and_control_type: bool,
+        automation_id_and_control_type: bool,
+    ) -> Self {
+        let mut bits = 0_u8;
+        if class_and_automation_id {
+            bits |= Self::CLASS_AND_AUTOMATION_ID;
+        }
+        if class_and_control_type {
+            bits |= Self::CLASS_AND_CONTROL_TYPE;
+        }
+        if automation_id_and_control_type {
+            bits |= Self::AUTOMATION_ID_AND_CONTROL_TYPE;
+        }
+        Self(bits)
+    }
+
+    pub(crate) const fn binding_bits(self) -> u8 {
+        self.0
+    }
+
+    pub(crate) const fn near_match_without_class_name(self) -> bool {
+        self.0 & Self::AUTOMATION_ID_AND_CONTROL_TYPE != 0
+    }
+
+    pub(crate) const fn near_match_without_automation_id(self) -> bool {
+        self.0 & Self::CLASS_AND_CONTROL_TYPE != 0
+    }
+
+    pub(crate) const fn near_match_without_control_type(self) -> bool {
+        self.0 & Self::CLASS_AND_AUTOMATION_ID != 0
+    }
+
+    pub(crate) const fn no_two_property_near_match(self) -> bool {
+        self.0 == 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AppSnapshot {
     pub platform: UiPlatform,
@@ -176,6 +236,10 @@ pub struct AppSnapshot {
     /// excluded from snapshot serialization and cannot authorize mutation.
     #[serde(skip)]
     pub read_only_window_ambiguity: Option<ReadOnlyWindowAmbiguity>,
+    /// Fixed near-match evidence for an absent known-profile composer. It is
+    /// excluded from serialization and can never authorize mutation.
+    #[serde(skip)]
+    pub read_only_composer_selector_evidence: Option<ReadOnlyComposerSelectorEvidence>,
     pub modal_present: bool,
 }
 
@@ -456,6 +520,16 @@ fn update_snapshot_binding(mac: &mut HmacSha256, snapshot: &UiSnapshot) {
         read_only_window_ambiguity_binding(snapshot.app.read_only_window_ambiguity);
     update_byte(mac, ambiguity_code);
     update_byte(mac, blocker_bits);
+    match snapshot.app.read_only_composer_selector_evidence {
+        Some(evidence) => {
+            update_byte(mac, 1);
+            update_byte(mac, evidence.binding_bits());
+        }
+        None => {
+            update_byte(mac, 0);
+            update_byte(mac, 0);
+        }
+    }
     update_bool(mac, snapshot.app.modal_present);
 
     update_byte(mac, target_code(snapshot.target.kind));
@@ -1042,6 +1116,7 @@ mod tests {
                 known_ui_profile: true,
                 top_level_window_count: 1,
                 read_only_window_ambiguity: None,
+                read_only_composer_selector_evidence: None,
                 modal_present: false,
             },
             target: ChatTargetSnapshot {
@@ -1144,15 +1219,21 @@ mod tests {
     }
 
     #[test]
-    fn read_only_ambiguity_is_not_part_of_the_serialized_snapshot_schema() {
+    fn read_only_diagnostics_are_not_part_of_the_serialized_snapshot_schema() {
         let mut snapshot = target_snapshot();
         snapshot.app.read_only_window_ambiguity = Some(
             ReadOnlyWindowAmbiguity::CandidateNotInspected(executable_unverified_blocker()),
+        );
+        snapshot.app.read_only_composer_selector_evidence = Some(
+            ReadOnlyComposerSelectorEvidence::from_near_matches(false, true, true),
         );
 
         let json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
         assert!(!json.contains("read_only_window_ambiguity"));
         assert!(!json.contains("candidate_not_inspected"));
+        assert!(!json.contains("read_only_composer_selector_evidence"));
+        assert!(!json.contains("near_match"));
+        assert!(format!("{snapshot:?}").contains("ReadOnlyComposerSelectorEvidence(<fixed>)"));
     }
 
     #[test]
@@ -1216,6 +1297,38 @@ mod tests {
                 blockers.is_empty(),
                 existing_gate,
                 "gate mismatch for synthetic state {state:#04x}"
+            );
+        }
+    }
+
+    #[test]
+    fn composer_selector_evidence_maps_only_exact_near_match_pairs() {
+        for state in 0_u8..8 {
+            let class_and_automation_id = state & (1 << 0) != 0;
+            let class_and_control_type = state & (1 << 1) != 0;
+            let automation_id_and_control_type = state & (1 << 2) != 0;
+            let evidence = ReadOnlyComposerSelectorEvidence::from_near_matches(
+                class_and_automation_id,
+                class_and_control_type,
+                automation_id_and_control_type,
+            );
+
+            assert_eq!(
+                evidence.near_match_without_control_type(),
+                class_and_automation_id
+            );
+            assert_eq!(
+                evidence.near_match_without_automation_id(),
+                class_and_control_type
+            );
+            assert_eq!(
+                evidence.near_match_without_class_name(),
+                automation_id_and_control_type
+            );
+            assert_eq!(evidence.no_two_property_near_match(), state == 0);
+            assert_eq!(
+                format!("{evidence:?}"),
+                "ReadOnlyComposerSelectorEvidence(<fixed>)"
             );
         }
     }
@@ -1319,6 +1432,11 @@ mod tests {
                 ReadOnlyWindowAmbiguity::CandidateNotInspected(executable_unverified_blocker()),
             )
         });
+        assert_binding_rejects_mutation(&permit, &bound, |value| {
+            value.app.read_only_composer_selector_evidence = Some(
+                ReadOnlyComposerSelectorEvidence::from_near_matches(true, false, false),
+            )
+        });
         assert_binding_rejects_mutation(&permit, &bound, |value| value.app.modal_present = true);
 
         assert_binding_rejects_mutation(&permit, &bound, |value| {
@@ -1365,6 +1483,24 @@ mod tests {
             ReadOnlyCandidateBlockers::from_observation(true, false, true, true, false, true, true);
         changed.app.read_only_window_ambiguity = Some(
             ReadOnlyWindowAmbiguity::CandidateNotInspected(initial.union(profile_unknown)),
+        );
+        assert!(!permit.verifies_snapshot(&changed));
+    }
+
+    #[test]
+    fn target_binding_commits_composer_selector_evidence_details() {
+        let (request, permit) = InspectRequest::bound_self_chat(TARGET_CANARY, [0x9d; 32]);
+        let mut bound = target_snapshot();
+        bound.app.read_only_composer_selector_evidence = Some(
+            ReadOnlyComposerSelectorEvidence::from_near_matches(true, false, false),
+        );
+        let observed: Vec<u16> = TARGET_CANARY.encode_utf16().collect();
+        bound.target.target_binding = request.bind_observed_target_utf16(&observed, &bound);
+        assert!(permit.verifies_snapshot(&bound));
+
+        let mut changed = bound.clone();
+        changed.app.read_only_composer_selector_evidence = Some(
+            ReadOnlyComposerSelectorEvidence::from_near_matches(true, true, false),
         );
         assert!(!permit.verifies_snapshot(&changed));
     }
