@@ -321,6 +321,7 @@ impl InspectRequest {
     /// not expose the requested label and remains unable to serialize or format
     /// that secret. This avoids moving a raw label into a second allocation
     /// merely to satisfy the worker thread's `'static` lifetime.
+    #[cfg(target_os = "windows")]
     pub(crate) fn clone_for_worker(&self) -> Self {
         Self {
             target: self.target,
