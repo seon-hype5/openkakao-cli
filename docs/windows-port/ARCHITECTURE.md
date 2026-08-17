@@ -98,8 +98,11 @@ command line, requires exactly one configured allowlist entry, and reads only
 the selected root's `CurrentName` BSTR for an exact UTF-16 comparison. The
 process/root/modal/composer path is revalidated on both sides of that read. A
 successful match alone permits one exact-composer `CurrentValue` read, reduced
-to `draft_empty`. The root Name is read and bound again afterward; a mismatch
-discards the bit and refuses. All BSTRs are scrubbed without decoding or output.
+to `draft_empty`. For the exact profile, empty means either native text length
+zero or the source-static domain-separated UTF-16 placeholder digest; no
+placeholder text is retained or emitted. The root Name is read and bound again
+afterward; a mismatch discards the bit and refuses. All BSTRs are scrubbed
+without decoding or output.
 
 Only after exact executable-name verification, modal discovery separately
 enumerates top-level windows but retains only a boolean. A candidate blocks
@@ -120,15 +123,15 @@ moved to another state refuse. When the draft bit changes after its guarded
 read, a second scrubbed Name observation must match before evidence is
 recomputed against the complete final snapshot.
 
-This selector remains a candidate, not production proof. Twenty separately
-opened positive observations and the ordinary/group/open/main/popup/duplicate
-negative matrix are still required, so `send_open_chat` remains false.
+This selector remains version-specific and default-off. The feature build may
+advertise `send_open_chat`, but general activation still requires the remaining
+positive/negative live matrix and a separately authorized one-shot session.
 
-Read-only narrowing does not apply to the native transaction path. Fresh
-write observation and final mutation preflight still require raw top-level
-enumeration itself to contain exactly one window. This asymmetry lets doctor
-distinguish a normal non-composer application window from a composer-bearing
-window without weakening any future mutation gate.
+Read-only narrowing does not choose a mutation target. Fresh write observation
+and every final mutation preflight enumerate the raw exact-class set, then
+require exactly one HWND to match both the approved PID and the request-scoped
+window fingerprint. Zero or multiple matches refuse. Helper windows remain in
+the raw set but cannot substitute for the approved root.
 
 ## Authorization boundary
 
@@ -203,10 +206,9 @@ policy snapshot; a native caller cannot supply a different snapshot. The
 observer immediately reduces the result to booleans and retains no label.
 Selection uses a closed internal state, and only its exact-unique variant may
 carry a label or invoke the verifier; exactness and uniqueness are not supplied
-as independent caller booleans. The current candidate constructs exact-unique
-only after raw enumeration itself contains one root and its Name matches the
-approval-owned permit. Its qualification gate remains closed until the required
-positive and negative observations pass.
+as independent caller booleans. The mutation path constructs exact-unique only
+after one raw HWND matches the approved PID/window fingerprint and its Name
+matches the approval-owned permit.
 
 Stage-only is designed as:
 
@@ -224,6 +226,13 @@ profile uses `SendMessageTimeoutW` for one composer-targeted
 `WM_KEYDOWN/VK_RETURN`; it does not synthesize global input or change focus.
 Every failure or panic after that call begins is `SubmissionUncertain` with
 `retry_safe=false`; there is no automatic retry edge.
+
+A recovery-marked commit is distinct from the normal pipeline. It is minted
+only for a nonempty, unfocused snapshot and the sealed Windows recovery
+capability. Native execution then requires the exact stage-only sequence-2
+ledger record and exact profile-normalized live message, performs no SetValue
+or clear, promotes the record durably to terminal sequence 3, and makes the
+same single submit call. Normal approvals cannot enter this branch.
 
 ## Threading and native resource ownership
 

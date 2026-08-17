@@ -28,6 +28,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
+use zeroize::Zeroize;
 
 use super::{
     AppSnapshot, ApprovedSend, ChatTargetSnapshot, InputSnapshot, InspectRequest, MessageSender,
@@ -43,6 +44,11 @@ const TOP_LEVEL_CLASS: &str = "EVA_Window_Dblclk";
 const COMPOSER_CLASS: &str = "RICHEDIT50W";
 const COMPOSER_AUTOMATION_ID: &str = "1006";
 const UIA_DOCUMENT_CONTROL_TYPE: i32 = 50_030;
+const EMPTY_PLACEHOLDER_DIGEST_DOMAIN: &[u8] = b"openkakao.windows.composer-placeholder.v1\0";
+const KNOWN_EMPTY_PLACEHOLDER_UTF16_SHA256: [u8; 32] = [
+    0x15, 0x73, 0x09, 0xf2, 0x22, 0xf0, 0x4a, 0x0c, 0x36, 0x99, 0xd9, 0x6f, 0x2d, 0x0f, 0x01, 0x59,
+    0xe6, 0x2d, 0x29, 0xf1, 0xf7, 0xe8, 0x15, 0x0b, 0xf9, 0x80, 0xc9, 0x75, 0x8a, 0x24, 0x5f, 0x12,
+];
 static READ_ONLY_PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -88,6 +94,8 @@ struct UiProfile {
     composer_class: &'static str,
     composer_automation_id: &'static str,
     composer_control_type: i32,
+    empty_placeholder_utf16_sha256: [u8; 32],
+    set_value_appends_carriage_return: bool,
     submit_strategy: Option<SubmitStrategy>,
 }
 
@@ -97,6 +105,31 @@ impl UiProfile {
             && automation_id == self.composer_automation_id
             && control_type == self.composer_control_type
     }
+
+    fn matches_empty_placeholder(&self, units: &[u16]) -> bool {
+        let mut observed = empty_placeholder_utf16_digest(units);
+        let matches = observed == self.empty_placeholder_utf16_sha256;
+        observed.zeroize();
+        matches
+    }
+
+    fn matches_staged_value(&self, current: &[u16], expected: &[u16]) -> bool {
+        current == expected
+            || (self.set_value_appends_carriage_return
+                && current.len() == expected.len() + 1
+                && current.starts_with(expected)
+                && current.last() == Some(&u16::from(b'\r')))
+    }
+}
+
+fn empty_placeholder_utf16_digest(units: &[u16]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(EMPTY_PLACEHOLDER_DIGEST_DOMAIN);
+    hasher.update((units.len() as u64).to_le_bytes());
+    for unit in units {
+        hasher.update(unit.to_le_bytes());
+    }
+    hasher.finalize().into()
 }
 
 const KNOWN_PROFILE: UiProfile = UiProfile {
@@ -106,6 +139,8 @@ const KNOWN_PROFILE: UiProfile = UiProfile {
     composer_class: COMPOSER_CLASS,
     composer_automation_id: COMPOSER_AUTOMATION_ID,
     composer_control_type: UIA_DOCUMENT_CONTROL_TYPE,
+    empty_placeholder_utf16_sha256: KNOWN_EMPTY_PLACEHOLDER_UTF16_SHA256,
+    set_value_appends_carriage_return: true,
     submit_strategy: Some(SubmitStrategy::ComposerEnterMessageV1),
 };
 
@@ -959,6 +994,38 @@ mod tests {
             })
             .count();
         assert_eq!(exact_count, 2, "duplicate exact selectors are ambiguous");
+    }
+
+    #[test]
+    fn empty_placeholder_digest_is_exact_domain_separated_and_profile_bound() {
+        let units: Vec<u16> = "SYNTHETIC_EMPTY_CHROME".encode_utf16().collect();
+        let profile = UiProfile {
+            empty_placeholder_utf16_sha256: empty_placeholder_utf16_digest(&units),
+            ..KNOWN_PROFILE
+        };
+        assert!(profile.matches_empty_placeholder(&units));
+
+        let changed: Vec<u16> = "SYNTHETIC_EMPTY_CHROME ".encode_utf16().collect();
+        assert!(!profile.matches_empty_placeholder(&changed));
+        assert!(!KNOWN_PROFILE.matches_empty_placeholder(&units));
+    }
+
+    #[test]
+    fn staged_value_accepts_only_exact_or_profile_carriage_return_form() {
+        let expected: Vec<u16> = "SYNTHETIC_MESSAGE".encode_utf16().collect();
+        assert!(KNOWN_PROFILE.matches_staged_value(&expected, &expected));
+
+        let mut provider_form = expected.clone();
+        provider_form.push(u16::from(b'\r'));
+        assert!(KNOWN_PROFILE.matches_staged_value(&provider_form, &expected));
+
+        let mut line_feed = expected.clone();
+        line_feed.push(u16::from(b'\n'));
+        assert!(!KNOWN_PROFILE.matches_staged_value(&line_feed, &expected));
+
+        let mut extra = expected.clone();
+        extra.extend([u16::from(b'\r'), u16::from(b'\r')]);
+        assert!(!KNOWN_PROFILE.matches_staged_value(&extra, &expected));
     }
 
     #[test]

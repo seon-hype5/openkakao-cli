@@ -27,6 +27,10 @@ pub enum UiPlatform {
 pub struct UiCapabilities {
     pub inspect: bool,
     pub send_open_chat: bool,
+    /// The sealed sender can resume only a durable, stage-only indeterminate
+    /// record after proving that the existing draft is the newly authorized
+    /// message. This does not authorize arbitrary existing-draft submission.
+    pub recover_indeterminate_stage: bool,
     pub open_chat_by_name: bool,
     pub read_visible: bool,
     pub watch_unread: bool,
@@ -37,6 +41,7 @@ impl UiCapabilities {
         Self {
             inspect: true,
             send_open_chat: false,
+            recover_indeterminate_stage: false,
             open_chat_by_name: false,
             read_visible: false,
             watch_unread: false,
@@ -51,6 +56,7 @@ impl UiCapabilities {
         Self {
             inspect: true,
             send_open_chat: true,
+            recover_indeterminate_stage: true,
             open_chat_by_name: false,
             read_visible: false,
             watch_unread: false,
@@ -796,6 +802,7 @@ pub struct ApprovedSend {
     approval_deadline: ApprovalDeadline,
     execution_claimed: AtomicBool,
     transaction_correlation: Mutex<Option<TransactionCorrelation>>,
+    recover_indeterminate_stage: bool,
 }
 
 impl ApprovedSend {
@@ -809,6 +816,8 @@ impl ApprovedSend {
         transaction_correlation: [u8; 16],
         _token: ApprovalToken,
     ) -> Result<Self, UiError> {
+        let recover_indeterminate_stage =
+            intent.mode == SendMode::Commit && !snapshot.input.draft_empty;
         Ok(Self {
             intent,
             snapshot,
@@ -819,6 +828,7 @@ impl ApprovedSend {
             transaction_correlation: Mutex::new(Some(TransactionCorrelation::from_policy(
                 transaction_correlation,
             )?)),
+            recover_indeterminate_stage,
         })
     }
 
@@ -859,6 +869,15 @@ impl ApprovedSend {
     #[allow(dead_code)] // Consumed by the guarded Windows backend feature.
     pub(crate) fn target_binding_verified(&self) -> bool {
         self.target_binding.verifies_snapshot(&self.snapshot)
+    }
+
+    /// True only when policy deliberately authorized commit recovery from a
+    /// nonempty snapshot. The Windows transaction still requires the exact
+    /// sequence-2 stage-only ledger record and exact live message before any
+    /// submission call.
+    #[allow(dead_code)]
+    pub(crate) fn recover_indeterminate_stage(&self) -> bool {
+        self.recover_indeterminate_stage
     }
 
     /// Native target observers use this after an ephemeral UTF-16 read and
@@ -1138,6 +1157,7 @@ mod tests {
         let read_only = UiCapabilities::windows_read_only();
         assert!(read_only.inspect);
         assert!(!read_only.send_open_chat);
+        assert!(!read_only.recover_indeterminate_stage);
         assert!(!read_only.open_chat_by_name);
         assert!(!read_only.read_visible);
         assert!(!read_only.watch_unread);
@@ -1145,6 +1165,7 @@ mod tests {
         let guarded_write = UiCapabilities::windows_guarded_write();
         assert!(guarded_write.inspect);
         assert!(guarded_write.send_open_chat);
+        assert!(guarded_write.recover_indeterminate_stage);
         assert!(!guarded_write.open_chat_by_name);
         assert!(!guarded_write.read_visible);
         assert!(!guarded_write.watch_unread);

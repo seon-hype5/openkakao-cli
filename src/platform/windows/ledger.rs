@@ -158,9 +158,18 @@ pub(super) trait DurableLedgerStore {
 /// The transaction-facing subset. It intentionally exposes no reset or
 /// age-based expiry operation: a nonempty ledger requires human resolution.
 pub(super) trait MutationLedger {
+    fn recoverable_indeterminate_stage(&mut self) -> Result<Option<LedgerRecord>, UiError> {
+        Ok(None)
+    }
     fn ensure_clear(&mut self) -> Result<(), UiError>;
     fn begin_stage(&mut self) -> Result<LedgerRecord, UiError>;
     fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError>;
+    fn mark_recovery_commit(
+        &mut self,
+        _indeterminate_stage: LedgerRecord,
+    ) -> Result<LedgerRecord, UiError> {
+        Err(ledger_state_error())
+    }
     fn mark_indeterminate(
         &mut self,
         correlation: RecordCorrelation,
@@ -205,6 +214,20 @@ impl<S: DurableLedgerStore> LedgerController<S> {
 }
 
 impl<S: DurableLedgerStore> MutationLedger for LedgerController<S> {
+    fn recoverable_indeterminate_stage(&mut self) -> Result<Option<LedgerRecord>, UiError> {
+        match self.load()? {
+            None => Ok(None),
+            Some(record)
+                if record.schema_valid()
+                    && record.phase == LedgerPhase::Indeterminate
+                    && record.sequence == 2 =>
+            {
+                Ok(Some(record))
+            }
+            Some(_) => Err(ledger_existing_error()),
+        }
+    }
+
     fn ensure_clear(&mut self) -> Result<(), UiError> {
         if self.load()?.is_some() {
             Err(ledger_existing_error())
@@ -232,6 +255,23 @@ impl<S: DurableLedgerStore> MutationLedger for LedgerController<S> {
 
         let commit = stage.next(LedgerPhase::CommitMayHaveStarted)?;
         self.replace_verified(Some(stage), commit)?;
+        Ok(commit)
+    }
+
+    fn mark_recovery_commit(
+        &mut self,
+        indeterminate_stage: LedgerRecord,
+    ) -> Result<LedgerRecord, UiError> {
+        if !indeterminate_stage.schema_valid()
+            || indeterminate_stage.phase != LedgerPhase::Indeterminate
+            || indeterminate_stage.sequence != 2
+            || self.load()? != Some(indeterminate_stage)
+        {
+            return Err(ledger_state_error());
+        }
+
+        let commit = indeterminate_stage.next(LedgerPhase::Indeterminate)?;
+        self.replace_verified(Some(indeterminate_stage), commit)?;
         Ok(commit)
     }
 
@@ -660,6 +700,25 @@ mod tests {
         let mut restarted = LedgerController::new(store, correlation(9));
         assert_uncertain(restarted.begin_stage().unwrap_err());
         assert_eq!(restarted.store.record, Some(terminal));
+    }
+
+    #[test]
+    fn stage_indeterminate_can_be_promoted_once_before_recovery_submit() {
+        let mut ledger = controller(14);
+        let stage = ledger.begin_stage().unwrap();
+        let recovery = ledger.mark_indeterminate(stage.correlation()).unwrap();
+        assert_eq!(recovery.phase, LedgerPhase::Indeterminate);
+        assert_eq!(recovery.sequence, 2);
+        assert_eq!(
+            ledger.recoverable_indeterminate_stage().unwrap(),
+            Some(recovery)
+        );
+
+        let commit = ledger.mark_recovery_commit(recovery).unwrap();
+        assert_eq!(commit.phase, LedgerPhase::Indeterminate);
+        assert_eq!(commit.sequence, 3);
+        assert!(ledger.recoverable_indeterminate_stage().is_err());
+        assert!(ledger.ensure_clear().is_err());
     }
 
     #[test]

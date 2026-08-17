@@ -228,7 +228,13 @@ where
         let (snapshot, target_binding) =
             inspect_for_policy(probe, requested_label, OP_DRY_RUN_INSPECT)?;
         let now_unix_ms = policy_now(&self.clock)?;
-        validate_snapshot(&snapshot, intent.target, now_unix_ms, &target_binding)?;
+        validate_snapshot(
+            &snapshot,
+            intent.target,
+            now_unix_ms,
+            &target_binding,
+            false,
+        )?;
 
         Ok(DryRunPlan {
             schema_version: 1,
@@ -293,7 +299,15 @@ where
             inspect_for_policy(probe, requested_label, OP_AUTHORIZE_INSPECT)?;
         let approved_at_monotonic = Instant::now();
         let now_unix_ms = policy_now(&self.clock)?;
-        validate_snapshot(&snapshot, intent.target, now_unix_ms, &target_binding)?;
+        let allow_indeterminate_stage_recovery =
+            intent.mode == SendMode::Commit && capabilities.recover_indeterminate_stage;
+        validate_snapshot(
+            &snapshot,
+            intent.target,
+            now_unix_ms,
+            &target_binding,
+            allow_indeterminate_stage_recovery,
+        )?;
         let approval_deadline = approval_deadline(&snapshot, now_unix_ms, approved_at_monotonic)?;
 
         let transaction_correlation = generate_transaction_correlation()?;
@@ -577,11 +591,12 @@ fn validate_snapshot(
     requested_target: TargetKind,
     now_unix_ms: u64,
     target_binding: &TargetBindingPermit,
+    allow_indeterminate_stage_recovery: bool,
 ) -> Result<(), UiError> {
     validate_app_snapshot(snapshot)?;
     validate_snapshot_time(snapshot, now_unix_ms)?;
     validate_target_snapshot(snapshot, requested_target, target_binding)?;
-    validate_input_snapshot(snapshot)
+    validate_input_snapshot(snapshot, allow_indeterminate_stage_recovery)
 }
 
 fn validate_app_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
@@ -708,7 +723,10 @@ fn validate_target_snapshot(
     Ok(())
 }
 
-fn validate_input_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
+fn validate_input_snapshot(
+    snapshot: &UiSnapshot,
+    allow_indeterminate_stage_recovery: bool,
+) -> Result<(), UiError> {
     let input = &snapshot.input;
     if !input.present {
         return Err(policy_error(
@@ -731,7 +749,7 @@ fn validate_input_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
     if input.focused {
         return Err(policy_error(UiErrorKind::UserActive, OP_INPUT_SNAPSHOT));
     }
-    if !input.draft_empty {
+    if !input.draft_empty && !allow_indeterminate_stage_recovery {
         return Err(policy_error(UiErrorKind::ExistingDraft, OP_INPUT_SNAPSHOT));
     }
     if input.selector_profile_id.as_deref() != Some(SUPPORTED_SELECTOR_PROFILE_ID) {
@@ -901,6 +919,78 @@ mod tests {
     }
 
     #[test]
+    fn existing_draft_recovery_requires_commit_mode_and_the_sealed_capability() {
+        let mut state = snapshot();
+        state.input.draft_empty = false;
+        let policy = WindowsSafetyPolicy::with_clock(
+            WindowsPolicyConfig::new(["SYNTHETIC_SELF_CHAT"]).unwrap(),
+            FixedClock,
+        );
+
+        let unsupported = policy
+            .authorize(
+                &StaticProbe(state.clone()),
+                "SYNTHETIC_SELF_CHAT",
+                SendIntent::new(
+                    TargetKind::SelfChat,
+                    SecretMessage::new("SYNTHETIC_BODY"),
+                    SendMode::Commit,
+                    true,
+                    "synthetic-recovery-unsupported",
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(unsupported.kind, UiErrorKind::ExistingDraft);
+
+        let wrong_mode = policy
+            .authorize(
+                &RecoveryProbe(state.clone()),
+                "SYNTHETIC_SELF_CHAT",
+                SendIntent::new(
+                    TargetKind::SelfChat,
+                    SecretMessage::new("SYNTHETIC_BODY"),
+                    SendMode::StageOnly,
+                    true,
+                    "synthetic-recovery-stage",
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(wrong_mode.kind, UiErrorKind::ExistingDraft);
+
+        state.input.focused = true;
+        let focused = policy
+            .authorize(
+                &RecoveryProbe(state.clone()),
+                "SYNTHETIC_SELF_CHAT",
+                SendIntent::new(
+                    TargetKind::SelfChat,
+                    SecretMessage::new("SYNTHETIC_BODY"),
+                    SendMode::Commit,
+                    true,
+                    "synthetic-recovery-focused",
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(focused.kind, UiErrorKind::UserActive);
+
+        state.input.focused = false;
+        let approval = policy
+            .authorize(
+                &RecoveryProbe(state),
+                "SYNTHETIC_SELF_CHAT",
+                SendIntent::new(
+                    TargetKind::SelfChat,
+                    SecretMessage::new("SYNTHETIC_BODY"),
+                    SendMode::Commit,
+                    true,
+                    "synthetic-recovery-authorized",
+                ),
+            )
+            .expect("the capability may mint only a recovery-marked commit approval");
+        assert!(approval.approved.recover_indeterminate_stage());
+    }
+
+    #[test]
     fn expired_monotonic_approval_refuses_before_sender_dispatch() {
         let policy = WindowsSafetyPolicy::with_clock(
             WindowsPolicyConfig::new(["SYNTHETIC_SELF_CHAT"]).unwrap(),
@@ -1001,10 +1091,27 @@ mod tests {
             UiCapabilities {
                 inspect: true,
                 send_open_chat: true,
+                recover_indeterminate_stage: false,
                 open_chat_by_name: false,
                 read_visible: false,
                 watch_unread: false,
             }
+        }
+
+        fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {
+            let mut snapshot = self.0.clone();
+            let observed_utf16: Vec<u16> = "SYNTHETIC_SELF_CHAT".encode_utf16().collect();
+            snapshot.target.target_binding =
+                request.bind_observed_target_utf16(&observed_utf16, &snapshot);
+            Ok(snapshot)
+        }
+    }
+
+    struct RecoveryProbe(UiSnapshot);
+
+    impl PlatformProbe for RecoveryProbe {
+        fn capabilities(&self) -> UiCapabilities {
+            UiCapabilities::windows_guarded_write()
         }
 
         fn inspect(&self, request: &InspectRequest) -> Result<UiSnapshot, UiError> {

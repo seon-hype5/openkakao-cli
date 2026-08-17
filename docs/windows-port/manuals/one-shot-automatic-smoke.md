@@ -3,10 +3,9 @@
 > **Gate L40 — NOT AUTHORIZED NOW. It requires fresh immediate approval for one commit.**
 
 L40 is the highest-risk MVP gate. It permits at most one automatic commit in
-one approved session. A guarded transaction scaffold exists, but production
-capability, target/submit selectors, and a durable replay store are absent, so
-this manual cannot presently be executed. The pure ledger codec/state machine
-does not satisfy this prerequisite.
+one approved session. The default-off write build now has an exact target,
+composer-Enter submit strategy, and durable replay store, but every remaining
+qualification prerequisite and fresh session approval below is still required.
 
 The release goal of repeated exact echoes is cumulative across separately
 approved sessions. It never means sending a batch in one session.
@@ -17,8 +16,9 @@ approved sessions. It never means sending a batch in one session.
   indeterminate failure.
 - The full adversarial refusal matrix is green with zero mutation calls on
   every refusal path.
-- A reviewed implementation supports a verified submit-button invocation.
-  Key-input fallback requires its own approved RFC and is otherwise forbidden.
+- The reviewed profile supports exactly one synchronous composer-targeted
+  `WM_KEYDOWN/VK_RETURN` dispatch. Global key input, focus changes, key-up,
+  fallback controls, and retry remain forbidden.
 - Cross-process mutual exclusion, one-shot nonce consumption, snapshot TTL,
   user-activity detection, exact staged readback, and the accepted durable
   ledger protocol from [the activation RFC](../ACTIVATION_RFC.md) are all
@@ -49,6 +49,11 @@ automatically.
 4. Mark `retry_safe=false` as soon as the commit call begins.
 5. Observe one bounded echo interval and classify the outcome once.
 6. Report the outcome to the user and stop the session.
+
+If a prior stage-only call alone left a durable sequence-2 indeterminate record,
+the recovery branch may skip steps 1's SetValue and restore work only after it
+proves the exact staged canary. It must promote to terminal sequence 3 before
+step 3 and still dispatch at most once.
 
 There is no loop, retry, fallback submit mechanism, automatic deletion, or
 second smoke action.

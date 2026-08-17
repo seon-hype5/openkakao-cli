@@ -863,3 +863,33 @@ self-chat allowlisting, stdin input, explicit `--yes`, and all fresh gates are
 still mandatory. Any failure after the sole dispatch boundary is terminal
 submission uncertainty, and an existing draft is never overwritten or
 cleared.
+
+## ADR-054: Bind the measured composer representation and stage-only recovery
+
+A separately authorized live stage-only exercise on KakaoTalk `26.7.0.5255`
+established three profile details without retaining or emitting draft text.
+First, the empty RichEdit provider exposes its UI-chrome placeholder as a
+nonempty ValuePattern value. The profile therefore accepts empty only when the
+native `WM_GETTEXTLENGTH` result is zero or the scrubbed UTF-16 value matches
+the source-static, domain-separated placeholder SHA-256 exactly. Second,
+`SetValue` readback normalizes the requested value to either the exact UTF-16
+message or that message followed by one carriage return. Accept only those two
+forms; message validation already rejects control characters, so this cannot
+alias an authorized input. Third, raw exact-class enumeration includes helper
+windows. Mutation selection now requires exactly one raw HWND whose PID and
+run-scoped window fingerprint equal the approved root; zero or multiple matches
+fail closed, and unrelated helpers cannot become the target.
+
+The stage-only provider call returned uncertainty after changing the exact
+draft. Its durable record is `Indeterminate` sequence 2, a state reachable only
+from `StageMayHaveStarted`; the stage-only state machine contains no submission
+call. Permit a narrowly marked recovery approval only for commit mode, only
+when the sealed backend advertises this recovery contract, and only from a
+nonempty, unfocused, inactive snapshot. The transaction then requires accepted
+executable trust, that exact sequence-2 record, the same target/window/composer
+evidence, and exact profile-normalized live message. It performs no `SetValue`
+or clear, consumes the one-shot approval, durably promotes sequence 2 to
+terminal sequence 3, and only then issues the single profile-bound Enter call.
+Normal commit approvals never consume a recoverable record. A missing record,
+changed draft, focus/foreground activity, or any other mismatch refuses before
+submission; once sequence 3 is durable, no retry path exists.

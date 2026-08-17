@@ -58,6 +58,7 @@ impl PlatformProbe for ErrorProbe {
         UiCapabilities {
             inspect: true,
             send_open_chat: true,
+            recover_indeterminate_stage: false,
             open_chat_by_name: false,
             read_visible: false,
             watch_unread: false,
@@ -865,6 +866,7 @@ impl PlatformProbe for SequenceProbe {
         UiCapabilities {
             inspect: true,
             send_open_chat: true,
+            recover_indeterminate_stage: false,
             open_chat_by_name: false,
             read_visible: false,
             watch_unread: false,
@@ -1006,6 +1008,7 @@ impl PlatformProbe for ConcurrentProbe {
         UiCapabilities {
             inspect: true,
             send_open_chat: self.send_open_chat,
+            recover_indeterminate_stage: false,
             open_chat_by_name: false,
             read_visible: false,
             watch_unread: false,

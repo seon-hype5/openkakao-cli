@@ -94,6 +94,11 @@ proven to have occurred. Plain doctor, mismatch, focus, or any other skipped
 read emits `draft_unobserved`; the fail-closed internal false bit is not
 misreported as evidence of a real draft.
 
+The exact profile treats a zero native text length or one source-static
+placeholder UTF-16 digest as empty. SetValue ownership accepts only the exact
+message or that message plus one provider carriage return. Neither provider
+text form is serialized or formatted.
+
 ## Mutation capability semantics
 
 `MessageSender` is public for invocation but sealed against external
@@ -175,6 +180,13 @@ Once the first `SetValue` method is entered, every error or panic through
 readback, validation, clear, restore, or commit preparation is non-retryable
 uncertainty. Once `Invoke` is entered, every returned error or panic is
 submission uncertainty. There is no automatic retry.
+
+A commit approval derived from a nonempty snapshot is marked for stage-only
+recovery and is valid only when the sealed backend advertises that capability.
+The backend must find the exact sequence-2 stage-only ledger record, prove the
+exact live message and all fresh gates, durably promote to terminal sequence 3,
+and submit once without SetValue or clear. Normal approvals cannot enter this
+branch, and focus/foreground activity still refuses.
 
 ## Windows CLI contract
 

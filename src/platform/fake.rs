@@ -56,6 +56,7 @@ impl PlatformProbe for FakeBackend {
         UiCapabilities {
             inspect: true,
             send_open_chat: true,
+            recover_indeterminate_stage: false,
             open_chat_by_name: false,
             read_visible: false,
             watch_unread: false,

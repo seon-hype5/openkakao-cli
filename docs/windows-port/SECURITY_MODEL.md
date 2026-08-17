@@ -20,8 +20,10 @@ A Windows UI write is unavailable unless every independent layer permits it:
   independently observed target and complete redacted snapshot;
 - the request is self-chat, stdin-only, opened-only, explicitly confirmed,
   and within the fixed input limits;
-- policy evidence proves a supported profile, exact unique self target, empty
-  draft, no focus/modal, compatible process/session/integrity, and a fresh TTL;
+- policy evidence proves a supported profile, exact unique self target, no
+  focus/modal, compatible process/session/integrity, and a fresh TTL. Normal
+  writes also require an empty draft; the recovery-only exception is described
+  below;
 - a process-local approval mutex and hashed one-use nonce are available;
 - a zero-wait named Windows mutex provides cross-process exclusion;
 - fresh transaction state exactly matches the approved state; and
@@ -63,6 +65,9 @@ independent runtime opt-in and every exact fresh-state gate below.
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;
   session/integrity mismatch; and ambiguous windows/composers are refusals.
+  The sole existing-draft exception requires a recovery-marked commit, the
+  exact stage-only sequence-2 ledger record, and exact profile-normalized live
+  message; it performs no SetValue or clear.
 - Modal evidence includes both a disabled selected window and every visible
   same-process owned top-level popup in its root-owner group. Owner-query
   uncertainty refuses; visible modeless owned popups may conservatively block.
@@ -75,10 +80,12 @@ independent runtime opt-in and every exact fresh-state gate below.
   preflight, and each actual Value/Invoke call.
 - One approval is consumed by one synchronous reviewed sender call. A
   crate-private atomic claim prevents a second native write attempt.
-- Policy nonce tracking is process-local and hashed. A content-free replay
-  codec/state machine is implemented synthetically, but durable Windows
-  storage is intentionally replaced by a fail-closed placeholder while
-  production commit remains unavailable.
+- Policy nonce tracking is process-local and hashed. The content-free ledger is
+  stored under a verified current-user LocalAppData directory with exact ACL,
+  DPAPI, no-reparse, bounded-record, and durable compare-and-replace checks.
+  A sequence-2 stage-only uncertainty may be promoted once to terminal
+  sequence 3 before the sole submit; sequence 3 is never retried or removed
+  automatically.
 
 ## Message and output privacy
 

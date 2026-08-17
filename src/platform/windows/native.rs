@@ -22,12 +22,10 @@ use windows::core::BSTR;
 use windows::core::{w, Error as WindowsError, BOOL, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, SetLastError, ERROR_SUCCESS, E_ACCESSDENIED, FILETIME, HANDLE, HWND,
-    LPARAM, RPC_E_CALL_CANCELED, RPC_E_CALL_COMPLETE, RPC_E_CHANGED_MODE,
+    LPARAM, RPC_E_CALL_CANCELED, RPC_E_CALL_COMPLETE, RPC_E_CHANGED_MODE, WPARAM,
 };
 #[cfg(feature = "windows-ui-write")]
-use windows::Win32::Foundation::{
-    WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT, WPARAM,
-};
+use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Security::{
     GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, IsValidSid,
     TokenIntegrityLevel, TOKEN_MANDATORY_LABEL, TOKEN_QUERY,
@@ -58,13 +56,12 @@ use windows::Win32::UI::Accessibility::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetAncestor, GetClassNameW, GetWindow, GetWindowLongPtrW,
-    GetWindowThreadProcessId, IsWindowVisible, GA_ROOTOWNER, GWL_STYLE, GW_OWNER, WS_DISABLED,
+    GetWindowThreadProcessId, IsWindowVisible, SendMessageTimeoutW, GA_ROOTOWNER, GWL_STYLE,
+    GW_OWNER, SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT,
+    WM_GETTEXTLENGTH, WS_DISABLED,
 };
 #[cfg(feature = "windows-ui-write")]
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, SendMessageTimeoutW, SEND_MESSAGE_TIMEOUT_FLAGS, SMTO_ABORTIFHUNG,
-    SMTO_BLOCK, SMTO_ERRORONEXIT, WM_KEYDOWN,
-};
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, WM_KEYDOWN};
 
 use zeroize::Zeroize;
 #[cfg(any(feature = "windows-ui-write", test))]
@@ -407,6 +404,23 @@ const fn window_matches_enumeration_scope(
         #[cfg(any(feature = "windows-ui-write", test))]
         WindowEnumerationScope::RawExactClass => exact_class,
     }
+}
+
+#[cfg(any(feature = "windows-ui-write", test))]
+fn select_unique_matching_candidate<T: Copy>(
+    candidates: impl IntoIterator<Item = (T, bool)>,
+) -> Option<T> {
+    let mut selected = None;
+    for (candidate, matches) in candidates {
+        if !matches {
+            continue;
+        }
+        if selected.is_some() {
+            return None;
+        }
+        selected = Some(candidate);
+    }
+    selected
 }
 
 #[derive(Clone, Copy)]
@@ -928,17 +942,78 @@ fn read_exact_composer_draft_empty(
         ));
     }
 
-    // This is the sole default-build draft read. It is unreachable until the
-    // exact target label has produced valid request-scoped evidence. The value
-    // is reduced to one empty/nonempty bit, never decoded or retained, and its
-    // BSTR is scrubbed before the element/pattern interfaces are released.
-    let current = ScrubbedBstr::new(
-        unsafe { pattern.CurrentValue() }
-            .map_err(|error| map_windows_error(error, "windows_draft_uia_current_value"))?,
-    );
-    let empty = current.units().is_empty();
+    // KakaoTalk exposes a nonempty UI-chrome placeholder when the composer is
+    // empty. Accept either a zero native length or the exact source-static
+    // placeholder digest for this version. The BSTR is never decoded,
+    // retained, or formatted and is scrubbed before release.
+    let empty = if composer_native_text_empty(element_hwnd)? {
+        true
+    } else {
+        let current = ScrubbedBstr::new(
+            unsafe { pattern.CurrentValue() }
+                .map_err(|error| map_windows_error(error, "windows_draft_uia_current_value"))?,
+        );
+        context.profile.matches_empty_placeholder(current.units())
+    };
     revalidate_read_only_target_context(context, fingerprints)?;
     Ok(empty)
+}
+
+fn composer_native_text_empty(composer_hwnd: HWND) -> Result<bool, UiError> {
+    composer_native_text_empty_with(
+        composer_hwnd,
+        |hwnd, message, wparam, lparam, flags, timeout_ms, message_result| {
+            // SAFETY: `hwnd` was just revalidated as the exact composer. The
+            // query copies no text; `message_result` remains valid through the
+            // synchronous call and is not retained by user32.
+            unsafe {
+                SendMessageTimeoutW(
+                    hwnd,
+                    message,
+                    wparam,
+                    lparam,
+                    flags,
+                    timeout_ms,
+                    Some(ptr::from_mut(message_result)),
+                )
+                .0 != 0
+            }
+        },
+    )
+}
+
+fn composer_native_text_empty_with(
+    composer_hwnd: HWND,
+    query_once: impl FnOnce(
+        HWND,
+        u32,
+        WPARAM,
+        LPARAM,
+        SEND_MESSAGE_TIMEOUT_FLAGS,
+        u32,
+        &mut usize,
+    ) -> bool,
+) -> Result<bool, UiError> {
+    const TEXT_LENGTH_TIMEOUT_MS: u32 = 1_000;
+
+    let mut native_length = 0_usize;
+    let delivered = query_once(
+        composer_hwnd,
+        WM_GETTEXTLENGTH,
+        WPARAM(0),
+        LPARAM(0),
+        SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT,
+        TEXT_LENGTH_TIMEOUT_MS,
+        &mut native_length,
+    );
+    if delivered {
+        Ok(native_length == 0)
+    } else {
+        Err(UiError::new(
+            UiErrorKind::Timeout,
+            "windows_draft_native_length",
+        ))
+    }
 }
 
 #[cfg(feature = "windows-ui-write")]
@@ -1615,6 +1690,7 @@ struct NativeMutationPort<'operation> {
     approved: &'operation ApprovedSend,
     fingerprints: FingerprintKey,
     expected_pid: u32,
+    expected_window_fingerprint: String,
     expires_at_unix_ms: u64,
     message_utf16: &'operation [u16],
     identity: Option<NativeMutationIdentity>,
@@ -1648,6 +1724,7 @@ impl<'operation> NativeMutationPort<'operation> {
             approved,
             fingerprints,
             expected_pid: expected.pid,
+            expected_window_fingerprint: expected.window_fingerprint.to_string(),
             expires_at_unix_ms: expected.expires_at_unix_ms,
             message_utf16,
             identity: None,
@@ -1657,6 +1734,25 @@ impl<'operation> NativeMutationPort<'operation> {
             submit_strategy: None,
             prepared: PreparedMutation::None,
         }
+    }
+
+    fn select_approved_window(&self, windows: &[HWND]) -> Result<HWND, UiError> {
+        let mut candidates = Vec::with_capacity(windows.len());
+        for &hwnd in windows {
+            let mut pid = 0_u32;
+            // SAFETY: `pid` is a writable out parameter and `hwnd` came from
+            // the synchronous top-level enumeration immediately above.
+            let thread_id =
+                unsafe { GetWindowThreadProcessId(hwnd, Some(ptr::from_mut(&mut pid))) };
+            if thread_id == 0 || pid == 0 {
+                return Err(stale_window_error());
+            }
+            let matches = pid == self.expected_pid
+                && self.fingerprints.window(hwnd.0 as usize, pid)
+                    == self.expected_window_fingerprint;
+            candidates.push((hwnd, matches));
+        }
+        select_unique_matching_candidate(candidates).ok_or_else(stale_window_error)
     }
 
     fn revalidate_before_mutation(&self, required_draft: DraftState) -> Result<(), UiError> {
@@ -1681,7 +1777,7 @@ impl<'operation> NativeMutationPort<'operation> {
         })?;
 
         let windows = enumerate_raw_top_level_windows()?;
-        if windows.len() != 1 || windows[0] != identity.hwnd {
+        if self.select_approved_window(&windows)? != identity.hwnd {
             return Err(stale_window_error());
         }
         ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
@@ -1754,7 +1850,12 @@ impl<'operation> NativeMutationPort<'operation> {
         // comparisons. A room switch during the read must fail before the
         // resulting draft classification can influence a mutation decision.
         ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
-        let draft = classify_current_value(pattern, self.message_utf16)?;
+        let draft = classify_current_value(
+            pattern,
+            identity.composer_hwnd,
+            self.message_utf16,
+            &KNOWN_PROFILE,
+        )?;
         ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
         if draft != required_draft {
             return Err(UiError::new(
@@ -1770,10 +1871,10 @@ impl<'operation> NativeMutationPort<'operation> {
 impl ExecutableTrustBoundary for NativeMutationPort<'_> {
     fn verify_executable_trust(&mut self) -> Result<(), UiError> {
         let windows = enumerate_raw_top_level_windows()?;
-        if windows.len() != 1 || !window_has_exact_class(windows[0]) {
+        let hwnd = self.select_approved_window(&windows)?;
+        if !window_has_exact_class(hwnd) {
             return Err(stale_window_error());
         }
-        let hwnd = windows[0];
         let mut pid = 0_u32;
         // SAFETY: `pid` is a writable out parameter and the exact-class HWND
         // came from the bounded top-level enumeration above.
@@ -1789,6 +1890,10 @@ impl ExecutableTrustBoundary for NativeMutationPort<'_> {
 
 #[cfg(feature = "windows-ui-write")]
 impl MutationLedger for NativeMutationPort<'_> {
+    fn recoverable_indeterminate_stage(&mut self) -> Result<Option<LedgerRecord>, UiError> {
+        self.ledger.recoverable_indeterminate_stage()
+    }
+
     fn ensure_clear(&mut self) -> Result<(), UiError> {
         self.ledger.ensure_clear()
     }
@@ -1799,6 +1904,13 @@ impl MutationLedger for NativeMutationPort<'_> {
 
     fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
         self.ledger.mark_commit(stage)
+    }
+
+    fn mark_recovery_commit(
+        &mut self,
+        indeterminate_stage: LedgerRecord,
+    ) -> Result<LedgerRecord, UiError> {
+        self.ledger.mark_recovery_commit(indeterminate_stage)
     }
 
     fn mark_indeterminate(
@@ -1832,12 +1944,8 @@ impl MutationPort for NativeMutationPort<'_> {
 
         let now_unix_ms = unix_now_ms();
         let windows = enumerate_raw_top_level_windows()?;
-        let mut fresh = FreshState::unavailable(now_unix_ms, windows.len());
-        if windows.len() != 1 {
-            return Ok(fresh);
-        }
-
-        let hwnd = windows[0];
+        let hwnd = self.select_approved_window(&windows)?;
+        let mut fresh = FreshState::unavailable(now_unix_ms, 1);
         let NativeWindow {
             fingerprint,
             visible,
@@ -1920,7 +2028,12 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.exact_target = target.exact;
         fresh.unique_target = target.unique;
         fresh.draft = if target.authorizes_target_access() {
-            let draft = classify_current_value(&opened.value_pattern, self.message_utf16)?;
+            let draft = classify_current_value(
+                &opened.value_pattern,
+                opened.hwnd,
+                self.message_utf16,
+                profile,
+            )?;
             ensure_self_target(hwnd, process.pid, self.approved)?;
             draft
         } else {
@@ -2260,9 +2373,14 @@ fn observe_self_target(
             |_| false,
         ));
     }
-    if windows.len() != 1 {
+    if windows
+        .iter()
+        .filter(|candidate| **candidate == hwnd)
+        .count()
+        != 1
+    {
         return Ok(target_evidence_from_observation(
-            ObservedTargetSelection::AmbiguousInexact,
+            ObservedTargetSelection::AmbiguousExact,
             |_| false,
         ));
     }
@@ -2457,8 +2575,13 @@ fn validate_mutation_composer_element(
 #[cfg(feature = "windows-ui-write")]
 fn classify_current_value(
     pattern: &IUIAutomationValuePattern,
+    composer_hwnd: HWND,
     expected_message_utf16: &[u16],
+    profile: &UiProfile,
 ) -> Result<DraftState, UiError> {
+    if composer_native_text_empty(composer_hwnd)? {
+        return Ok(DraftState::Empty);
+    }
     // SAFETY: read occurs only after live self-target verification. The BSTR is
     // immediately wrapped, never formatted/decoded/serialized, compared as
     // UTF-16 only, and scrubbed in place before SysFreeString runs.
@@ -2466,13 +2589,15 @@ fn classify_current_value(
         unsafe { pattern.CurrentValue() }
             .map_err(|error| map_windows_error(error, "windows_mutation_current_value"))?,
     );
-    Ok(if current.units().is_empty() {
-        DraftState::Empty
-    } else if current.units() == expected_message_utf16 {
-        DraftState::ExactMessage
-    } else {
-        DraftState::Different
-    })
+    Ok(
+        if profile.matches_staged_value(current.units(), expected_message_utf16) {
+            DraftState::ExactMessage
+        } else if profile.matches_empty_placeholder(current.units()) {
+            DraftState::Empty
+        } else {
+            DraftState::Different
+        },
+    )
 }
 
 struct ScrubbedBstr(BSTR);
@@ -2533,6 +2658,55 @@ fn map_windows_error(error: WindowsError, operation: &'static str) -> UiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approved_window_selection_requires_one_exact_match_among_helpers() {
+        assert_eq!(
+            select_unique_matching_candidate([(1_u8, false), (2, true), (3, false)]),
+            Some(2)
+        );
+        assert_eq!(
+            select_unique_matching_candidate([(1_u8, false), (2, false)]),
+            None
+        );
+        assert_eq!(
+            select_unique_matching_candidate([(1_u8, true), (2, true)]),
+            None
+        );
+    }
+
+    #[test]
+    fn native_composer_length_query_is_content_free_bounded_and_fail_closed() {
+        let hwnd = HWND::default();
+        let empty = composer_native_text_empty_with(
+            hwnd,
+            |actual_hwnd, message, wparam, lparam, flags, timeout_ms, result| {
+                assert_eq!(actual_hwnd, hwnd);
+                assert_eq!(message, WM_GETTEXTLENGTH);
+                assert_eq!(wparam.0, 0);
+                assert_eq!(lparam.0, 0);
+                assert_eq!(flags, SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT);
+                assert_eq!(timeout_ms, 1_000);
+                assert_eq!(*result, 0);
+                true
+            },
+        )
+        .expect("a delivered zero-length query must classify empty");
+        assert!(empty);
+
+        let nonempty = composer_native_text_empty_with(hwnd, |_, _, _, _, _, _, result| {
+            *result = 7;
+            true
+        })
+        .expect("a delivered nonzero-length query must classify nonempty");
+        assert!(!nonempty);
+
+        let error = composer_native_text_empty_with(hwnd, |_, _, _, _, _, _, _| false)
+            .expect_err("a failed or timed-out query must fail closed");
+        assert_eq!(error.kind, UiErrorKind::Timeout);
+        assert_eq!(error.operation, "windows_draft_native_length");
+        assert!(error.retry_safe);
+    }
 
     #[cfg(feature = "windows-ui-write")]
     #[test]

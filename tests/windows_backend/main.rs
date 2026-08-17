@@ -11,8 +11,12 @@ fn production_backend_exposes_only_the_build_selected_capability_surface() {
     assert!(capabilities.inspect);
     #[cfg(not(feature = "windows-ui-write"))]
     assert!(!capabilities.send_open_chat);
+    #[cfg(not(feature = "windows-ui-write"))]
+    assert!(!capabilities.recover_indeterminate_stage);
     #[cfg(feature = "windows-ui-write")]
     assert!(capabilities.send_open_chat);
+    #[cfg(feature = "windows-ui-write")]
+    assert!(capabilities.recover_indeterminate_stage);
     assert!(!capabilities.open_chat_by_name);
     assert!(!capabilities.read_visible);
     assert!(!capabilities.watch_unread);

@@ -25,7 +25,8 @@ timeout, or user activity:
 | Composer is exactly root's current synthetic canary | Restore the proven prior empty value once, then verify empty |
 | Composer differs or user activity is possible | Leave it unchanged and alert the user |
 | Commit call began | Never clear, retry, delete, recall, or compensate automatically |
-| Outcome is indeterminate | Stop and ask the user to inspect the one session nonce out of band |
+| Stage-only is durable `Indeterminate` sequence 2 and the exact owned draft remains | A newly confirmed commit may use the reviewed recovery path once; it must promote to terminal sequence 3 before submit |
+| Any other indeterminate state | Stop and ask the user to inspect out of band; never retry |
 
 Never restore an assumed prior draft. Existing or unknown input is user-owned.
 
@@ -39,7 +40,7 @@ Never restore an assumed prior draft. Existing or unknown input is user-owned.
 | 12 | Composer, draft, modal, activity, or stale-state refusal | Preserve UI state and stop |
 | 13 | Session, integrity, permission, or profile refusal | Stop and resolve the environment outside the live gate |
 | 20 | Backend failure before commit | Stop; no automatic rediscovery/continuation |
-| 21 | Submission indeterminate | Never retry; immediate user inspection is required |
+| 21 | Mutation/submission indeterminate | Never retry a submit. Only the exact stage-only sequence-2 recovery contract may resume before any prior submit call |
 
 ## Troubleshooting limits
 

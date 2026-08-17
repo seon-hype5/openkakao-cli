@@ -10,6 +10,15 @@ Date: 2026-08-17 KST
 > read-only. Earlier `send_open_chat=false` and unconfigured-submit statements
 > below describe predecessor checkpoints and are superseded for feature builds.
 
+> Composer/recovery successor update: the exact empty placeholder is pinned by
+> a source-static UTF-16 digest, SetValue readback accepts only exact message or
+> exact message plus one provider carriage return, and raw helper windows are
+> excluded by unique approved PID/window-fingerprint selection. A stage-only
+> sequence-2 indeterminate record may be resumed only by a recovery-marked
+> commit that proves the exact live message and durably promotes the record to
+> terminal sequence 3 before one Enter dispatch. Normal commits cannot consume
+> that record; focus/foreground activity still blocks.
+
 > Latest successor update: the accepted x64 bundle is
 > [`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md), the exact
 > provider output is `0x80003080`, and the profile-bound native observer is now
@@ -256,10 +265,10 @@ an invisible window can never satisfy the existing visible-target gate. Such a
 window was nevertheless counted toward the eight-candidate ceiling or mapped
 to `NotInspected`, which forces ambiguity. The next offline successor therefore
 excludes invisible windows only when constructing the read-only candidate set.
-The mutation path retains a separate raw exact-class enumeration and still
-requires exactly one raw top-level window. A pure four-case test freezes both
-scopes. This is a conservative source diagnosis, not proof that an invisible
-window caused either observed failure.
+The mutation path retains a separate raw exact-class enumeration and requires
+exactly one entry to match the approved PID and run-scoped window fingerprint.
+Zero or multiple matches fail closed; helper windows remain non-selectable. A
+pure unique-match test freezes this rule.
 
 The third failed session showed that visibility-only narrowing was not enough,
 while the predecessor's fixed output could not identify the remaining
@@ -571,9 +580,8 @@ successfully. No execution-policy bypass or trust-store change was made.
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 208 passed; 1 bounded qualification child ignored |
-| `cargo test --locked --lib --all-features platform::windows` | 121 passed; 1 bounded qualification child ignored |
-| `cargo test --locked --bin openkakao-cli` | 179 passed |
+| `cargo test --locked --lib --all-features` | 230 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --bin openkakao-cli` | 178 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
 | `cargo test --locked --test windows_cli` | 1 passed |
@@ -608,6 +616,8 @@ successfully. No execution-policy bypass or trust-store change was made.
 | hosted cross-platform CI at `988fc0f` | run `32006211297` passed Linux and macOS jobs |
 | hosted Windows safe CI at `5b0591a` | run `32013457539` passed every step, including native qualification and optimized all-feature tests |
 | hosted cross-platform CI at `5b0591a` | run `32013457513` passed Linux lint/tests and the macOS release build |
+| hosted Windows safe CI at `39f079a` | run `32017266546` passed every step |
+| hosted cross-platform CI at `39f079a` | run `32017266651` passed Linux and macOS jobs |
 
 The initial successor push `2e298ee` passed its synthetic and macOS jobs but
 exposed one Linux-only `dead_code` lint on the Windows worker-clone helper.
@@ -632,6 +642,13 @@ inline documentation/action/toolchain validator and every newly added command
 passed locally and in hosted run `32004418562`.
 
 ## Safety ledger for this implementation session
+
+Successor live addendum for the composer/recovery measurement: one authorized
+stage-only backend call entered `SetValue` once, performed no clear and no
+submit, and left the exact synthetic draft with a durable sequence-2
+indeterminate record. One later commit command was refused by policy as
+`user_active` before backend dispatch. At this checkpoint there have been zero
+Enter submit calls and zero actual messages from this successor.
 
 - live KakaoTalk/UIA doctor probes: 7;
 - documented live before/after read-only guard snapshots: 12;

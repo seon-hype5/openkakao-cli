@@ -116,6 +116,10 @@ impl<F: LedgerStoreFactory> LazyLedger<F> {
 }
 
 impl<F: LedgerStoreFactory> MutationLedger for LazyLedger<F> {
+    fn recoverable_indeterminate_stage(&mut self) -> Result<Option<LedgerRecord>, UiError> {
+        self.controller()?.recoverable_indeterminate_stage()
+    }
+
     fn ensure_clear(&mut self) -> Result<(), UiError> {
         self.controller()?.ensure_clear()
     }
@@ -126,6 +130,13 @@ impl<F: LedgerStoreFactory> MutationLedger for LazyLedger<F> {
 
     fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
         self.controller()?.mark_commit(stage)
+    }
+
+    fn mark_recovery_commit(
+        &mut self,
+        indeterminate_stage: LedgerRecord,
+    ) -> Result<LedgerRecord, UiError> {
+        self.controller()?.mark_recovery_commit(indeterminate_stage)
     }
 
     fn mark_indeterminate(
@@ -149,6 +160,10 @@ impl LazyProductionLedger {
 }
 
 impl MutationLedger for LazyProductionLedger {
+    fn recoverable_indeterminate_stage(&mut self) -> Result<Option<LedgerRecord>, UiError> {
+        self.0.recoverable_indeterminate_stage()
+    }
+
     fn ensure_clear(&mut self) -> Result<(), UiError> {
         self.0.ensure_clear()
     }
@@ -159,6 +174,13 @@ impl MutationLedger for LazyProductionLedger {
 
     fn mark_commit(&mut self, stage: LedgerRecord) -> Result<LedgerRecord, UiError> {
         self.0.mark_commit(stage)
+    }
+
+    fn mark_recovery_commit(
+        &mut self,
+        indeterminate_stage: LedgerRecord,
+    ) -> Result<LedgerRecord, UiError> {
+        self.0.mark_recovery_commit(indeterminate_stage)
     }
 
     fn mark_indeterminate(

@@ -268,28 +268,40 @@ commit_may_have_started
   -> indeterminate                (every returned or lost Invoke outcome)
 
 indeterminate
+  -> indeterminate sequence 3    (sequence-2 stage-only recovery, durable before sole submit)
+
+indeterminate sequence 3
   -> human resolution only
 ```
 
-The absence of a ledger is the only automatically usable state. Before the
-first `SetValue`, `stage_may_have_started` must be durable. Immediately before
-the only `Invoke`, `commit_may_have_started` must be durable. After commit
-entry, no result automatically deletes the record, including an apparent echo.
-Stage may remove its record only after exact owned-value restoration and exact
-empty readback; a crash during removal is safe only because restoration was
-already proven.
+The absence of a ledger is the only normal write state. Before the first
+`SetValue`, `stage_may_have_started` must be durable. Immediately before the
+only submit, `commit_may_have_started` must be durable. After commit entry, no
+result automatically deletes the record, including an apparent echo. Stage may
+remove its record only after exact owned-value restoration and exact empty
+readback; a crash during removal is safe only because restoration was already
+proven.
 
-At startup or authorization, any present record—including a terminal marker—
-and every malformed, undecryptable, or unknown record refuses all Windows UI
-writes. `WAIT_ABANDONED` also
-refuses; the prior owner was required to write a pre-mutation record, so a
-present record preserves its uncertainty. There is no age-based expiry,
-garbage collection, automatic reset, or retry.
+There is one closed recovery edge for an `Indeterminate` sequence-2 record,
+which can arise only from the stage-only state machine and therefore precedes
+all submission code. A commit-mode recovery approval may enter it only from a
+nonempty, unfocused/inactive snapshot. The native transaction rechecks trust,
+target/window/composer identity, exact profile-normalized message, and the
+exact sequence-2 record; it performs no SetValue or clear. It consumes the
+one-shot approval and durably promotes the record to sequence 3 before the sole
+submit. Normal approvals never use this edge, and sequence 3 has no recovery
+or retry transition.
 
-A future recovery command must be separate from send, require a typed opaque
-correlation plus explicit human confirmation, expose no content, and only mark
-resolution. It cannot infer that a message was not sent and cannot run during
-ordinary CLI startup.
+Every present record other than the exact sequence-2 recovery case, plus every
+malformed, undecryptable, or unknown record, refuses all Windows UI writes.
+`WAIT_ABANDONED` also refuses; the prior owner was required to write a
+pre-mutation record, so a present record preserves its uncertainty. There is no
+age-based expiry, garbage collection, automatic reset, or retry.
+
+A future terminal-resolution command must be separate from send, require a
+typed opaque correlation plus explicit human confirmation, expose no content,
+and only mark human resolution. It cannot infer that a sequence-3 message was
+not sent and cannot run during ordinary CLI startup.
 
 ### Required synthetic tests
 
@@ -300,7 +312,8 @@ ordinary CLI startup.
 - mutex abandonment with each ledger state;
 - crash after SetValue entry and immediately before/after Invoke entry;
 - exact restored stage clears once; changed/unknown draft never clears;
-- process restart refuses every nonempty ledger state; and
+- process restart refuses every nonempty ledger state except the exact
+  sequence-2 recovery contract, which must promote once before submit; and
 - every journal/output/Debug path is canary-free and every uncertainty has
   `retry_safe=false`.
 

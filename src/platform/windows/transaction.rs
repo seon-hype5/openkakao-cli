@@ -114,6 +114,7 @@ pub(super) struct ExpectedState<'a> {
     pub(super) observed_at_unix_ms: u64,
     pub(super) expires_at_unix_ms: u64,
     pub(super) approved_at_unix_ms: u64,
+    pub(super) recover_indeterminate_stage: bool,
 }
 
 impl<'a> ExpectedState<'a> {
@@ -142,6 +143,7 @@ impl<'a> ExpectedState<'a> {
         }
 
         let snapshot = approved.snapshot();
+        let recover_indeterminate_stage = approved.recover_indeterminate_stage();
         if snapshot.app.platform != UiPlatform::Windows {
             return Err(error(
                 UiErrorKind::UnsupportedCapability,
@@ -258,7 +260,7 @@ impl<'a> ExpectedState<'a> {
                 "windows_approval_composer_writable",
             ));
         }
-        if !input.draft_empty {
+        if !input.draft_empty && !recover_indeterminate_stage {
             return Err(error(UiErrorKind::ExistingDraft, "windows_approval_draft"));
         }
         if input.focused {
@@ -295,6 +297,7 @@ impl<'a> ExpectedState<'a> {
             observed_at_unix_ms,
             expires_at_unix_ms,
             approved_at_unix_ms,
+            recover_indeterminate_stage,
         })
     }
 }
@@ -396,6 +399,15 @@ pub(super) fn run_commit<C: ExecutionClaim, P: MutationPort>(
     port: &mut P,
 ) -> Result<SendOutcome, UiError> {
     port.verify_executable_trust()?;
+    if expected.recover_indeterminate_stage {
+        let indeterminate_stage = port.recoverable_indeterminate_stage()?.ok_or_else(|| {
+            error(
+                UiErrorKind::ExistingDraft,
+                "windows_ledger_recovery_missing",
+            )
+        })?;
+        return run_recovered_commit(expected, message_utf16, claim, port, indeterminate_stage);
+    }
     port.ensure_clear()?;
     let before = port.observe(message_utf16)?;
     validate_fresh(expected, &before, DraftState::Empty, true)?;
@@ -481,6 +493,38 @@ fn run_commit_after_claim<P: MutationPort>(
         ));
     }
     match invoke_result {
+        Ok(Ok(())) => Ok(SendOutcome::CommitIssued),
+        Ok(Err(_)) | Err(_) => Err(error(
+            UiErrorKind::SubmissionUncertain,
+            "windows_commit_invoke_uncertain",
+        )),
+    }
+}
+
+fn run_recovered_commit<C: ExecutionClaim, P: MutationPort>(
+    expected: &ExpectedState<'_>,
+    message_utf16: &[u16],
+    claim: &C,
+    port: &mut P,
+    indeterminate_stage: LedgerRecord,
+) -> Result<SendOutcome, UiError> {
+    // Sequence-2 Indeterminate can arise only from StageMayHaveStarted. The
+    // stage-only state machine contains no submission call. Resume only when
+    // the complete fresh state proves that the exact profile-normalized value
+    // is still the newly approved message.
+    let staged = port.observe(message_utf16)?;
+    validate_fresh(expected, &staged, DraftState::ExactMessage, true)?;
+    claim.try_claim()?;
+
+    // Promote durably to sequence 3 before the final native preflight. Future
+    // processes can no longer classify this record as a recoverable stage, so
+    // the sole submission call below can never be retried automatically.
+    port.mark_recovery_commit(indeterminate_stage)?;
+    let submit_result = catch_unwind(AssertUnwindSafe(|| {
+        port.prepare_invoke()?;
+        port.invoke_verified()
+    }));
+    match submit_result {
         Ok(Ok(())) => Ok(SendOutcome::CommitIssued),
         Ok(Err(_)) | Err(_) => Err(error(
             UiErrorKind::SubmissionUncertain,
@@ -811,6 +855,10 @@ mod tests {
     }
 
     impl MutationLedger for FakePort {
+        fn recoverable_indeterminate_stage(&mut self) -> Result<Option<LedgerRecord>, UiError> {
+            self.ledger.recoverable_indeterminate_stage()
+        }
+
         fn ensure_clear(&mut self) -> Result<(), UiError> {
             self.events.push("ledger_preflight");
             self.ledger_preflight_calls += 1;
@@ -836,6 +884,14 @@ mod tests {
                 return Err(error);
             }
             self.ledger.mark_commit(stage)
+        }
+
+        fn mark_recovery_commit(
+            &mut self,
+            indeterminate_stage: LedgerRecord,
+        ) -> Result<LedgerRecord, UiError> {
+            self.events.push("ledger_recovery_commit");
+            self.ledger.mark_recovery_commit(indeterminate_stage)
         }
 
         fn mark_indeterminate(
@@ -927,7 +983,14 @@ mod tests {
             observed_at_unix_ms: 100,
             expires_at_unix_ms: 500,
             approved_at_unix_ms: 110,
+            recover_indeterminate_stage: false,
         }
+    }
+
+    fn recovery_expected() -> ExpectedState<'static> {
+        let mut expected = expected();
+        expected.recover_indeterminate_stage = true;
+        expected
     }
 
     fn valid(draft: DraftState) -> FreshState {
@@ -1337,6 +1400,63 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn recovered_stage_indeterminate_promotes_before_exactly_one_submit() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([valid(DraftState::ExactMessage)]);
+        let stage = port.ledger.begin_stage().unwrap();
+        port.ledger.mark_indeterminate(stage.correlation()).unwrap();
+
+        assert_eq!(
+            run_commit(&recovery_expected(), MESSAGE, &claim, &mut port).unwrap(),
+            SendOutcome::CommitIssued
+        );
+        assert_eq!(claim.calls.get(), 1);
+        assert_eq!(port.set_calls, 0);
+        assert_eq!(port.clear_calls, 0);
+        assert_eq!(port.invoke_calls, 1);
+        assert_eq!(
+            port.events,
+            [
+                "trust_preflight",
+                "observe",
+                "ledger_recovery_commit",
+                "prepare_invoke",
+                "invoke",
+            ]
+        );
+        assert!(port.ledger.recoverable_indeterminate_stage().is_err());
+    }
+
+    #[test]
+    fn normal_commit_never_resumes_a_recoverable_stage_record() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([]);
+        let stage = port.ledger.begin_stage().unwrap();
+        port.ledger.mark_indeterminate(stage.correlation()).unwrap();
+
+        let refusal = run_commit(&expected(), MESSAGE, &claim, &mut port).unwrap_err();
+
+        assert_eq!(refusal.operation, "windows_ledger_existing");
+        assert_eq!(claim.calls.get(), 0);
+        assert_eq!(port.observe_calls, 0);
+        port.assert_no_mutation();
+    }
+
+    #[test]
+    fn recovery_approval_without_the_exact_stage_record_never_observes_or_mutates() {
+        let claim = FakeClaim::accepting();
+        let mut port = FakePort::with_states([]);
+
+        let refusal = run_commit(&recovery_expected(), MESSAGE, &claim, &mut port).unwrap_err();
+
+        assert_eq!(refusal.kind, UiErrorKind::ExistingDraft);
+        assert_eq!(refusal.operation, "windows_ledger_recovery_missing");
+        assert_eq!(claim.calls.get(), 0);
+        assert_eq!(port.observe_calls, 0);
+        port.assert_no_mutation();
     }
 
     #[test]

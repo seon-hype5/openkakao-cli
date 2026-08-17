@@ -170,8 +170,8 @@ combinations cannot be represented. Neither `TargetEvidence` nor
 `NativeMutationPort` retains the label. The same four-way conjunction gates
 draft Value access and the final preflight before `SetValue` or `Invoke`.
 
-The current profile now has an unqualified privacy-bounded candidate. Only a
-target-bound inspection with exactly one configured allowlist entry can read
+The current profile has a privacy-bounded target path. Only a target-bound
+inspection with exactly one configured allowlist entry can read
 the selected root's `CurrentName`. The BSTR remains UTF-16, is never decoded or
 formatted, and is scrubbed before the root/automation interfaces are released.
 The process instance, exact root, modal state, and exact v2 composer are checked
@@ -188,11 +188,24 @@ observation rebinds it after the draft bit changes. The mutation observer and
 final preflight bracket their Value reads, and SetValue/Invoke entry repeats the
 Name check through the approval-owned permit.
 
+For this exact profile, an empty composer may expose a UI-chrome placeholder as
+provider Value. The boundary accepts empty only when a bounded native
+`WM_GETTEXTLENGTH` query returns zero or the scrubbed UTF-16 Value matches the
+source-static domain-separated placeholder digest. SetValue ownership accepts
+only the exact requested UTF-16 value or that value plus one provider carriage
+return; control characters are forbidden in authorized messages. No content,
+length-derived text, or digest input is emitted.
+
+Raw exact-class enumeration may include helper windows. Mutation observation
+and final preflight require exactly one raw HWND to match both the approved PID
+and run-scoped window fingerprint. Zero or multiple matches refuse; unrelated
+helpers cannot become the target or dilute the target permit.
+
 Pure synthetic tests exercise every closed target state, mismatches, state
-movement, and draft-read authorization. The required 20 separately opened
-positive observations and the full matrix—including a deliberately colliding
-same-display-name non-self chat—have not run, so this candidate authorizes no
-`send_open_chat`, stage, commit, or message send.
+movement, draft-read authorization, placeholder/normalized readback, and raw
+helper-window selection. General activation still requires the remaining
+positive/negative live matrix—including a deliberately colliding same-display-
+name non-self chat—and a fresh one-shot approval.
 The two Name observations do not make the Value read atomic with room identity:
 an away-and-back transition between them is not observable. A stronger native
 identity/navigation invariant or explicit proof that this transition cannot
@@ -200,21 +213,27 @@ occur remains an activation blocker.
 
 ## Durable ledger boundary
 
-Offline location status: the fixed current-user known-folder, source and
+Implemented location status: the fixed current-user known-folder, source and
 canonical parent-chain no-reparse, volume-GUID/fixed-local,
 retained-base-handle, and fixed child-directory protocol below is implemented.
 `NativeMutationPort` references it only through a lazy factory. Port
 construction performs no I/O, transaction ordering checks executable trust
 before the first ledger method, and the accepted x64 trust profile is exact.
-No valid production approval can yet be created because the self-target
-candidate remains unqualified and the backend reports `send_open_chat=false`.
-Consequently tests and current reachable production flows never call the
-ledger's `SHGetKnownFolderPath` or write real LocalAppData.
+The default build remains read-only. The default-off write build can open this
+store only after runtime opt-in and policy approval.
 
 The factory is consumed before its first open attempt. An error or unwind can
 never trigger an automatic second attempt in the same transaction object and
 maps to fixed `SubmissionUncertain` / `windows_ledger_state_uncertain` with
 `retry_safe=false`.
+
+An `Indeterminate` sequence-2 record is the only recoverable shape because it
+can arise only from `StageMayHaveStarted`; stage-only contains no submit call.
+A recovery-marked commit must prove the exact live message and all fresh
+target/window/composer/trust/inactivity gates, then durably promote the record
+to terminal sequence 3 before one submit. It performs no SetValue or clear.
+Normal approvals, every other record shape, and every sequence-3 record fail
+closed without a retry edge.
 
 ### Fixed location and bounds
 
