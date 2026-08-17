@@ -1,0 +1,45 @@
+name: Windows KakaoTalk x64 artifact qualification
+
+on:
+  push:
+    branches:
+      - "integration/windows-mvp"
+    paths:
+      - "scripts/qualify-windows-kakao-x64-artifact.ps1"
+      - ".github/workflows/windows-kakao-x64-artifact-qualification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-kakao-x64-artifact-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    if: >-
+      github.repository == 'seon-hype5/openkakao-cli' &&
+      github.ref == 'refs/heads/integration/windows-mvp'
+    name: ${{ matrix.install_mode }} install behavior
+    runs-on: windows-2022
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        install_mode:
+          - Default
+          - Override
+
+    steps:
+      - name: Checkout source without credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Qualify pinned public artifact without launching KakaoTalk
+        shell: pwsh
+        run: ./scripts/qualify-windows-kakao-x64-artifact.ps1 -InstallMode '${{ matrix.install_mode }}'
+
+      # This workflow deliberately uploads nothing. Its log contains only
+      # reviewed public artifact facts and portable root-relation evidence.

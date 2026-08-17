@@ -11,7 +11,9 @@ on:
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
       - "scripts/qualify-windows-trust-assumptions.ps1"
+      - "scripts/qualify-windows-kakao-x64-artifact.ps1"
       - ".github/workflows/windows.yml"
+      - ".github/workflows/windows-kakao-x64-artifact-qualification.yml"
       - ".github/workflows/openkakao-cli-ci.yml"
       - "docs/windows-port/**"
   pull_request:
@@ -24,7 +26,9 @@ on:
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
       - "scripts/qualify-windows-trust-assumptions.ps1"
+      - "scripts/qualify-windows-kakao-x64-artifact.ps1"
       - ".github/workflows/windows.yml"
+      - ".github/workflows/windows-kakao-x64-artifact-qualification.yml"
       - ".github/workflows/openkakao-cli-ci.yml"
       - "docs/windows-port/**"
   workflow_dispatch:
@@ -65,7 +69,13 @@ jobs:
           $documentationRoot = Join-Path $repositoryRoot "docs/windows-port"
           $workflowPaths = @(
             (Join-Path $repositoryRoot ".github/workflows/windows.yml"),
+            (Join-Path $repositoryRoot ".github/workflows/windows-kakao-x64-artifact-qualification.yml"),
             (Join-Path $repositoryRoot ".github/workflows/openkakao-cli-ci.yml")
+          )
+          $powerShellPaths = @(
+            (Join-Path $repositoryRoot "scripts/build-windows-authenticode-fixture.ps1"),
+            (Join-Path $repositoryRoot "scripts/qualify-windows-trust-assumptions.ps1"),
+            (Join-Path $repositoryRoot "scripts/qualify-windows-kakao-x64-artifact.ps1")
           )
           $toolchainPath = Join-Path $repositoryRoot "rust-toolchain.toml"
           $markdownFiles = @(Get-ChildItem -LiteralPath $documentationRoot -Recurse -File -Filter "*.md")
@@ -117,6 +127,19 @@ jobs:
           }
           if ($thirdPartyActionCount -eq 0) {
             throw "no third-party action references found"
+          }
+
+          foreach ($powerShellPath in $powerShellPaths) {
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $powerShellPath,
+              [ref]$tokens,
+              [ref]$parseErrors)
+            if ($parseErrors.Count -ne 0) {
+              $relativeScript = [System.IO.Path]::GetRelativePath($repositoryRoot, $powerShellPath)
+              throw "PowerShell parse failure in ${relativeScript}"
+            }
           }
 
           $toolchainPinned = Select-String -LiteralPath $toolchainPath -Pattern '^channel = "1\.95\.0"$' -Quiet
