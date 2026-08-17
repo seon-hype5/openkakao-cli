@@ -108,7 +108,7 @@ pub(super) fn inspect(
     await_inspection_permit(thread_id)?;
 
     let inspection = (|| {
-        let windows = enumerate_top_level_windows()?;
+        let windows = enumerate_read_only_top_level_windows()?;
 
         let window = match windows.len() {
             0 => WindowDiscovery::Absent,
@@ -239,12 +239,30 @@ impl Drop for ComApartment {
 struct EnumContext {
     handles: Vec<HWND>,
     callback_panicked: bool,
+    scope: WindowEnumerationScope,
 }
 
-fn enumerate_top_level_windows() -> Result<Vec<HWND>, UiError> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowEnumerationScope {
+    ReadOnlyVisible,
+    #[cfg(any(feature = "windows-ui-write", test))]
+    RawExactClass,
+}
+
+fn enumerate_read_only_top_level_windows() -> Result<Vec<HWND>, UiError> {
+    enumerate_top_level_windows(WindowEnumerationScope::ReadOnlyVisible)
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn enumerate_raw_top_level_windows() -> Result<Vec<HWND>, UiError> {
+    enumerate_top_level_windows(WindowEnumerationScope::RawExactClass)
+}
+
+fn enumerate_top_level_windows(scope: WindowEnumerationScope) -> Result<Vec<HWND>, UiError> {
     let mut context = EnumContext {
         handles: Vec::new(),
         callback_panicked: false,
+        scope,
     };
     let context_ptr = ptr::from_mut(&mut context);
 
@@ -280,7 +298,16 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
         // SAFETY: see the callback lifetime invariant above. EnumWindows is
         // synchronous and does not invoke this callback concurrently.
         let context = unsafe { &mut *context_ptr };
-        if window_has_exact_class(hwnd) {
+        let exact_class = window_has_exact_class(hwnd);
+        let visible = if exact_class && context.scope == WindowEnumerationScope::ReadOnlyVisible {
+            // SAFETY: `hwnd` is borrowed from EnumWindows for this synchronous
+            // callback. IsWindowVisible is a read-only state query and neither
+            // activates nor reorders the window.
+            unsafe { IsWindowVisible(hwnd).as_bool() }
+        } else {
+            false
+        };
+        if window_matches_enumeration_scope(context.scope, exact_class, visible) {
             context.handles.push(hwnd);
         }
     }));
@@ -291,6 +318,18 @@ unsafe extern "system" fn enum_window_callback(hwnd: HWND, lparam: LPARAM) -> BO
         BOOL(0)
     } else {
         BOOL(1)
+    }
+}
+
+const fn window_matches_enumeration_scope(
+    scope: WindowEnumerationScope,
+    exact_class: bool,
+    visible: bool,
+) -> bool {
+    match scope {
+        WindowEnumerationScope::ReadOnlyVisible => exact_class && visible,
+        #[cfg(any(feature = "windows-ui-write", test))]
+        WindowEnumerationScope::RawExactClass => exact_class,
     }
 }
 
@@ -1267,7 +1306,7 @@ impl<'operation> NativeMutationPort<'operation> {
             )
         })?;
 
-        let windows = enumerate_top_level_windows()?;
+        let windows = enumerate_raw_top_level_windows()?;
         if windows.len() != 1 || windows[0] != identity.hwnd {
             return Err(stale_window_error());
         }
@@ -1360,7 +1399,7 @@ impl<'operation> NativeMutationPort<'operation> {
 #[cfg(feature = "windows-ui-write")]
 impl ExecutableTrustBoundary for NativeMutationPort<'_> {
     fn verify_executable_trust(&mut self) -> Result<(), UiError> {
-        let windows = enumerate_top_level_windows()?;
+        let windows = enumerate_raw_top_level_windows()?;
         if windows.len() != 1 || !window_has_exact_class(windows[0]) {
             return Err(stale_window_error());
         }
@@ -1421,7 +1460,7 @@ impl MutationPort for NativeMutationPort<'_> {
         self.prepared = PreparedMutation::None;
 
         let now_unix_ms = unix_now_ms();
-        let windows = enumerate_top_level_windows()?;
+        let windows = enumerate_raw_top_level_windows()?;
         let mut fresh = FreshState::unavailable(now_unix_ms, windows.len());
         if windows.len() != 1 {
             return Ok(fresh);
@@ -2010,6 +2049,33 @@ mod tests {
         assert!(cancellation_error_is_terminal(RPC_E_CALL_CANCELED));
         assert!(!cancellation_error_is_terminal(E_ACCESSDENIED));
         assert!(!cancellation_error_is_terminal(HRESULT(0)));
+    }
+
+    #[test]
+    fn read_only_enumeration_ignores_hidden_windows_without_weakening_raw_scope() {
+        for (exact_class, visible, expected_read_only, expected_raw) in [
+            (false, false, false, false),
+            (false, true, false, false),
+            (true, false, false, true),
+            (true, true, true, true),
+        ] {
+            assert_eq!(
+                window_matches_enumeration_scope(
+                    WindowEnumerationScope::ReadOnlyVisible,
+                    exact_class,
+                    visible,
+                ),
+                expected_read_only
+            );
+            assert_eq!(
+                window_matches_enumeration_scope(
+                    WindowEnumerationScope::RawExactClass,
+                    exact_class,
+                    visible,
+                ),
+                expected_raw
+            );
+        }
     }
 
     #[test]

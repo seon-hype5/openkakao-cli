@@ -688,3 +688,24 @@ Profile acceptance authorizes source-static executable/signer/root values and
 native trust wiring only. It leaves `send_open_chat=false`, self-target and
 submit selectors unconfigured, and every L10-L40 live gate separately
 unauthorized.
+
+## ADR-047: Ignore invisible exact-class windows only in read-only discovery
+
+`EnumWindows` can report invisible helper or parking windows that share
+KakaoTalk's exact top-level class. An invisible window cannot satisfy the
+existing visible-target gate, but counting it in read-only discovery can either
+consume the eight-candidate ceiling or produce `NotInspected`, which makes an
+otherwise unique composer-bearing window ambiguous.
+
+Give native enumeration two explicit scopes. Read-only doctor discovery keeps
+only visible exact-class windows before applying the existing bounded composer
+narrowing. Every mutation preflight continues to use raw exact-class
+enumeration and require exactly one raw top-level window. A pure four-case
+classifier test freezes the class/visibility matrix for both scopes so a future
+refactor cannot silently weaken the mutation boundary.
+
+This change reads only `IsWindowVisible`, never activates or reorders a window,
+does not establish self-chat identity, and does not add a submit selector or
+send capability. The two failed L10 sessions retained no raw count, so this is
+a conservative remediation of a source-level false-ambiguity class rather than
+a claimed live root cause. It authorizes no L10 retry or later gate.

@@ -22,10 +22,10 @@ cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-`L10` was subsequently approved for one read-only session and attempted once;
-it failed closed and is not complete. Not completed or authorized now: a new
-`L10` attempt, `L20`, `L30`, `L40`, and final post-live task `R00`. A green I20
-does not carry authority into any live gate.
+`L10` was subsequently approved and attempted in two separate read-only
+sessions; both failed closed and it is not complete. Not completed or
+authorized now: a new `L10` attempt, `L20`, `L30`, `L40`, and final post-live
+task `R00`. A green I20 does not carry authority into any live gate.
 
 The requested topology was used: root plus Child A/B/C, with isolated
 worktrees and no child subdelegation. Rust builds were kept within the stated
@@ -109,11 +109,26 @@ No retry, weaker selector, alternate live probe, stage, or commit followed the
 failure. The troubleshooting runbook permits only offline source/synthetic
 work now. L20 is blocked.
 
+### Later L10 retry at the accepted x64 profile
+
+After the x64 executable-trust profile and its hosted qualification were
+accepted, the user granted a fresh one-session L10 approval and manually kept
+the intended self-chat open. Root ran exactly one release-build
+`doctor --ui --json` against `4084687`. It exited 0 with the fixed redacted
+schema, `ui_profile=null`, `attempted=false`, and `not_submitted`; the evidence
+included the fixed `top_level_window_ambiguous` and
+`composer_fingerprint_not_observed` codes. No title, room/profile label,
+composer value, HWND, PID, or private content was emitted.
+
+Selector ambiguity is an L10 abort condition, so no dry-run, retry, weaker
+matching, focus, input, clipboard operation, stage, or commit followed in that
+session. This second failure supplied no authority for another live attempt.
+
 ## Offline remediation after the failed L10
 
-The failed session retained only fixed booleans, so it did not preserve a raw
-window count and does not prove a root cause. Offline source review identified
-a conservative failure class: the read-only backend previously returned
+The failed sessions retained only fixed booleans, so they did not preserve a
+raw window count and do not prove a root cause. Offline source review identified
+conservative failure classes. The read-only backend originally returned
 ambiguous as soon as more than one exact `EVA_Window_Dblclk` window existed,
 before determining whether only one contained the exact known-profile
 composer.
@@ -125,6 +140,17 @@ other candidate has none. Duplicate composers, an internally ambiguous
 composer, too many windows, or any native/UIA inspection error still fail
 closed. Synthetic tests cover the unique, duplicate, internally ambiguous,
 unsupported, and absent-composer shapes.
+
+A later audit found one remaining contradiction in that read-only path:
+`EnumWindows` can return invisible exact-class helper or parking windows, while
+an invisible window can never satisfy the existing visible-target gate. Such a
+window was nevertheless counted toward the eight-candidate ceiling or mapped
+to `NotInspected`, which forces ambiguity. The next offline successor therefore
+excludes invisible windows only when constructing the read-only candidate set.
+The mutation path retains a separate raw exact-class enumeration and still
+requires exactly one raw top-level window. A pure four-case test freezes both
+scopes. This is a conservative source diagnosis, not proof that an invisible
+window caused either observed failure.
 
 This is not a self-chat selector and does not authorize a live retry. All
 target-identity booleans remain false, `send_open_chat` remains false, and the
