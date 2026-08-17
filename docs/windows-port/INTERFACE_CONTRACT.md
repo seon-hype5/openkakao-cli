@@ -180,8 +180,8 @@ exit 21 and override any incorrectly supplied retry flag.
 Once the first `SetValue` method is entered, every error or panic through
 readback, validation, clear, restore, or commit preparation is non-retryable
 uncertainty. Once submit is entered, every returned error or panic is
-submission uncertainty. Profile v3 focuses the exact target/composer, repeats
-the foreground/focus/draft proof, and queues one Enter keydown/key-up pair to
+submission uncertainty. Profile v3 activates the exact top-level target,
+repeats the root-normalized foreground/composer/draft proof, and queues one Enter keydown/key-up pair to
 that exact composer HWND. There is no global input or automatic retry.
 
 A commit approval derived from a nonempty snapshot is marked for stage-only

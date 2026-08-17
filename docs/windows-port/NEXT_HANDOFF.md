@@ -6,8 +6,8 @@ Date: 2026-08-17 KST
 > visible but no message appeared in the self-chat. The earlier
 > `commit_issued` result was therefore a failed submit, and the post-call two
 > carriage returns prove only local composer state. ADR-056/profile v3 replaces
-> direct `SendMessageTimeoutW` with exact-target activation, exact-composer
-> focus, a repeated foreground/focus/draft proof, and one target-queued Enter
+> direct `SendMessageTimeoutW` with exact-top-level-target activation, a
+> repeated root-normalized foreground/composer/draft proof, and one target-queued Enter
 > keydown/key-up pair. No global input or automatic retry is introduced.
 
 > Historical v2 update: a metadata-only live selector measurement found

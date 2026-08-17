@@ -53,10 +53,11 @@ static READ_ONLY_PROBE_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SubmitStrategy {
-    /// KakaoTalk 26.7 exposes no separate send element or InvokePattern. Focus
-    /// the exact verified composer, then enqueue one complete Enter keystroke
-    /// to that HWND's owning thread without synthesizing global keyboard input.
-    FocusedQueuedComposerEnterV2,
+    /// KakaoTalk 26.7 exposes no separate send element or InvokePattern.
+    /// Activate the exact verified root, then enqueue one complete Enter
+    /// keystroke to the exact composer HWND's owning thread without
+    /// synthesizing global keyboard input.
+    ForegroundQueuedComposerEnterV3,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -147,7 +148,7 @@ const KNOWN_PROFILE: UiProfile = UiProfile {
     empty_placeholder_utf16_sha256: KNOWN_EMPTY_PLACEHOLDER_UTF16_SHA256,
     empty_control_utf16: [0x000D, 0x000D],
     set_value_appends_carriage_return: true,
-    submit_strategy: Some(SubmitStrategy::FocusedQueuedComposerEnterV2),
+    submit_strategy: Some(SubmitStrategy::ForegroundQueuedComposerEnterV3),
 };
 
 fn profile_for(version: Option<FileVersion>) -> Option<&'static UiProfile> {

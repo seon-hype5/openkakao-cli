@@ -170,11 +170,11 @@ AutomationId, Document control type, native HWND/PID, bounded ancestry,
 enabled/writable state, and executable profile.
 
 After all normal target, draft, activity, modal, mutex, deadline, approval, and
-ledger checks, profile v3 activates the exact target, focuses the exact
-composer, repeats the foreground/focus/draft/target proof, and queues
+ledger checks, profile v3 activates the exact top-level target, repeats the
+root-normalized foreground/composer/draft/target proof, and queues
 `WM_KEYDOWN/VK_RETURN` plus its matching `WM_KEYUP` to that composer HWND.
 Zero or multiple composers, an unreadable property, provider timeout, process
-replacement, selector drift, focus mismatch, or failed enqueue is terminal
+replacement, selector drift, foreground mismatch, or failed enqueue is terminal
 refusal/uncertainty. There is no global key input, clipboard, hit-test,
 coordinate, default-button fallback, or retry.
 

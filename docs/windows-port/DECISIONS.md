@@ -923,7 +923,7 @@ direct-dispatch attempt as a failed submit, not merely unverified delivery. The
 two-carriage-return provider value proves only local composer state and must
 never be used as delivery evidence.
 
-## ADR-056: Replace direct Enter dispatch with focused queued input
+## ADR-056: Replace direct Enter dispatch with foreground-targeted queued input
 
 `SendMessageTimeoutW` invokes the composer window procedure directly and
 bypasses the owning thread's normal queued-input path. Windows translates a
@@ -933,16 +933,24 @@ therefore consistent with the direct call bypassing KakaoTalk's send handler.
 
 Bump the combined selector/submit profile to v3 and remove
 `ComposerEnterMessageV1`. After the existing unfocused/background preflight and
-durable commit transition, activate only the exact approved top-level HWND and
-call UIA `SetFocus` on the exact composer. Before enqueueing anything, repeat
-the process/window/modal/target/draft proof and additionally require the
-foreground HWND's `GA_ROOT` to equal that exact top-level window and that exact
-composer to own keyboard focus. Then enqueue one complete Enter
-press—`WM_KEYDOWN/VK_RETURN` followed by
-the matching `WM_KEYUP`—to the exact composer HWND with `PostMessageW`.
+durable commit transition, activate only the exact approved top-level HWND.
+Before enqueueing anything, repeat the process/window/modal/target/draft proof
+and additionally require the foreground HWND's `GA_ROOT` to equal that exact
+top-level window. Then enqueue one complete Enter press—`WM_KEYDOWN/VK_RETURN`
+followed by the matching `WM_KEYUP`—to the exact composer HWND with
+`PostMessageW`.
 
-This strategy deliberately changes target focus but never synthesizes global
-input, uses coordinates, touches the clipboard, or posts to a thread or HWND
+The live provider returned success from UIA `SetFocus`, but both
+`GetGUIThreadInfo` and `CurrentHasKeyboardFocus` remained false. Attaching the
+input queues and calling native `SetActiveWindow`/`SetFocus` also left
+`hwndFocus` null. Composer focus is therefore not a usable precondition on this
+version. A separately bounded manual continuation verified the exact owned
+draft in memory, activated the exact root, queued one keydown/key-up pair to the
+sole exact composer, and observed the composer return to the profile's empty
+state. Delivery still requires the user's visual confirmation.
+
+This strategy deliberately activates the exact target but never synthesizes
+global input, uses coordinates, touches the clipboard, or posts to a thread or HWND
 selected after approval. A failed first enqueue and a failed key-up after a
 successful keydown are both terminal submission uncertainty. There is no
 automatic retry. The old sequence-3 ledger remains evidence for the failed v1

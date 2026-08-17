@@ -29,8 +29,8 @@
 > contains an experimental profile-v3 self-chat sender, but it has not completed
 > the full live activation matrix and is not a generally supported capability.
 > It uses no KakaoTalk database, credential, clipboard, or global synthetic-key
-> input; immediately before submit it focuses only the verified KakaoTalk target
-> and composer. See the
+> input; immediately before submit it activates only the verified KakaoTalk
+> top-level target. See the
 > [Windows architecture](docs/windows-port/ARCHITECTURE.md) and
 > [current handoff](docs/windows-port/NEXT_HANDOFF.md).
 

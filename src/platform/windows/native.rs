@@ -4,9 +4,9 @@
 //! binding and reduces it to an empty/nonempty bit; the private BSTR is scrubbed
 //! in place. Inspection never mutates UI state. Production SetValue and the
 //! single profile-bound submit call exist only with the `windows-ui-write`
-//! build feature and behind the transaction state machine. Submission focuses
-//! the exact composer and enqueues one complete Enter keystroke to its owning
-//! thread; it never synthesizes global keyboard input or touches the clipboard.
+//! build feature and behind the transaction state machine. Submission activates
+//! the exact top-level target and enqueues one complete Enter keystroke to the
+//! exact composer's owning thread; it never synthesizes global keyboard input or touches the clipboard.
 //! COM objects stay on the dedicated MTA thread that created them.
 
 use std::ffi::{c_void, OsStr, OsString};
@@ -1716,9 +1716,9 @@ enum PreparedMutation {
 
 #[cfg(feature = "windows-ui-write")]
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum SubmissionFocus {
+enum SubmissionContext {
     UnfocusedBackground,
-    FocusedForeground,
+    ForegroundTarget,
 }
 
 #[cfg(feature = "windows-ui-write")]
@@ -1767,17 +1767,17 @@ impl<'operation> NativeMutationPort<'operation> {
     }
 
     fn revalidate_before_mutation(&self, required_draft: DraftState) -> Result<(), UiError> {
-        self.revalidate_mutation_state(required_draft, SubmissionFocus::UnfocusedBackground)
+        self.revalidate_mutation_state(required_draft, SubmissionContext::UnfocusedBackground)
     }
 
-    fn revalidate_focused_submission(&self, required_draft: DraftState) -> Result<(), UiError> {
-        self.revalidate_mutation_state(required_draft, SubmissionFocus::FocusedForeground)
+    fn revalidate_foreground_submission(&self, required_draft: DraftState) -> Result<(), UiError> {
+        self.revalidate_mutation_state(required_draft, SubmissionContext::ForegroundTarget)
     }
 
     fn revalidate_mutation_state(
         &self,
         required_draft: DraftState,
-        submission_focus: SubmissionFocus,
+        submission_context: SubmissionContext,
     ) -> Result<(), UiError> {
         ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
         let identity = self.identity.as_ref().ok_or_else(|| {
@@ -1804,8 +1804,8 @@ impl<'operation> NativeMutationPort<'operation> {
             return Err(stale_window_error());
         }
         ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
-        match submission_focus {
-            SubmissionFocus::UnfocusedBackground => {
+        match submission_context {
+            SubmissionContext::UnfocusedBackground => {
                 if foreground_indicates_user_activity(identity.hwnd, identity.pid)? {
                     return Err(UiError::new(
                         UiErrorKind::UserActive,
@@ -1813,10 +1813,10 @@ impl<'operation> NativeMutationPort<'operation> {
                     ));
                 }
             }
-            SubmissionFocus::FocusedForeground => {
-                // SAFETY: these are read-only queries. UIA focus may make the
-                // child composer the foreground HWND, so normalize it to its
-                // top-level root before comparing it with the approved root.
+            SubmissionContext::ForegroundTarget => {
+                // SAFETY: these are read-only queries. Windows may report a
+                // child HWND as foreground, so normalize it to its top-level
+                // root before comparing it with the approved root.
                 let foreground = unsafe { GetForegroundWindow() };
                 if foreground.0.is_null()
                     || unsafe { GetAncestor(foreground, GA_ROOT) } != identity.hwnd
@@ -1880,20 +1880,11 @@ impl<'operation> NativeMutationPort<'operation> {
                 "windows_mutation_composer_writable",
             ));
         }
-        match (submission_focus, focused) {
-            (SubmissionFocus::UnfocusedBackground, true) => {
-                return Err(UiError::new(
-                    UiErrorKind::UserActive,
-                    "windows_mutation_composer_focus",
-                ));
-            }
-            (SubmissionFocus::FocusedForeground, false) => {
-                return Err(UiError::new(
-                    UiErrorKind::UserActive,
-                    "windows_mutation_submit_focus",
-                ));
-            }
-            _ => {}
+        if submission_context == SubmissionContext::UnfocusedBackground && focused {
+            return Err(UiError::new(
+                UiErrorKind::UserActive,
+                "windows_mutation_composer_focus",
+            ));
         }
 
         // Bracket CurrentValue with two independent scrub-on-drop root-Name
@@ -2092,8 +2083,8 @@ impl MutationPort for NativeMutationPort<'_> {
 
         self.submit_strategy = profile.submit_strategy;
         fresh.commit_selector = match self.submit_strategy {
-            Some(SubmitStrategy::FocusedQueuedComposerEnterV2) => {
-                CommitSelectorState::UniqueFocusedQueuedComposerEnter
+            Some(SubmitStrategy::ForegroundQueuedComposerEnterV3) => {
+                CommitSelectorState::UniqueForegroundQueuedComposerEnter
             }
             None => CommitSelectorState::Unconfigured,
         };
@@ -2215,17 +2206,11 @@ impl MutationPort for NativeMutationPort<'_> {
                 .map_err(|error| map_windows_error(error, "windows_commit_invoke"));
         }
         match submit_strategy {
-            Some(SubmitStrategy::FocusedQueuedComposerEnterV2) => {
+            Some(SubmitStrategy::ForegroundQueuedComposerEnterV3) => {
                 let top_level_hwnd = identity.hwnd;
                 let composer_hwnd = identity.composer_hwnd;
-                let element = self.composer_element.as_ref().ok_or_else(|| {
-                    UiError::new(
-                        UiErrorKind::ComposerNotFound,
-                        "windows_mutation_composer_missing",
-                    )
-                })?;
-                focus_profile_bound_composer(top_level_hwnd, element)?;
-                self.revalidate_focused_submission(DraftState::ExactMessage)?;
+                activate_profile_bound_target(top_level_hwnd);
+                self.revalidate_foreground_submission(DraftState::ExactMessage)?;
                 queue_profile_bound_composer_enter(composer_hwnd)
             }
             None => Err(UiError::new(
@@ -2237,27 +2222,19 @@ impl MutationPort for NativeMutationPort<'_> {
 }
 
 #[cfg(feature = "windows-ui-write")]
-fn focus_profile_bound_composer(
-    top_level_hwnd: HWND,
-    composer: &IUIAutomationElement,
-) -> Result<(), UiError> {
+fn activate_profile_bound_target(top_level_hwnd: HWND) {
     // SAFETY: the top-level HWND was freshly revalidated as the exact approved
-    // KakaoTalk target. The return value is only advisory: UIA SetFocus may
-    // complete activation itself, and the next full revalidation requires the
-    // exact top-level/composer foreground-focus pair before any enqueue.
+    // KakaoTalk target. The return value is only advisory: activation may
+    // complete asynchronously, and the next full revalidation requires the
+    // foreground HWND's top-level root to equal this exact approved root.
     let _ = unsafe { SetForegroundWindow(top_level_hwnd) };
-    // SAFETY: this exact UIA element was opened and identity-checked in the
-    // current MTA apartment. The focused-state proof is repeated immediately
-    // afterward by `revalidate_focused_submission`.
-    unsafe { composer.SetFocus() }
-        .map_err(|error| map_windows_error(error, "windows_commit_focus_composer"))
 }
 
 #[cfg(feature = "windows-ui-write")]
 fn queue_profile_bound_composer_enter(composer_hwnd: HWND) -> Result<(), UiError> {
     queue_profile_bound_composer_enter_with(composer_hwnd, |hwnd, message, wparam, lparam| {
         // SAFETY: the caller established that `hwnd` is the freshly
-        // revalidated, focused composer. PostMessageW copies these scalar
+        // revalidated composer under the exact foreground root. PostMessageW copies these scalar
         // system-message parameters into that HWND's owning thread queue.
         unsafe { PostMessageW(Some(hwnd), message, wparam, lparam) }.is_ok()
     })
@@ -2274,8 +2251,8 @@ fn queue_profile_bound_composer_enter_with(
     const ENTER_KEYUP_LPARAM: isize =
         1 | (RETURN_SCAN_CODE << 16) | (1_isize << 30) | (1_isize << 31);
 
-    // `composer_hwnd` was freshly revalidated as the exact focused
-    // RICHEDIT50W/1006 Document composer. Queueing, unlike SendMessageTimeoutW,
+    // `composer_hwnd` was freshly revalidated as the exact RICHEDIT50W/1006
+    // Document composer under the exact foreground root. Queueing, unlike SendMessageTimeoutW,
     // lets KakaoTalk's message loop translate and filter the keystroke before
     // dispatch. The pair models one complete Enter press without global input.
     let keydown_enqueued = enqueue(

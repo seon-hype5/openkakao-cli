@@ -17,8 +17,8 @@ approved sessions. It never means sending a batch in one session.
 - The full adversarial refusal matrix is green with zero mutation calls on
   every refusal path.
 - The reviewed v3 profile supports exactly one composer-targeted queued Enter
-  keydown/key-up pair after exact target activation, composer focus, and a
-  repeated foreground/focus/draft proof. Global key input, fallback controls,
+  keydown/key-up pair after exact top-level-target activation and a repeated
+  root-normalized foreground/composer/draft proof. Global key input, fallback controls,
   and retry remain forbidden.
 - Cross-process mutual exclusion, one-shot nonce consumption, snapshot TTL,
   user-activity detection, exact staged readback, and the accepted durable
@@ -35,7 +35,7 @@ Immediately after approval and immediately before commit, root must prove:
 - unchanged process, session, executable fingerprint, and top-level window;
 - unchanged exact unique self-chat and composer fingerprints;
 - exact staged canary and no other draft content;
-- no modal or user activity before the deliberate v3 focus transition;
+- no modal or user activity before the deliberate v3 target activation;
 - unexpired snapshot and held cross-process mutex; and
 - unused one-shot nonce.
 

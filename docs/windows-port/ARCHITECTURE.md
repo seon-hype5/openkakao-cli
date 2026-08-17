@@ -5,16 +5,16 @@
 The Windows release-candidate path is a fail-closed, UI-only integration for
 an already-open KakaoTalk self-chat. It does not log in, access KakaoTalk files
 or databases, inspect process memory, select or open rooms, synthesize global
-keys, or use the clipboard. The v3 submit strategy deliberately focuses only
-the already verified target/composer immediately before targeted queue input.
+keys, or use the clipboard. The v3 submit strategy deliberately activates only
+the already verified top-level target immediately before targeted queue input.
 
 The default build excludes native UI write call sites and remains read-only.
 The default-off `windows-ui-write` build exposes a guarded send capability for
 the exact known executable/UI profile. KakaoTalk `26.7.0.5255` exposes no
-separate send element or InvokePattern, so that profile v3 focuses the freshly
-revalidated composer and queues one complete Enter press to that exact HWND's
-owning thread. Runtime opt-in and every policy/transaction gate remain
-mandatory.
+separate send element or InvokePattern, so that profile v3 activates the
+freshly revalidated top-level target and queues one complete Enter press to the
+exact composer HWND's owning thread. Runtime opt-in and every
+policy/transaction gate remain mandatory.
 
 ```text
 Windows CLI / redacted output
@@ -224,8 +224,8 @@ Stage-only is designed as:
 If user activity changes the value, the transaction never clears the mixed or
 unknown draft. Commit performs the same preparation, requires the exact
 profile-bound submit strategy, and makes at most one submit call. The current
-profile activates the exact top-level target, focuses the exact composer, fully
-revalidates the resulting root-normalized foreground/focus pair and exact draft, then queues
+profile activates the exact top-level target, fully revalidates the resulting
+root-normalized foreground target and exact composer/draft, then queues
 `WM_KEYDOWN/VK_RETURN` followed by the matching `WM_KEYUP` to that composer.
 This enters KakaoTalk's normal message loop without synthesizing global input.
 Every failure or panic after queueing begins is `SubmissionUncertain` with

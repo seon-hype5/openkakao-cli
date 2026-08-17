@@ -43,7 +43,7 @@ allowlist-ordering, and CI allowlist findings.
   bounded/redacted/zeroized according to their ownership.
 - No global keys, clipboard, screenshots, hooks, injection, process-memory
   access, or retry edge exists. The v3 profile's sole focus/Z-order change is
-  activation of the exact revalidated target/composer immediately before one
+  activation of the exact revalidated top-level target immediately before one
   composer-queued Enter keydown/key-up pair.
 
 ## Automated I20 gates

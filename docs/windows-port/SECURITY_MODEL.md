@@ -169,8 +169,8 @@ memory, injection, hook, unofficial login, or telemetry is used by this port.
 
 The guarded implementation uses UIA ValuePattern for stage/readback/restore.
 The exact `26.7.0.5255` profile has no send InvokePattern. Profile v3 activates
-the exact top-level target, focuses the exact composer, revalidates the exact
-foreground/focus/draft binding, and queues one Enter keydown/key-up pair to
+the exact top-level target, revalidates the root-normalized foreground target
+and exact composer/draft binding, and queues one Enter keydown/key-up pair to
 that composer HWND. It does not use the clipboard, global keys, guessed
 targets, coordinate input, or retries.
 
