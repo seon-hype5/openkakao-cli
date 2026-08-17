@@ -4,9 +4,10 @@ Date: 2026-08-17 KST
 
 Branch: `integration/windows-mvp`
 
-The reviewed predecessor is
-`f7d94c68e875aafcc3722c7199dda2fdf69e1682`. The successor commit containing
-this handoff must be reported externally because it cannot embed its own hash.
+The qualification implementation is
+`e2f257d2e3b2d6017f698a47fa9c2694e1d545a0`. The successor commit containing
+this hosted result and cross-platform compile-parity fixes must be reported
+externally because it cannot embed its own hash.
 
 ## Outcome
 
@@ -48,8 +49,10 @@ executable, installed application, user data, trust store, or UI was accessed.
 Clippy pass with the new tests. Local Smart App Control refused the newly
 linked unsigned Rust test executable before entry with OS error 4551. The
 policy was not disabled, bypassed, or relaxed; the copied ignored helper did not
-enter. The committed Windows workflow therefore runs the OS script and the
-Rust library suite on the hosted image, where the result is still required.
+enter. The
+[hosted Windows workflow](https://github.com/seon-hype5/openkakao-cli/actions/runs/31985013629)
+then passed the committed OS script, Rust library suite, lint, synthetic tests,
+and debug/release build matrix at `e2f257d`.
 
 This is not production activation evidence. Production remains wired to
 `UnavailableExecutableTrust`, and no KakaoTalk process, file, path, UI,
@@ -57,8 +60,8 @@ credential, or message was accessed or changed.
 
 ## Remaining activation gates
 
-- Run the committed script and Rust test on the pinned hosted Windows image and
-  every declared supported Windows/NTFS build.
+- Repeat the committed script and Rust test on every declared supported
+  Windows/NTFS build; the pinned GitHub-hosted image is one passing data point.
 - Qualify a trusted timestamped SHA-2 WinTrust success through the real provider
   chain and record its legal high-word flags.
 - Prove weak-signed MD5/SHA-1 WinTrust rejection end to end in an isolated VM.
@@ -68,5 +71,9 @@ credential, or message was accessed or changed.
 - Keep production construction disconnected until a separate wiring review;
   selector measurement and every live gate retain their own approval boundary.
 
-Hosted execution also depends on pushing the branch. Repository write
-authentication was still unavailable when this handoff was prepared.
+The branch was pushed to the `seon-hype5/openkakao-cli` fork. Its paired
+[cross-platform run](https://github.com/seon-hype5/openkakao-cli/actions/runs/31985013674)
+passed the Linux synthetic job and exposed one Linux all-feature dead-code
+scope error plus one macOS `CFArray` indexing error. The successor fixes those
+compile-only defects; both hosted workflows must be green before upstream
+release work.

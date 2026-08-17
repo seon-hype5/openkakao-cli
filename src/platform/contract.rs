@@ -512,7 +512,7 @@ impl TransactionCorrelation {
         }
     }
 
-    #[cfg_attr(not(feature = "windows-ui-write"), allow(dead_code))]
+    #[cfg(any(test, all(target_os = "windows", feature = "windows-ui-write")))]
     pub(crate) fn into_bytes(mut self) -> [u8; 16] {
         let bytes = self.0;
         self.0.zeroize();

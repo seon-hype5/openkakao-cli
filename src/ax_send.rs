@@ -576,7 +576,11 @@ mod imp {
             .collect();
 
         match super::match_chat_row(&titles, chat_display_name) {
-            super::ChatMatch::Found(index) => Ok(Some(windows[index].clone())),
+            super::ChatMatch::Found(index) => windows
+                .iter()
+                .nth(index)
+                .map(|window| Some(window.clone()))
+                .ok_or_else(|| anyhow!("matched chat window index was unavailable")),
             super::ChatMatch::NotFound => Ok(None),
             super::ChatMatch::Ambiguous(count) => Err(anyhow!(
                 "chat name matches {count} already-open windows exactly — ambiguous, refusing to guess"

@@ -5,11 +5,11 @@ Date: 2026-08-17 KST
 ## Status
 
 The non-live Windows release candidate is complete through DAG task `I20` on
-branch `integration/windows-mvp`. Its reviewed predecessor is
-`f7d94c68e875aafcc3722c7199dda2fdf69e1682`. The successor containing this
-handoff adds automated SHA-2 policy and NTFS process-image path qualification;
-its final SHA must be reported externally because a commit cannot embed its
-own content-derived SHA.
+branch `integration/windows-mvp`. Its reviewed qualification predecessor is
+`e2f257d2e3b2d6017f698a47fa9c2694e1d545a0`. The successor containing this
+handoff restores Linux/macOS compile parity exposed by the first hosted run and
+records that run; its final SHA must be reported externally because a commit
+cannot embed its own content-derived SHA.
 
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
@@ -67,7 +67,9 @@ concurrency limit.
   `1fc9dc3c32c882fbb33fbd195c264a93f9bd6cbe`; and
 - branch-push CI containment, target-byte/strong-sign hardening, public
   installer corroboration, and independent safety review:
-  `f7d94c68e875aafcc3722c7199dda2fdf69e1682`.
+  `f7d94c68e875aafcc3722c7199dda2fdf69e1682`; and
+- shared SHA-2/NTFS qualification gates and their hosted Windows execution:
+  `e2f257d2e3b2d6017f698a47fa9c2694e1d545a0`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -228,15 +230,20 @@ restricted to metadata-only inspection; mutation workers remain synchronous,
 joined, and cancellation-disabled. Pure tests call no native COM or desktop
 API, and no live provider compatibility was measured.
 
-The current successor makes hosted Windows CI reproduce the complete local
-safe release matrix. It adds the five synthetic compatibility targets,
+The qualification predecessor makes hosted Windows CI reproduce the complete
+local safe release matrix. It adds the five synthetic compatibility targets,
 default and all-feature release builds, and optimized all-feature Windows unit
 tests. An inline PowerShell gate validates every Windows-port local Markdown
 link, rejects out-of-repository targets and mutable action references, and
 rechecks the exact Rust toolchain pin. Every Windows-port documentation change
 now triggers the workflow. The exact-name CLI allowlist, read-only permissions,
-no-artifact policy, and ban on product invocation remain unchanged. The
-commands pass locally; the first GitHub-hosted run remains external evidence.
+no-artifact policy, and ban on product invocation remain unchanged. The first
+[hosted Windows run](https://github.com/seon-hype5/openkakao-cli/actions/runs/31985013629)
+passed every gate, including the OS and Rust native-assumption tests. Its paired
+[cross-platform run](https://github.com/seon-hype5/openkakao-cli/actions/runs/31985013674)
+passed the Linux synthetic suite and exposed one Linux all-feature dead-code
+scope error plus one macOS `CFArray` indexing error. The current successor fixes
+those compile-only defects without changing a live boundary.
 
 The newest offline successor closes a provider-state evidence gap before
 signer traversal. A zero WinTrust result must now retain the exact provider
@@ -353,13 +360,14 @@ must not be weakened merely to make a live test possible.
 
 ## Final non-live verification
 
-The fully executed baseline below belongs to predecessor `f7d94c6`. All
+The fully executed local baseline below belongs to predecessor `f7d94c6`. All
 recorded final-matrix Rust commands used the ignored
 `C:\Users\ihvna\source\openkakao-dev\repo\.target\wave2-root` directory. The
-successor compiles the two new trust tests and one ignored helper, but local
-Smart App Control refused the newly linked unsigned test executable before
-entry. The baseline counts therefore remain historical results, not a claim
-that the successor Rust tests executed locally.
+qualification predecessor compiles the two new trust tests and one ignored
+helper, but local Smart App Control refused the newly linked unsigned test
+executable before entry. The baseline counts therefore remain historical
+results, not a claim that those Rust tests executed locally. They did execute
+successfully on the pinned GitHub-hosted Windows runner.
 
 | Gate | Result |
 |---|---|
@@ -390,7 +398,9 @@ that the successor Rust tests executed locally.
 | successor `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | successor PowerShell parser and `actionlint` 1.7.12 | passed |
 | successor native-assumption OS qualification | Windows `10.0.26200.0`/NTFS: strong hash and before/between/after timings passed |
-| successor Rust trust-test execution | blocked before entry by Smart App Control, OS error 4551; hosted result pending |
+| qualification Rust trust-test execution | local entry blocked by Smart App Control error 4551; hosted Windows run passed |
+| hosted Windows safe CI at `e2f257d` | passed every step, including qualification, lint, synthetic tests, debug/release builds, and optimized all-feature tests |
+| initial hosted cross-platform CI at `e2f257d` | Linux synthetic job passed; Linux all-feature lint and macOS compile exposed the two defects fixed by this successor |
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -408,8 +418,7 @@ uses read-only repository permissions, disables checkout credential
 persistence, uploads no artifact, and runs default plus explicitly scoped
 all-feature synthetic coverage in debug and release profiles. Its committed
 inline documentation/action/toolchain validator and every newly added command
-passed locally; the first GitHub-hosted run remains an external integration
-check.
+passed locally and in hosted run `31985013629`.
 
 ## Safety ledger for this implementation session
 
@@ -430,12 +439,15 @@ check.
 - installed KakaoTalk files/databases read: 0;
 - public official installer downloads: 2, both hash-only/static inspection;
 - installer or target executable launches: 0;
-- credential/token reads: 0;
+- credential/token content reads: 0; browser/device authentication stored the
+  credential through the platform credential manager;
 - native COM cancellation calls during implementation/tests: 0;
 - screenshots/UI dumps/process-memory reads/injection/hooks: 0;
 - automatic retries: 0;
-- push attempts: 2 (noninteractive HTTPS and strict-host-key SSH);
-- successful pushes: 0; and
+- GitHub forks created: 1 (`seon-hype5/openkakao-cli`);
+- push attempts: 4 (unauthenticated HTTPS, strict-host-key SSH, authenticated
+  upstream HTTPS rejected with 403, and authenticated fork HTTPS);
+- successful pushes: 1 (fork branch `integration/windows-mvp`); and
 - pull requests/releases: 0.
 
 All mutation counts in automated tests belong to fake or in-memory synthetic
@@ -480,12 +492,12 @@ implementation; it likewise authorizes no probe or production wiring.
   preserved as corroboration; neither architecture has an accepted installed
   target hash/SPKI/root bundle. Windows `10.0.26200.0`/NTFS passed the
   signed-PowerShell strong-hash and before/between/after-query matrix. The same
-  committed tests must still pass on the pinned hosted image and every declared
-  supported Windows build; the local unsigned Rust test was not allowed to
-  enter. Activation also requires a trusted timestamped provider-path run and
-  isolated weak-signed WinTrust end-to-end refusal. The current exact provider
-  flag comparison may conservatively reject a legitimate RFC3161 high-word
-  flag. All of these failures remain closed because production has zero profile
+  committed tests also passed the pinned GitHub-hosted Windows image and must
+  still pass every declared supported Windows build; the local unsigned Rust
+  test was not allowed to enter. Activation also requires a trusted timestamped
+  provider-path run and isolated weak-signed WinTrust end-to-end refusal. The
+  current exact provider flag comparison may conservatively reject a legitimate
+  RFC3161 high-word flag. All of these failures remain closed because production has zero profile
   values/references and uses `UnavailableExecutableTrust`.
 - Generic Win32 owner-chain modal evidence cannot identify an unowned custom
   dialog or an overlay drawn inside the selected window. Future activation
@@ -498,25 +510,23 @@ implementation; it likewise authorizes no probe or production wiring.
   later probes until it returns or the process exits. Native cancellation
   compatibility and performance have not been measured against a live UIA
   provider.
-- Run the committed workflow on a GitHub Windows runner and obtain reviewed
-  macOS/Linux regression signals before upstream release work.
+- Re-run both hosted workflows after the compile-parity successor and require
+  green Windows, Linux, and macOS results before upstream release work.
 - No live selector compatibility, target identity, empty-draft proof, stage
   restoration, or submission result has been measured.
 
 ## Next permissible step
 
-The predecessor passes the fully executed local safe matrix, and the successor
-passes formatting, compile-only Rust tests, warnings-denied Clippy, static
-workflow checks, and the signed-PowerShell native-assumption equivalent.
-Independent CI, provenance, and native-unsafe reviews are complete. Local Smart
-App Control deliberately remains unchanged, so successor Rust execution must
-come from hosted Windows CI. Both branch-push workflows have been narrowed to
-their non-live boundary. Noninteractive HTTPS had no credential and strict-
-host-key SSH had no authorized public key; neither attempt changed the remote.
-The next safe step is to supply repository write authentication, push the
-current integration head, and review the Windows/Linux/macOS hosted results.
-That work does not require a desktop session, product installation, KakaoTalk
-path/signature observation, or a trust-store change.
+The qualification predecessor passes the fully executed hosted Windows safe
+matrix, including the Rust tests that local Smart App Control correctly kept
+from entering. GitHub authentication is stored through the platform credential
+manager, the fork exists, and `e2f257d` is pushed on
+`integration/windows-mvp`. The paired cross-platform run provided a green Linux
+synthetic signal and identified two compile-only parity defects. The next safe
+step is to commit and push this successor, then require its Windows, Linux, and
+macOS hosted runs to pass. That work does not require a desktop session,
+product installation, KakaoTalk path/signature observation, or a trust-store
+change.
 
 After hosted CI, the next activation work is isolated artifact qualification:
 select one architecture, reproduce the target bundle in a disposable VM, run
