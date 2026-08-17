@@ -5,11 +5,11 @@ Date: 2026-08-17 KST
 ## Status and non-authorization
 
 This document defines the evidence required before a KakaoTalk target
-executable digest, signer, or installation-root value may enter source. It
-contains no production target digest, signer digest, install path, selector,
-or capability activation. Public installer acquisition is recorded separately;
-it does not authorize inspecting an installed application or live KakaoTalk
-state.
+executable digest, signer, or installation-root value may enter source. The
+accepted x64 bundle is recorded in
+[`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md). Its public
+values may be wired separately while capability remains false; it does not
+authorize inspecting a live KakaoTalk UI or activating message submission.
 
 [Kakao's public notice](https://pc.kakao.com/talk/notices/ko/2882?agent=win32)
 identifies the Kakao corporate service page and Microsoft Store as official
@@ -19,8 +19,8 @@ install path, exact target bytes, or version-specific UI profile.
 
 The independently reproduced public 26.7 x86/x64 installer snapshot is in
 [`handoffs/root-public-kakao-installer-provenance.md`](handoffs/root-public-kakao-installer-provenance.md).
-Those hashes are preliminary installer acquisition evidence only. No
-architecture or runtime profile is selected.
+The x64 architecture and exact runtime profile were subsequently selected by
+the accepted bundle above. x86 remains unselected.
 
 ## Production provenance bundle
 
@@ -46,7 +46,8 @@ native wiring and contain only public, non-user evidence:
 8. one exact known-folder root kind and portable relative components,
    established from signed package metadata or reproducible installer behavior
    in a disposable network-isolated test VM, never from an existing user
-   installation, plus proof that root overrides cannot select another root;
+   installation, plus explicit observation of root overrides and proof that
+   every non-selected root/relation fails the source-static runtime profile;
 9. reviewer identities, review date, independent tool versions, acceptance
    source tag, and a one-to-one UI-profile identifier; and
 10. the previous profile it supersedes plus an explicit rollback decision.
@@ -60,18 +61,19 @@ regions and therefore cannot by itself identify every reviewed byte. The root
 is represented only by `InstallRootKind` and the portable relative-component
 codec in `executable_trust.rs`.
 
-Two reviewers must reproduce the installer hash, target whole-file hash and
-length, target version/machine, target signer SPKI, signature policy, and root
-relation independently. A disagreement, unavailable revocation evidence,
-unexpected signature cardinality, catalog-only signing, weak digest, or an
-installer capable of selecting more than one root blocks the profile.
+Two independent reviewed reproductions must reproduce the installer hash,
+target whole-file hash and length, target version/machine, target signer SPKI,
+signature policy, and root relation. A disagreement, unavailable revocation
+evidence, unexpected signature cardinality, catalog-only signing, weak digest,
+or inability to make every non-selected installer root fail closed blocks the
+profile. Merely supporting a documented installer override does not weaken an
+exact known-folder/relation runtime pin.
 
 ## Canonical installation-root and process-image rule
 
-No production root kind or components are selected now. A future profile may
-choose exactly one of `ProgramFilesX86`, `ProgramFiles64`, or
-`CurrentUserLocalAppData` only when the same architecture-specific bundle
-establishes it.
+The accepted x64 profile selects `ProgramFiles64` and exact relative
+components `Kakao`, `KakaoTalk`, `KakaoTalk.exe`. No other root or x86 profile
+is selected.
 
 At runtime the observer must:
 
@@ -146,11 +148,12 @@ and accepted SHA-256. Local Smart App Control blocked the newly linked unsigned
 Rust test before entry, so its hosted execution remains required. This
 hash-only OS result does not prove trusted timestamped WinTrust acceptance of
 the reviewed target.
-The same positive trusted timestamped qualification must record
-`CRYPT_PROVIDER_DATA.dwProvFlags`: the low word must preserve the caller flags,
-the revocation high-word choice must remain chain-excluding-root, and any
-RFC3161/lower-quality-chain bit must receive an explicit reviewed policy.
-Unknown bits and `CPD_USE_NT5_CHAIN_FLAG` are activation refusals.
+The positive trusted timestamped x64 qualification recorded
+`CRYPT_PROVIDER_DATA.dwProvFlags=0x80003080` on Windows 11 and hosted Windows
+Server 2022. The low word exactly preserved the caller flags; the only high
+bit was the SDK-documented `CPD_USE_NT5_CHAIN_FLAG`. The accepted provider
+policy requires that exact value. CPD revocation high bits, RFC3161,
+lower-quality-chain, and unknown bits remain activation refusals.
 
 ## Repository-owned signed fixture
 
@@ -184,7 +187,7 @@ activation gates.
 
 ## Review and activation gates
 
-The following remain separate decisions:
+The following are separate decisions:
 
 1. accept the synthetic fixture provenance and reproduce clean pinned-Windows
    structure/lifetime tests;
@@ -198,5 +201,7 @@ The following remain separate decisions:
 7. complete target and submit-selector measurements under their own approvals;
 8. only then consider capability activation.
 
-Failure or staleness at any gate keeps `UnavailableExecutableTrust`, every
-production target/signer/root value absent, and `send_open_chat=false`.
+Items 1–6 are complete for the accepted x64 profile. Failure or staleness in
+the runtime observer refuses before UI inspection; items 7–8 remain incomplete
+and keep `send_open_chat=false`. Rollback removes the accepted source values and
+restores `UnavailableExecutableTrust` rather than weakening any match.

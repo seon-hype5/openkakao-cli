@@ -63,9 +63,10 @@ use zeroize::Zeroize;
 #[cfg(any(feature = "windows-ui-write", test))]
 use zeroize::Zeroizing;
 
+use super::executable_trust_native::verify_accepted_x64_process;
 #[cfg(feature = "windows-ui-write")]
 use super::{
-    executable_trust::{ExecutableTrustBoundary, UnavailableExecutableTrust},
+    executable_trust::ExecutableTrustBoundary,
     ledger::{LedgerRecord, MutationLedger, RecordCorrelation},
     ledger_native::LazyProductionLedger,
     transaction::{self, CommitSelectorState, DraftState, ExpectedState, FreshState, MutationPort},
@@ -541,8 +542,11 @@ fn inspect_unique_window(
     let process_handle = OwnedHandle::open_process(pid)?;
     let image = query_process_image(process_handle.raw())?;
     let creation_time_100ns = process_creation_time(process_handle.raw())?;
-    let executable_verified =
+    let executable_name_matches =
         image.path.is_absolute() && image.path.file_name() == Some(OsStr::new("KakaoTalk.exe"));
+    let executable_verified = executable_name_matches
+        && verify_accepted_x64_process(hwnd, pid, creation_time_100ns, process_handle.raw())
+            .is_ok();
     let executable_fingerprint = fingerprints.executable(&image.utf16, creation_time_100ns);
     let version = executable_verified
         .then(|| query_file_version(&image.path))
@@ -1196,10 +1200,10 @@ struct NativeMutationIdentity {
 
 #[cfg(feature = "windows-ui-write")]
 struct NativeMutationPort<'operation> {
-    executable_trust: UnavailableExecutableTrust,
     ledger: LazyProductionLedger,
     approved: &'operation ApprovedSend,
     fingerprints: FingerprintKey,
+    expected_pid: u32,
     expires_at_unix_ms: u64,
     message_utf16: &'operation [u16],
     identity: Option<NativeMutationIdentity>,
@@ -1228,10 +1232,10 @@ impl<'operation> NativeMutationPort<'operation> {
         correlation: RecordCorrelation,
     ) -> Self {
         Self {
-            executable_trust: UnavailableExecutableTrust,
             ledger: LazyProductionLedger::new(correlation),
             approved,
             fingerprints,
+            expected_pid: expected.pid,
             expires_at_unix_ms: expected.expires_at_unix_ms,
             message_utf16,
             identity: None,
@@ -1356,7 +1360,21 @@ impl<'operation> NativeMutationPort<'operation> {
 #[cfg(feature = "windows-ui-write")]
 impl ExecutableTrustBoundary for NativeMutationPort<'_> {
     fn verify_executable_trust(&mut self) -> Result<(), UiError> {
-        self.executable_trust.verify_executable_trust()
+        let windows = enumerate_top_level_windows()?;
+        if windows.len() != 1 || !window_has_exact_class(windows[0]) {
+            return Err(stale_window_error());
+        }
+        let hwnd = windows[0];
+        let mut pid = 0_u32;
+        // SAFETY: `pid` is a writable out parameter and the exact-class HWND
+        // came from the bounded top-level enumeration above.
+        let thread_id = unsafe { GetWindowThreadProcessId(hwnd, Some(ptr::from_mut(&mut pid))) };
+        if thread_id == 0 || pid == 0 || pid != self.expected_pid {
+            return Err(stale_window_error());
+        }
+        let process = OwnedHandle::open_process(pid)?;
+        let creation_time_100ns = process_creation_time(process.raw())?;
+        verify_accepted_x64_process(hwnd, pid, creation_time_100ns, process.raw())
     }
 }
 

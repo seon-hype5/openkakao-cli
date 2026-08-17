@@ -6,9 +6,7 @@
 //! boundary; the `windows-ui-write` feature compiles a transaction path that
 //! still fails closed until live self-target and send selectors are verified.
 
-#[cfg(any(feature = "windows-ui-write", test))]
 mod executable_trust;
-#[cfg(any(feature = "windows-ui-write", test))]
 mod executable_trust_native;
 #[cfg(any(feature = "windows-ui-write", test))]
 mod ledger;
@@ -39,7 +37,7 @@ use super::{
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(8);
 const SNAPSHOT_TTL_MS: u64 = 5_000;
-const KNOWN_PROFILE_ID: &str = "kakaotalk-windows-26.7.0.5255";
+const KNOWN_PROFILE_ID: &str = "kakaotalk-windows-x64-stable-26.7.0.5255-v1";
 const TOP_LEVEL_CLASS: &str = "EVA_Window_Dblclk";
 const COMPOSER_CLASS: &str = "RICHEDIT50W";
 const COMPOSER_AUTOMATION_ID: &str = "1006";

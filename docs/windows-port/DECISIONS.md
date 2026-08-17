@@ -665,3 +665,26 @@ pinned hosted Windows image. These gates qualify only hash-policy and path-
 requery assumptions. A trusted timestamped positive provider traversal,
 weak-signed WinTrust end-to-end refusal, architecture-specific target bundle,
 and separate production wiring review remain mandatory for activation.
+
+## ADR-046: Accept the qualified x64 target and exact provider output
+
+The accepted
+[`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md) supersedes
+ADR-043's provisional high-word decision. Two positive target reproductions
+returned `CRYPT_PROVIDER_DATA.dwProvFlags=0x80003080`: the SDK-guaranteed caller
+low word plus only `CPD_USE_NT5_CHAIN_FLAG`. Require that exact value. Continue
+to reject CPD revocation high bits, RFC3161, lower-quality-chain, and unknown
+bits; the caller already requires whole-chain revocation excluding root,
+cache-only retrieval, and the SHA-2-only strong-sign policy.
+
+The x64 installer also accepts NSIS `/D`. Treat that as explicit distribution
+behavior, not as a reason to weaken or abandon the canonical-root boundary.
+The production profile selects only `FOLDERID_ProgramFilesX64` with components
+`Kakao`, `KakaoTalk`, `KakaoTalk.exe`; every override and alternate relation
+must fail closed. This supersedes the earlier rule that installer support for
+more than one root automatically blocks an otherwise exact runtime profile.
+
+Profile acceptance authorizes source-static executable/signer/root values and
+native trust wiring only. It leaves `send_open_chat=false`, self-target and
+submit selectors unconfigured, and every L10-L40 live gate separately
+unauthorized.

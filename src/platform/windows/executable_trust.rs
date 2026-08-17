@@ -1,18 +1,18 @@
 //! Pure executable-trust decision seam for guarded Windows mutations.
 //!
 //! Native path, file-handle, and Authenticode APIs are intentionally absent
-//! here. The disconnected native observer reduces its results to this fixed,
+//! here. The profile-bound native observer reduces its results to this fixed,
 //! path-free and redacted evidence shape. Installation-root pins can be
 //! constructed only from the versioned reviewed root-relation codec below,
 //! never an observed absolute path. The reviewed executable-byte digest is
-//! source-static and cannot be promoted from runtime evidence. Production
-//! remains wired to [`UnavailableExecutableTrust`] until complete target,
-//! signer, root, and activation-qualification evidence is available.
+//! source-static and cannot be promoted from runtime evidence. Production uses
+//! the accepted x64 profile; [`UnavailableExecutableTrust`] remains the
+//! explicit rollback/fail-closed placeholder.
 
 #![cfg_attr(
     not(test),
     allow(dead_code),
-    doc = "The pure verifier remains compiled while production uses the fail-closed placeholder."
+    doc = "Some constructors remain rollback/test-only outside the accepted production profile."
 )]
 
 use std::fmt;
@@ -815,6 +815,29 @@ mod tests {
             format!("{:?}", reviewed_signer()),
             "ReviewedSignerDigest(<redacted>)"
         );
+    }
+
+    #[test]
+    fn accepted_x64_default_relation_is_exact_and_override_relation_is_distinct() {
+        let accepted = InstallRootDigest::from_static_reviewed_relation(
+            InstallRootKind::ProgramFiles64,
+            &["Kakao", "KakaoTalk", "KakaoTalk.exe"],
+        )
+        .unwrap();
+        let expected = TrustDigest::from_bytes([
+            0x73, 0x75, 0x29, 0xde, 0xaf, 0xe8, 0x8f, 0xb3, 0xb3, 0xbc, 0xcd, 0x0f, 0xb6, 0x62,
+            0x5b, 0x94, 0x4a, 0xac, 0x87, 0xd7, 0x83, 0xb1, 0x52, 0x9c, 0x39, 0x9d, 0xb6, 0xe3,
+            0x00, 0xb6, 0x8e, 0x2e,
+        ])
+        .unwrap();
+        assert_eq!(accepted.trust_digest(), expected);
+
+        let override_relation = InstallRootDigest::from_relation_components(
+            InstallRootKind::ProgramFiles64,
+            &["KakaoTalk", "KakaoTalk.exe"],
+        )
+        .unwrap();
+        assert_ne!(accepted, override_relation);
     }
 
     #[test]

@@ -2,6 +2,14 @@
 
 Date: 2026-08-17 KST
 
+> Latest successor update: the accepted x64 bundle is
+> [`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md), the exact
+> provider output is `0x80003080`, and the profile-bound native observer is now
+> wired while `send_open_chat=false`. Earlier statements below that production
+> still uses `UnavailableExecutableTrust` describe predecessor checkpoints.
+> The next live step is still a freshly approved L10 session; no earlier
+> approval carries forward.
+
 ## Status
 
 The non-live Windows release candidate is complete through DAG task `I20` on

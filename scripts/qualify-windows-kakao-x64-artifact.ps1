@@ -871,7 +871,7 @@ $headerText = $installerResponse.Headers.ToString()
 if ($headerText -match '(?im)^Last-Modified:\s*(?<value>[^\r\n]+)') {
     $lastModified = $Matches["value"].Trim()
 }
-$providerCompatibility = $winTrustEvidence.ProviderFlags -eq [uint32]0x00083080
+$providerCompatibility = $winTrustEvidence.ProviderFlags -eq [uint32]0x80003080
 
 Write-Output "qualification_schema=openkakao-windows-kakao-x64-observation-v1"
 Write-Output "install_mode=$InstallMode"

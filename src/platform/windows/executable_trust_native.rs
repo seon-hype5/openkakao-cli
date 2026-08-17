@@ -1,14 +1,12 @@
-//! Fakeable orchestration and disconnected native Windows executable trust.
+//! Fakeable orchestration and profile-bound native Windows executable trust.
 //!
 //! The orchestration freezes the exact offline WinTrust policy plus
 //! VERIFY/extract/CLOSE lifetime. A native adapter now implements the process,
 //! file-identity, complete-file digest, known-folder-relative root,
-//! provider-chain, strong-signature, and SPKI boundary, but no production path
-//! constructs the full process-bound adapter and automated tests never call
-//! it. Reviewed target/signer/root values and Windows/NTFS qualification remain
-//! mandatory before wiring. The stable WinTrust state is revalidated after
-//! VERIFY, including exact provider pointer linkage and the primary verified-
-//! signature index.
+//! provider-chain, strong-signature, and SPKI boundary. Production constructs
+//! it only for the accepted x64 profile while capability remains false. The
+//! stable WinTrust state is revalidated after VERIFY, including exact provider
+//! pointer linkage and the primary verified-signature index.
 
 #![cfg_attr(not(test), allow(dead_code))]
 
@@ -36,9 +34,11 @@ use windows::Win32::Security::Cryptography::{
     CERT_STRONG_SIGN_PARA, CERT_STRONG_SIGN_PARA_0, CRYPT_ENCODE_OBJECT_FLAGS, X509_ASN_ENCODING,
     X509_PUBLIC_KEY_INFO,
 };
+#[cfg(test)]
+use windows::Win32::Security::WinTrust::CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
 use windows::Win32::Security::WinTrust::{
     WTHelperGetProvCertFromChain, WTHelperGetProvSignerFromChain, WTHelperProvDataFromStateData,
-    WinVerifyTrust, CPD_CHOICE_SIP, CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT, CRYPT_PROVIDER_CERT,
+    WinVerifyTrust, CPD_CHOICE_SIP, CPD_USE_NT5_CHAIN_FLAG, CRYPT_PROVIDER_CERT,
     CRYPT_PROVIDER_DATA, CRYPT_PROVIDER_SGNR, WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA,
     WINTRUST_DATA_0, WINTRUST_DATA_PROVIDER_FLAGS, WINTRUST_DATA_REVOCATION_CHECKS,
     WINTRUST_DATA_STATE_ACTION, WINTRUST_DATA_UICHOICE, WINTRUST_DATA_UICONTEXT,
@@ -79,9 +79,30 @@ use super::executable_trust::{
     FileSystemKind, FinalPathSource, InstallRootKind, ReparseState, TrustDigest, VolumeKind,
     MAX_INSTALL_ROOT_COMPONENTS, MAX_INSTALL_ROOT_COMPONENT_BYTES, MAX_INSTALL_ROOT_RELATION_BYTES,
 };
-#[cfg(test)]
 use super::executable_trust::{InstallRootDigest, ReviewedExecutableDigest, ReviewedSignerDigest};
 use super::FileVersion;
+
+static ACCEPTED_X64_EXECUTABLE_SHA256: [u8; 32] = [
+    0x88, 0x2b, 0x32, 0x6a, 0xd3, 0x48, 0xed, 0x9d, 0x51, 0xb9, 0x2f, 0xcf, 0x3a, 0xa0, 0x9a, 0xda,
+    0x27, 0xed, 0x4a, 0x73, 0x7f, 0xba, 0x4b, 0x8a, 0xb4, 0xd7, 0x16, 0x85, 0x76, 0xc9, 0x6e, 0x50,
+];
+static ACCEPTED_X64_SIGNER_SPKI_SHA256: [u8; 32] = [
+    0xc7, 0xa3, 0x95, 0x98, 0x90, 0x45, 0xde, 0x47, 0x83, 0x59, 0x02, 0xe0, 0xe9, 0x12, 0x3a, 0x4d,
+    0x5d, 0xfa, 0x7f, 0x2e, 0xfe, 0xf6, 0xec, 0x9c, 0xb0, 0x36, 0xae, 0xdc, 0x69, 0x78, 0x86, 0xdc,
+];
+static ACCEPTED_X64_ROOT_RELATION: &[&str] = &["Kakao", "KakaoTalk", "KakaoTalk.exe"];
+
+fn accepted_x64_profile() -> Result<ExecutableTrustProfile, UiError> {
+    ExecutableTrustProfile::new(
+        FileVersion::KNOWN,
+        ReviewedExecutableDigest::from_static_reviewed_bytes(&ACCEPTED_X64_EXECUTABLE_SHA256)?,
+        ReviewedSignerDigest::from_static_reviewed_bytes(&ACCEPTED_X64_SIGNER_SPKI_SHA256)?,
+        InstallRootDigest::from_static_reviewed_relation(
+            InstallRootKind::ProgramFiles64,
+            ACCEPTED_X64_ROOT_RELATION,
+        )?,
+    )
+}
 
 // The documented szOID_CERT_STRONG_SIGN_OS_1 value. A module-owned static is
 // used instead of comparing addresses of an inlinable generated `const`, so
@@ -156,9 +177,13 @@ impl WinTrustCallPolicy {
 
     fn expected_provider_flags(self) -> u32 {
         // The Windows SDK contract fixes CRYPT_PROVIDER_DATA.dwProvFlags's
-        // low word to the caller's WINTRUST_DATA.dwProvFlags and records the
-        // effective revocation choice in the CPD high-word flags.
-        self.provider_flags.0 | CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT
+        // low word to the caller's WINTRUST_DATA.dwProvFlags. Independent
+        // positive target qualification on Windows 11 10.0.26200 and hosted
+        // Windows Server 2022 10.0.20348 added exactly the documented
+        // CPD_USE_NT5_CHAIN_FLAG and no CPD revocation/RFC3161/unknown bit.
+        // Require that exact result; the caller's low-word 0x80 and separate
+        // WTD_REVOKE_WHOLECHAIN remain the reviewed exclude-root inputs.
+        self.provider_flags.0 | CPD_USE_NT5_CHAIN_FLAG
     }
 }
 
@@ -519,8 +544,7 @@ struct WindowsPathState {
 
 /// Native implementation of the already-frozen adapter seam. The constructor
 /// duplicates the caller's process handle; no raw handle or path escapes this
-/// module. It remains disconnected from `NativeMutationPort` until signer and
-/// installation-root provenance are independently reviewed.
+/// module.
 struct WindowsNativeExecutableTrustApi {
     hwnd: HWND,
     pid: u32,
@@ -529,7 +553,6 @@ struct WindowsNativeExecutableTrustApi {
 }
 
 impl WindowsNativeExecutableTrustApi {
-    #[allow(dead_code)] // Deliberately disconnected until reviewed provenance is available.
     fn from_bound_process(
         hwnd: HWND,
         pid: u32,
@@ -566,6 +589,23 @@ impl WindowsNativeExecutableTrustApi {
         }
         Ok(())
     }
+}
+
+pub(super) fn verify_accepted_x64_process(
+    hwnd: HWND,
+    pid: u32,
+    expected_creation_time_100ns: u64,
+    process: HANDLE,
+) -> Result<(), UiError> {
+    let profile = accepted_x64_profile()?;
+    let api = WindowsNativeExecutableTrustApi::from_bound_process(
+        hwnd,
+        pid,
+        expected_creation_time_100ns,
+        process,
+    )
+    .map_err(NativeTrustFailure::into_ui_error)?;
+    NativeExecutableTrustObserver::new(profile, api).verify_executable_trust()
 }
 
 fn require_requeried_process_image_candidate(
@@ -2935,6 +2975,14 @@ mod tests {
         assert_adapter::<WindowsNativeExecutableTrustApi>();
         assert_eq!(noninteractive_hwnd().0, INVALID_HANDLE_VALUE.0);
         assert!(WinTrustCallPolicy::offline_embedded().is_exact());
+        assert_eq!(
+            WinTrustCallPolicy::offline_embedded().expected_provider_flags(),
+            0x8000_3080
+        );
+        assert_eq!(
+            accepted_x64_profile().unwrap().install_root_kind(),
+            InstallRootKind::ProgramFiles64
+        );
     }
 
     #[test]
@@ -2991,6 +3039,10 @@ mod tests {
 
         provider = exact_synthetic_provider(&mut state);
         provider.dwProvFlags ^= CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT;
+        assert!(!provider_policy_is_exact(&state, &provider));
+
+        provider = exact_synthetic_provider(&mut state);
+        provider.dwProvFlags ^= CPD_USE_NT5_CHAIN_FLAG;
         assert!(!provider_policy_is_exact(&state, &provider));
 
         provider = exact_synthetic_provider(&mut state);

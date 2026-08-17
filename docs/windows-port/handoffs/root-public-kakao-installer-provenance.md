@@ -2,6 +2,11 @@
 
 Date: 2026-08-17 KST
 
+> Successor: the x64 target/root/provider evidence was later accepted in
+> [`../KAKAOTALK_X64_TRUST_PROFILE.md`](../KAKAOTALK_X64_TRUST_PROFILE.md).
+> The non-authorization statements below describe this earlier installer-only
+> checkpoint.
+
 ## Outcome
 
 Two independent reviewers reproduced the current public KakaoTalk 26.7 stable

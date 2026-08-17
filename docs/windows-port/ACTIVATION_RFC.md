@@ -39,7 +39,7 @@ private snapshot, accepts no caller-selected snapshot, and retains no observed
 label. Native selection is a closed state rather than an optional label plus
 caller-chosen booleans; only an exact-unique state can invoke the verifier.
 
-The production Windows observer remains deliberately disconnected: it reads
+The production self-target observer remains deliberately disconnected: it reads
 no title/Name/label, passes no candidate to the verifier, produces no proof,
 leaves target binding false, and cannot read draft Value. Synthetic absent,
 mismatch, unique-inexact, ambiguous-inexact, and ambiguous-exact cases cover
@@ -175,11 +175,12 @@ fixed protected application directory.
 
 `NativeMutationPort` now owns a lazy production-ledger factory. Constructing
 the port performs no known-folder or file I/O. The transaction must verify
-executable trust before its first ledger method, and current production trust
-always returns `windows_executable_trust_unavailable`; therefore the lazy
-factory and production locator remain unreachable. Automated tests never call
-that locator or write real LocalAppData. If future trust wiring reaches the
-factory, any open error or unwind is consumed once and becomes fixed,
+executable trust before its first ledger method. The accepted x64 observer can
+pass only for the exact source-static profile, but no valid production approval
+can yet be created because self-target evidence remains false; therefore the
+lazy factory and production locator remain unreachable. Automated tests never
+call that locator or write real LocalAppData. When a later approved gate reaches
+the factory, any open error or unwind is consumed once and becomes fixed,
 non-retryable `windows_ledger_state_uncertain`. This is activation scaffolding,
 not live-write authorization.
 
@@ -281,21 +282,17 @@ ordinary CLI startup.
 
 ## D. Executable trust and canonical installation root
 
-Offline implementation status: a path-free/redacted verifier profile/evidence
-seam now models guarded and requeried process-image path provenance, NTFS on a
-fixed local volume, reparse refusal, process-creation binding, exact candidate
-file identities, exact complete-file SHA-256 and version, no-UI/cache-only
-SHA-2-only Authenticode behavior, catalog ambiguity, exact signer
-cardinality/digest, and exact install-root digest. Synthetic adversarial tests
-cover each pure refusal. A disconnected native adapter contains the reviewed
-process/path/file/WinTrust sequence, but no automated test or production path
-calls it against an installed application, and no production target/signer/root
-digest exists. Production uses `UnavailableExecutableTrust` before ledger or
-UI observation, so this remains an activation barrier rather than a trust
-claim.
+Offline implementation status: the accepted x64 bundle in
+[`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md) fixes the
+complete target SHA-256, target leaf SPKI, `ProgramFiles64` relation, exact
+version, and provider flags. The native observer is now wired into read-only
+inspection and transaction preflight. It still performs no call until a live
+session is separately authorized, and `send_open_chat` remains false.
+Synthetic adversarial tests cover every pure refusal and alternate installer
+roots cannot satisfy the source-static relation.
 
-The current basename/version check is insufficient for activation. A future
-profile must pin the complete reviewed target bytes, target leaf SPKI, exact
+The former basename/version-only check was insufficient. The accepted profile
+now pins complete reviewed target bytes, target leaf SPKI, exact
 version/machine, and one architecture-specific root. The observer must query
 the process image path, hold the first candidate without write/delete sharing,
 query again, independently guard the second candidate, and require canonical
@@ -303,12 +300,9 @@ path and file-identity agreement before trusting the verification handle.
 Symlink/reparse resolution, non-NTFS or non-fixed volumes, path replacement, or
 candidate disagreement fail closed. Because Windows does not document this
 path query as an atomic backing-file identity, hosted adversarial qualification
-on every supported Windows/NTFS image remains mandatory before wiring. A
-signed-PowerShell run passed all three replacement timings on Windows
-`10.0.26200.0`/NTFS. The committed OS script and Rust production-helper test
-must still pass on the pinned hosted image and every declared supported build.
-Local Smart App Control blocked the newly linked unsigned Rust test executable
-before entry; the project did not change or bypass that policy.
+on every supported Windows/NTFS image remains mandatory. Signed-PowerShell and
+the committed Rust helper passed all three replacement timings on Windows 11
+`10.0.26200`/NTFS and hosted Windows Server 2022 `10.0.20348`/NTFS.
 
 `WinVerifyTrust` must run with no UI, cache-only URL retrieval, and a live
 `CERT_STRONG_SIGN_PARA` selecting `szOID_CERT_STRONG_SIGN_OS_1`, so trust
@@ -322,13 +316,12 @@ uncertainty, or install-root mismatch disables writes.
 The exact production strong-policy constructor has now been exercised through
 `CertIsStrongHashToSign` with no certificate. On Windows `10.0.26200.0`, MD5
 and SHA-1 were refused and SHA-256 was accepted. This hash-only OS result does
-not qualify a trusted timestamped WinTrust success, real provider traversal,
-or an architecture-specific target bundle.
+not stand alone: the accepted timestamped x64 target also completed the real
+provider traversal on Windows 11 and hosted Windows Server 2022.
 
-Adding this boundary requires a dependency-feature RFC for the minimum
-`windows` namespaces, an unsafe ownership/lifetime audit, and synthetic tests
-around a verifier trait. No live executable-signature observation is
-authorized by this proposal.
+The dependency surface, unsafe ownership/lifetime audit, and synthetic verifier
+tests are complete. Source wiring does not itself authorize a live
+executable-signature observation.
 
 The minimum binding feature set, native call order, allocation ownership, and
 offline test boundary are now frozen in
@@ -338,7 +331,7 @@ inventory does not authorize a native observation or capability activation.
 A crate-private fakeable orchestration seam fixes the offline/no-UI WinTrust
 policy, attempts one CLOSE after every returned VERIFY state, maps provider
 errors/panics to closed refusal codes, and rejects catalog/secondary signature
-ambiguity before the existing pure verifier can succeed. Its disconnected
+ambiguity before the existing pure verifier can succeed. Its profile-bound
 Windows adapter retains stable boxed WinTrust state, binds guarded candidate
 file identities to process creation time, validates no-follow NTFS/fixed-volume
 paths,
@@ -357,12 +350,11 @@ boundary now exercises the complete successful provider-to-signer-to-leaf
 SPKI path and pointer substitution refusals with retained synthetic
 structures; it does not qualify a real Windows provider image.
 
-The current provider high-word check is deliberately exact and therefore may
-reject a legitimate RFC3161 timestamp flag. Before activation, a trusted
-timestamped SHA-2 fixture must establish the supported provider flag shape and
-an isolated weak-signature fixture must prove MD5/SHA-1 refusal. Unknown flags,
-the NT5 chain flag, or any attempt to relax offline/no-UI/strong-sign policy
-remain refusals.
+The provider high-word check is deliberately exact. Positive x64 target
+qualification established `0x80003080`, so the accepted policy requires the
+caller low word plus only `CPD_USE_NT5_CHAIN_FLAG`. CPD revocation high bits,
+RFC3161, lower-quality-chain, unknown flags, or any attempt to relax
+offline/no-UI/strong-sign policy remain refusals.
 
 The version-1 installation-root codec accepts only a reviewed root kind
 (`ProgramFilesX86`, `ProgramFiles64`, or `CurrentUserLocalAppData`) plus one to
@@ -374,11 +366,10 @@ domain-separated SHA-256 digest. `ExecutableTrustProfile` accepts only this
 typed root digest, a `ReviewedExecutableDigest`, and a `ReviewedSignerDigest`
 constructed from source-embedded static bytes; runtime file/SPKI/root
 observations remain evidence types and cannot be passed as expected pins by
-accident. Generic runtime root derivation is implemented, but no production
-target bytes, root kind/components, or signer value is configured and the
-native adapter has zero production references.
-Production therefore remains
-`UnavailableExecutableTrust`.
+accident. Production configures only the accepted x64 target bytes,
+`ProgramFiles64` components, and signer value; the observer is reachable only
+from read-only inspection or transaction preflight. Capability and selector
+gates remain closed.
 
 [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md) now freezes the evidence bundle,
 synthetic signed-fixture, and canonical-root derivation plan. The repository
@@ -395,12 +386,10 @@ authorization.
    seam, and a disconnected synthetic-base Windows DPAPI/ACL store are
    implemented. The LocalAppData/volume constructor is now wired through a
    side-effect-free lazy factory strictly after executable-trust verification;
-   current unavailable trust makes its production initialization unreachable.
-   The native executable API adapter remains disconnected. Repository-owned
-   signed-fixture evidence and generic runtime root derivation now exist, while
-   independent unsafe review is complete for a disconnected merge. Hosted NTFS
-   race/provider qualification, architecture-specific target/signer/root
-   provenance, and the trust production-wiring decision remain incomplete.
+   accepted trust must complete before its production initialization. The
+   native executable API adapter, hosted NTFS/provider qualification, accepted
+   architecture-specific target/signer/root provenance, and source wiring are
+   complete while capability remains false.
 3. Obtain a new, narrowly named privacy approval to measure target metadata;
    accept or reject a self-target profile without mutation.
 4. Separately measure the submit selector without invoking it.

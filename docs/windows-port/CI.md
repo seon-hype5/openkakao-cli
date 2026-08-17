@@ -119,8 +119,9 @@ performs no UI mutation, and cannot read user or application state.
   pre-readiness inspection permit closes and the synthetic worker is still
   pinned when cancellation is requested, but never call
   `CoEnableCallCancellation`, `CoCancelCall`, UIA, or a desktop API.
-- There is no service container, desktop session preparation, application
-  installation, account setup, network login, or secret injection.
+- In the two general safe workflows there is no service container, desktop
+  session preparation, application installation, account setup, network login,
+  or secret injection.
 - `RUST_BACKTRACE=0` prevents failure backtraces from becoming accidental
   diagnostic artifacts. Test failures must remain synthetic and redacted.
 
@@ -131,20 +132,25 @@ native call sites, but the production profile still advertises
 send-button selector is configured. Content-free replay and executable-trust
 decision seams are covered synthetically. The production ledger is composed
 through a side-effect-free lazy factory strictly behind executable-trust
-verification; current production trust returns
-`windows_executable_trust_unavailable`, so CI never resolves LocalAppData or
-opens the real DPAPI/ACL store. The repository fixture reaches only the
-disconnected WinTrust state seam and cannot supply a production root digest or
-caller. Generic root derivation is likewise compiled and tested only with
-synthetic paths; no executable-trust known folder is resolved. Synthetic
-contracts retain closed unavailable/uncertain-ledger
-coverage.
+verification. General CI has no approved live process/window, so it never
+constructs a usable live trust observer, resolves LocalAppData, or opens the
+real DPAPI/ACL store. The repository fixture
+cannot supply the accepted production root digest or caller. Generic root
+derivation remains tested only with synthetic paths in general CI; no
+executable-trust known folder is resolved there. Synthetic contracts retain
+closed unavailable/uncertain-ledger coverage.
 All-feature CI is compile and synthetic behavior coverage only; it must never
 be interpreted as permission to run a live UI command.
 
+The separate x64 artifact-qualification workflow is narrowly different: in
+two fresh hosted VMs it downloads only fixed-hash public installer/tool inputs,
+blocks all outbound traffic during installation, installs an IFEO refusal for
+`KakaoTalk.exe`, and compares static/installed public bytes. It executes no
+product binary, injects no account or secret, and uploads no artifact.
+
 ## Cache and artifact policy
 
-The workflow has no `upload-artifact` step. Its cache is limited to the Cargo
+No non-release workflow has an `upload-artifact` step. General CI caches only the Cargo
 registry, Cargo git checkout cache, and `.target/windows-ci`. Those locations
 contain dependencies and compiler outputs only because every executed test is
 synthetic. Do not add screenshots, UI trees, runtime traces, command stdout,

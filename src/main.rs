@@ -2830,7 +2830,9 @@ mod tests {
                 writable: true,
                 draft_empty: true,
                 focused: false,
-                selector_profile_id: Some("kakaotalk-windows-26.7.0.5255".to_string()),
+                selector_profile_id: Some(
+                    "kakaotalk-windows-x64-stable-26.7.0.5255-v1".to_string(),
+                ),
             },
         }
     }

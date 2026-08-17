@@ -16,13 +16,12 @@ ownership rules, and synthetic-test seams for five activation boundaries:
 - process owner-group modal evidence;
 - the approval-owned native target-binding permit;
 - the trust-ordered lazy production ledger; and
-- `UnavailableExecutableTrust`.
+- the accepted x64 executable-trust observer.
 
-It does not configure a signer or installation-root digest, advertise a send
-capability, inspect the installed KakaoTalk executable, observe a KakaoTalk
-window, mutate a composer, or authorize any live gate. Implementing these
-boundaries must leave all existing activation barriers in place until their
-separate evidence is reviewed.
+It configures only the public x64 signer, target, and installation-root digest.
+It does not advertise a send capability, authorize inspection of the installed
+KakaoTalk executable/window, mutate a composer, or authorize any live gate.
+All selector and approval barriers remain in place.
 
 ## Dependency-feature decision
 
@@ -185,9 +184,10 @@ canonical parent-chain no-reparse, volume-GUID/fixed-local,
 retained-base-handle, and fixed child-directory protocol below is implemented.
 `NativeMutationPort` references it only through a lazy factory. Port
 construction performs no I/O, transaction ordering checks executable trust
-before the first ledger method, and current production trust always refuses.
-Consequently tests and reachable production flows never call
-`SHGetKnownFolderPath` or write real LocalAppData.
+before the first ledger method, and the accepted x64 trust profile is exact.
+No valid production approval can yet be created because self-target evidence
+remains false. Consequently tests and current reachable production flows never
+call the ledger's `SHGetKnownFolderPath` or write real LocalAppData.
 
 The factory is consumed before its first open attempt. An error or unwind can
 never trigger an automatic second attempt in the same transaction object and
@@ -460,7 +460,7 @@ file/path/settings pointers, and null-reserved fields. Provider
 `pWintrustData`, `pgActionID`, and `pSigSettings` must point to those exact
 allocations. The provider-owned state must also report `CPD_CHOICE_SIP`, the
 exact caller low-word flags plus
-`CPD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT`, and zero low-level/final errors.
+`CPD_USE_NT5_CHAIN_FLAG`, and zero low-level/final errors.
 `fRecallWithState` is independent catalog-state evidence and any true value is
 catalog ambiguity. With zero secondary signatures, `dwVerifiedSigIndex` must
 be zero. After exact primary cardinality one, the signer helper must return the
@@ -485,16 +485,13 @@ Rust execution is still required because local Smart App Control blocked the
 new unsigned test binary before entry. This hash-only result does not replace
 a trusted timestamped WinTrust/provider success fixture.
 
-The current provider check rejects every additional high-word flag. The SDK
-also defines provider-added `CPD_RFC3161v21` and
-`CPD_RETURN_LOWER_QUALITY_CHAINS` flags, so that exact check may refuse a valid
-timestamped target. This is safe availability failure while the adapter is
-disconnected, not completed ABI qualification. Before activation, a positive
-trusted timestamped fixture must establish the observed flags. The eventual
-policy must require the caller low word exactly, require exactly the
-chain-excluding-root revocation choice, explicitly decide any observed
-RFC3161/lower-quality bits, and reject `CPD_USE_NT5_CHAIN_FLAG` and all unknown
-bits.
+Positive trusted timestamped target qualification on Windows 11
+`10.0.26200.9168` and hosted Windows Server 2022 `10.0.20348` established
+provider flags `0x80003080`: the exact caller low word plus only the documented
+`CPD_USE_NT5_CHAIN_FLAG`. The provider check requires that exact result. The
+caller low-word `WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT` and separate
+`WTD_REVOKE_WHOLECHAIN` remain mandatory; CPD revocation high bits,
+`CPD_RFC3161v21`, `CPD_RETURN_LOWER_QUALITY_CHAINS`, and unknown bits refuse.
 
 Every `WTD_STATEACTION_VERIFY` attempt that produced state is paired with
 exactly one `WTD_STATEACTION_CLOSE`, including trust failure, extraction
@@ -542,10 +539,10 @@ then emits only an evidence `TrustDigest`. Absolute/root/component text never
 enters evidence, errors, formatting, or the reviewed profile type.
 
 No implementation may inspect the current KakaoTalk installation and then
-declare that observed value trusted. Until an independently reviewed target
-whole-file digest/length, signer SPKI digest, root-relation digest, and Windows
-qualification matrix exist, production continues to use
-`UnavailableExecutableTrust`.
+declare that observed value trusted. Production uses only the independently
+reviewed x64 target whole-file digest/length, signer SPKI, root-relation digest,
+and Windows qualification matrix recorded in
+[`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md).
 
 ### Trust native API inventory
 
@@ -637,14 +634,16 @@ open the installed KakaoTalk binary.
 
 Automated native/transaction tests must not run the product binary, enumerate
 desktop windows, call the production native observer, or access KakaoTalk
-files. Within the two non-release safe CI workflows, the only automated
+files. Within the two general safe CI workflows, the only automated
 product-binary executions are the fourteen exact help/version/usage parser
 cases named in both workflows; broad or newly discovered CLI tests are
 forbidden. The separate tag/manual release workflow remains outside this
-claim. Synthetic trust qualification may launch only its owned copied unit-test
-harness or OS-supplied loopback helper, with no UI, external network,
-application data, or retained artifact. Live L10 and all later gates still
-require a fresh, explicitly named approval.
+claim. The separate artifact-qualification workflow may download and install
+only the pinned public installer in fresh network-isolated runners while IFEO
+prevents product execution; it uploads nothing. Synthetic trust qualification
+may launch only its owned copied unit-test harness or OS-supplied loopback
+helper. Live L10 and all later gates still require a fresh, explicitly named
+approval.
 
 ## Implementation order
 
@@ -654,24 +653,20 @@ require a fresh, explicitly named approval.
 3. Complete fault injection and implement the fixed LocalAppData constructor
    as a separate disconnected change. Both are complete.
 4. Implement the trust observer behind a fakeable native adapter without a
-   real KakaoTalk probe; keep production wiring unavailable. The call-policy,
-   state-lifetime orchestration, and disconnected native API adapter are
-   complete; no installed or production executable was opened or verified.
-   Only the repository-owned inert fixture now reaches the exact offline
-   WinTrust state boundary in automated tests.
+   real KakaoTalk probe. Complete: the call policy and lifetime orchestration
+   are wired to the accepted x64 profile while capability remains false.
 5. Wire the production ledger through a side-effect-free lazy factory only
    after trust verification, with one-shot non-retryable initialization
-   failure. Complete; current trust refusal leaves all native location/file
-   calls unreachable and no live store has been opened.
+   failure. Complete; only accepted trust can reach native location/file calls,
+   and no live store has been opened.
 6. Obtain signed release provenance, add a repository-owned reviewed fixture,
    independently audit the unsafe adapter, and review signer/root profile
    material. The fixture, reproducible build record, structural/SPKI test, and
    cache-only VERIFY/CLOSE test now exist as described in
-   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md). Independent disconnected-code
-   review is complete. Hosted OS qualification, production provenance, and
-   every production value remain absent. Generic runtime root derivation is
-   complete but the full adapter remains disconnected and has never resolved a
-   real application root.
+   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md). Independent code review,
+   hosted OS qualification, x64 production provenance, and exact source values
+   are complete. The adapter has not been invoked against this user's live
+   application; that first read-only session is L10 and requires fresh approval.
 7. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 

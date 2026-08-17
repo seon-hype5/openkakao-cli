@@ -147,7 +147,7 @@ or write authority.
 - No live-measured exact unique send-button selector/InvokePattern is
   configured.
 - A pure executable-trust verifier, fakeable VERIFY/extract/CLOSE
-  orchestration, and a disconnected native process/path/file/WinTrust/SPKI
+  orchestration, and a profile-bound native process/path/file/WinTrust/SPKI
   adapter exist. Distinct source-static target-byte, signer, and root-relation
   profile types prevent runtime observations from becoming expected pins.
   Runtime verification now requires an exact complete-file SHA-256, NTFS on a
@@ -159,27 +159,23 @@ or write authority.
   only the source-static known-folder kind and emits a bounded relation digest;
   observed paths cannot construct a profile. The repository fixture exercises
   structure, complete-file hashing, strong-policy pointer lifetime, SPKI, and
-  cache-only VERIFY/CLOSE without execution. The native adapter and fixture
-  remain disconnected from KakaoTalk.
+  cache-only VERIFY/CLOSE without execution. The adapter is wired to the
+  accepted x64 profile, but no user installation is observed without a fresh
+  live-gate approval.
 
-  Independent unsafe review accepted these additions for a production-
-  disconnected merge, but activation remains blocked. On Windows
-  `10.0.26200.0`/NTFS, a signed-PowerShell qualification rejected MD5/SHA-1,
+  Independent unsafe review accepted the native boundary. Windows 11
+  `10.0.26200` and hosted Windows Server 2022 `10.0.20348` rejected MD5/SHA-1,
   accepted SHA-256, and passed replacement before, between, and after the two
-  process-image path queries. The committed OS script and a Rust test now gate
-  those assumptions. Local Smart App Control refused the newly linked unsigned
-  Rust test binary before entry; it was compile/lint checked without bypassing
-  policy, and hosted execution remains required.
+  process-image path queries. The committed OS script and Rust test gate those
+  assumptions.
 
   Windows still documents `QueryFullProcessImageNameW` as returning a path,
   not a backing-file identity, so the NTFS timing matrix must pass on every
-  declared supported Windows image. A trusted timestamped fixture must also
-  qualify real provider traversal, weak-signature rejection, and legal provider
-  high-word flags. The current exact provider flag comparison may
-  conservatively reject RFC3161 timestamp state. No architecture-specific
-  Kakao target hash/SPKI/root bundle or production wiring exists. Production
-  refuses at `windows_executable_trust_unavailable` before ledger or UI
-  observation.
+  declared supported Windows image. The accepted timestamped x64 target
+  qualified real provider traversal and exact flags `0x80003080`; RFC3161,
+  lower-quality-chain, CPD revocation high bits, and unknown bits refuse. The
+  architecture-specific target hash/SPKI/root bundle and source wiring are in
+  [`KAKAOTALK_X64_TRUST_PROFILE.md`](KAKAOTALK_X64_TRUST_PROFILE.md).
 - Generic owner-chain evidence does not detect an unowned custom dialog or an
   overlay drawn inside the selected window. Activation needs negative live
   measurements and a reviewed version-specific rule if either shape exists.
@@ -197,10 +193,10 @@ or write authority.
   DPAPI/protected-ACL/write-through store is synthetically tested only under an
   explicit temporary base. The LocalAppData/volume-GUID/parent-chain locator
   is wired to the native port through a side-effect-free lazy factory, but
-  transaction ordering verifies executable trust first. Current production
-  trust refuses, so neither tests nor reachable production paths resolve the
-  known folder or open the store. A future ledger-open error or unwind is a
-  permanent non-retryable uncertainty for that transaction object.
+  transaction ordering verifies executable trust first. CI has no accepted
+  live process/window, so it cannot resolve the production ledger folder or
+  open the store. A ledger-open error or unwind is a permanent non-retryable
+  uncertainty for that transaction object.
 
 These are blockers to enabling production write capability, not reasons to
 weaken the gates.
