@@ -69,6 +69,7 @@ pub struct SafetyConfig {
     /// the build feature, backend capability, exact allowlist, and a fresh
     /// policy approval.
     #[serde(default)]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub allow_windows_ui_write: bool,
     /// Chat display names `local-send` is allowed to target. AX-send matches
     /// chats by display-name text scraped from the UI, not a chat-id (the
