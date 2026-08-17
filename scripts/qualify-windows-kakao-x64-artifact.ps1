@@ -756,7 +756,7 @@ $programFilesX86 = Get-KnownFolderPath -FolderId ([Guid]"7c5a40ef-a0fb-4bfc-874a
 $defaultSearchRoots = @(
     (Join-Path $programFiles64 "Kakao"),
     (Join-Path $programFilesX86 "Kakao"))
-if ((Find-KakaoTargets -Roots $defaultSearchRoots).Count -ne 0 -or
+if (@(Find-KakaoTargets -Roots $defaultSearchRoots).Count -ne 0 -or
     @(Get-Process -Name "KakaoTalk" -ErrorAction SilentlyContinue).Count -ne 0 -or
     (Test-Path -LiteralPath $ifeoKey)) {
     throw "hosted runner was not clean before installer qualification"
