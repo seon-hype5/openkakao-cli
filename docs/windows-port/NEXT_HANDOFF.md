@@ -556,9 +556,9 @@ must not be weakened merely to make a live test possible.
 ## Final non-live verification
 
 The Rust and static-documentation rows below were rerun locally for the
-target-boundary successor. The native-assumption PowerShell qualification
-remains the separately recorded predecessor/hosted result; no execution-policy
-bypass or trust-store change was made for this read-only boundary change.
+target-boundary successor. Local native-assumption qualification remained
+blocked by execution policy, while the successor's hosted Windows run reran it
+successfully. No execution-policy bypass or trust-store change was made.
 
 | Gate | Result |
 |---|---|
@@ -598,6 +598,12 @@ bypass or trust-store change was made for this read-only boundary change.
 | hosted cross-platform CI at `54c1381` | run `32004418502` passed Linux and macOS jobs |
 | hosted Windows safe CI at `988fc0f` | run `32006211269` passed every step |
 | hosted cross-platform CI at `988fc0f` | run `32006211297` passed Linux and macOS jobs |
+| hosted Windows safe CI at `5b0591a` | run `32013457539` passed every step, including native qualification and optimized all-feature tests |
+| hosted cross-platform CI at `5b0591a` | run `32013457513` passed Linux lint/tests and the macOS release build |
+
+The initial successor push `2e298ee` passed its synthetic and macOS jobs but
+exposed one Linux-only `dead_code` lint on the Windows worker-clone helper.
+`5b0591a` scopes that helper to Windows; no Windows behavior changed.
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -703,8 +709,6 @@ implementation; it likewise authorizes no probe or production wiring.
   later probes until it returns or the process exits. Native cancellation
   compatibility and performance have not been measured against a live UIA
   provider.
-- Re-run both hosted workflows for the target-boundary successor and require
-  green Windows, Linux, and macOS results before any live qualification work.
 - Live read-only observation proves that the v1 Edit triple is incompatible
   with the visible input. The v2 Document triple was then observed as one exact
   enabled writable composer in the selected window. The newly bracketed target
@@ -713,14 +717,12 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-The pre-boundary parent `988fc0f` passes the fully executed hosted Windows safe
-matrix in run `32006211269` and the paired Linux/macOS workflow in run
-`32006211297`. GitHub authentication is stored through the platform credential
+The target-boundary successor `5b0591a` passes the fully executed hosted Windows
+safe matrix in run `32013457539` and the paired Linux/macOS workflow in run
+`32013457513`. GitHub authentication is stored through the platform credential
 manager, the fork exists, and that commit is pushed on
-`integration/windows-mvp`. The next safe step is to commit and push this
-target-boundary successor, then require its Windows, Linux, and macOS hosted
-runs to pass. That work does not require a desktop session, product
-installation, KakaoTalk path/signature observation, or a trust-store change.
+`integration/windows-mvp`. No live KakaoTalk observation, UI mutation, or
+submission was performed while producing this evidence.
 
 After hosted CI, the next activation work is a newly approved, target-bound L10
 against the exact successor default-feature release binary. It may collect one
