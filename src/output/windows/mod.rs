@@ -130,6 +130,13 @@ const EVIDENCE_CODES: &[&str] = &[
     "read_only_composer_ambiguous",
     "read_only_candidate_not_inspected",
     "read_only_no_composer",
+    "read_only_candidate_executable_unverified",
+    "read_only_candidate_ui_profile_unknown",
+    "read_only_candidate_not_visible",
+    "read_only_candidate_disabled",
+    "read_only_candidate_modal_present",
+    "read_only_candidate_session_mismatch",
+    "read_only_candidate_integrity_incompatible",
     "modal_absent",
     "modal_present",
     "self_chat_verified",
@@ -366,7 +373,7 @@ fn safe_profile_id(backend: BackendKind, snapshot: &UiSnapshot) -> Option<String
 }
 
 fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
-    let mut evidence = Vec::with_capacity(20);
+    let mut evidence = Vec::with_capacity(27);
     push_state(
         &mut evidence,
         snapshot.app.app_running,
@@ -411,13 +418,50 @@ fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
                 ReadOnlyWindowAmbiguity::CandidateLimit => "read_only_candidate_limit",
                 ReadOnlyWindowAmbiguity::DuplicateComposer => "read_only_duplicate_composer",
                 ReadOnlyWindowAmbiguity::ComposerAmbiguous => "read_only_composer_ambiguous",
-                ReadOnlyWindowAmbiguity::CandidateNotInspected => {
+                ReadOnlyWindowAmbiguity::CandidateNotInspected(_) => {
                     "read_only_candidate_not_inspected"
                 }
                 ReadOnlyWindowAmbiguity::NoComposer => "read_only_no_composer",
             }
             .to_string(),
         );
+        if let ReadOnlyWindowAmbiguity::CandidateNotInspected(blockers) = reason {
+            push_positive(
+                &mut evidence,
+                blockers.executable_unverified(),
+                "read_only_candidate_executable_unverified",
+            );
+            push_positive(
+                &mut evidence,
+                blockers.ui_profile_unknown(),
+                "read_only_candidate_ui_profile_unknown",
+            );
+            push_positive(
+                &mut evidence,
+                blockers.window_not_visible(),
+                "read_only_candidate_not_visible",
+            );
+            push_positive(
+                &mut evidence,
+                blockers.window_disabled(),
+                "read_only_candidate_disabled",
+            );
+            push_positive(
+                &mut evidence,
+                blockers.modal_present(),
+                "read_only_candidate_modal_present",
+            );
+            push_positive(
+                &mut evidence,
+                blockers.session_mismatch(),
+                "read_only_candidate_session_mismatch",
+            );
+            push_positive(
+                &mut evidence,
+                blockers.integrity_incompatible(),
+                "read_only_candidate_integrity_incompatible",
+            );
+        }
     }
     push_state(
         &mut evidence,
@@ -502,6 +546,12 @@ fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
 
 fn push_state(evidence: &mut Vec<String>, state: bool, yes: &'static str, no: &'static str) {
     evidence.push(if state { yes } else { no }.to_string());
+}
+
+fn push_positive(evidence: &mut Vec<String>, state: bool, code: &'static str) {
+    if state {
+        evidence.push(code.to_string());
+    }
 }
 
 fn render_human_report(report: &ActionReport) -> String {

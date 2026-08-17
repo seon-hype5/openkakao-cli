@@ -8,8 +8,9 @@ execution guards without changing serialized report fields.
 The platform facade exports:
 
 - `UiCapabilities`;
-- `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, `UiSnapshot`, and the
-  fixed `ReadOnlyWindowAmbiguity` diagnostic enum;
+- `AppSnapshot`, `ChatTargetSnapshot`, `InputSnapshot`, `UiSnapshot`, the fixed
+  `ReadOnlyWindowAmbiguity` diagnostic enum, and its opaque bounded
+  `ReadOnlyCandidateBlockers` detail;
 - `InspectRequest`, opaque `TargetBindingEvidence`, `TargetKind`, and
   `PlatformProbe`;
 - `MessageSender`, `SendIntent`, `SecretMessage`, and `ApprovedSend`;
@@ -42,6 +43,11 @@ duplicate exact composers, an internally ambiguous composer, an uninspected
 candidate, or no exact composer. The classification order is deterministic.
 Any class is policy-rejected as `AmbiguousTarget` and is included in the opaque
 target-binding HMAC, so it cannot be moved to an otherwise acceptable snapshot.
+For the uninspected-candidate class only, existing observation booleans are
+unioned across candidates into fixed blocker classes. Reports expose no count,
+candidate association, or raw bitset; they append only allowlisted codes for
+executable trust, UI profile, visibility, enabled/modal, session, and integrity
+failure classes. No additional native or UIA observation is performed.
 
 Worker startup and native inspection share one eight-second budget. After the
 worker has enabled cancellation and published its pinned thread ID, expiry

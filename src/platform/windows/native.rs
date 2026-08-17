@@ -74,8 +74,8 @@ use super::{
 };
 use super::{
     profile_for, select_read_only_window, ComposerDiscovery, FileVersion, FingerprintKey,
-    NativeComposer, NativeInspection, NativeProcess, NativeWindow, ReadOnlyWindowAmbiguity,
-    UiProfile, WindowDiscovery, TOP_LEVEL_CLASS,
+    NativeComposer, NativeInspection, NativeProcess, NativeWindow, ReadOnlyCandidateBlockers,
+    ReadOnlyWindowAmbiguity, UiProfile, WindowDiscovery, TOP_LEVEL_CLASS,
 };
 #[cfg(feature = "windows-ui-write")]
 use crate::platform::{ApprovedSend, SendOutcome};
@@ -617,15 +617,24 @@ fn inspect_unique_window(
     };
 
     let profile = executable_verified.then(|| profile_for(version)).flatten();
-    let composer = if let Some(profile) = profile {
-        if visible && enabled && !modal_present && interactive_session_match && integrity_compatible
-        {
-            discover_composer(hwnd, pid, fingerprints, profile)?
-        } else {
-            ComposerDiscovery::NotInspected
-        }
+    let blockers = ReadOnlyCandidateBlockers::from_observation(
+        executable_verified,
+        profile.is_some(),
+        visible,
+        enabled,
+        modal_present,
+        interactive_session_match,
+        integrity_compatible,
+    );
+    let composer = if blockers.is_empty() {
+        discover_composer(
+            hwnd,
+            pid,
+            fingerprints,
+            profile.expect("empty composer blockers require a known UI profile"),
+        )?
     } else {
-        ComposerDiscovery::NotInspected
+        ComposerDiscovery::NotInspected(blockers)
     };
 
     revalidate_window(hwnd, pid)?;
@@ -1501,7 +1510,7 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.user_active = foreground_indicates_user_activity(hwnd, process.pid)?;
 
         match composer {
-            ComposerDiscovery::NotInspected | ComposerDiscovery::Absent => return Ok(fresh),
+            ComposerDiscovery::NotInspected(_) | ComposerDiscovery::Absent => return Ok(fresh),
             ComposerDiscovery::Ambiguous(count) => {
                 fresh.composer_count = count;
                 return Ok(fresh);

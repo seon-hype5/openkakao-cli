@@ -51,14 +51,109 @@ pub struct ProcessFingerprint {
 /// Content-free reason why read-only Windows discovery could not select one
 /// diagnostic window. The value is internal snapshot state: public reports
 /// map it to a fixed allowlisted evidence code, while serde omits it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadOnlyWindowAmbiguity {
     CandidateLimit,
     DuplicateComposer,
     ComposerAmbiguous,
-    CandidateNotInspected,
+    CandidateNotInspected(ReadOnlyCandidateBlockers),
     NoComposer,
+}
+
+/// Fixed aggregate reasons that prevented one or more visible read-only
+/// candidates from reaching composer inspection. The private bitset can only
+/// be constructed by crate-owned observation code; public reports expose
+/// individual booleans solely through allowlisted evidence codes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ReadOnlyCandidateBlockers(u8);
+
+impl fmt::Debug for ReadOnlyCandidateBlockers {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ReadOnlyCandidateBlockers(<fixed>)")
+    }
+}
+
+impl ReadOnlyCandidateBlockers {
+    const EXECUTABLE_UNVERIFIED: u8 = 1 << 0;
+    const UI_PROFILE_UNKNOWN: u8 = 1 << 1;
+    const WINDOW_NOT_VISIBLE: u8 = 1 << 2;
+    const WINDOW_DISABLED: u8 = 1 << 3;
+    const MODAL_PRESENT: u8 = 1 << 4;
+    const SESSION_MISMATCH: u8 = 1 << 5;
+    const INTEGRITY_INCOMPATIBLE: u8 = 1 << 6;
+
+    pub(crate) const fn from_observation(
+        executable_verified: bool,
+        known_ui_profile: bool,
+        visible: bool,
+        enabled: bool,
+        modal_present: bool,
+        interactive_session_match: bool,
+        integrity_compatible: bool,
+    ) -> Self {
+        let mut bits = 0_u8;
+        if !executable_verified {
+            bits |= Self::EXECUTABLE_UNVERIFIED;
+        } else if !known_ui_profile {
+            bits |= Self::UI_PROFILE_UNKNOWN;
+        }
+        if !visible {
+            bits |= Self::WINDOW_NOT_VISIBLE;
+        }
+        if !enabled {
+            bits |= Self::WINDOW_DISABLED;
+        }
+        if modal_present {
+            bits |= Self::MODAL_PRESENT;
+        }
+        if !interactive_session_match {
+            bits |= Self::SESSION_MISMATCH;
+        }
+        if !integrity_compatible {
+            bits |= Self::INTEGRITY_INCOMPATIBLE;
+        }
+        Self(bits)
+    }
+
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub(crate) const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub(crate) const fn binding_bits(self) -> u8 {
+        self.0
+    }
+
+    pub(crate) const fn executable_unverified(self) -> bool {
+        self.0 & Self::EXECUTABLE_UNVERIFIED != 0
+    }
+
+    pub(crate) const fn ui_profile_unknown(self) -> bool {
+        self.0 & Self::UI_PROFILE_UNKNOWN != 0
+    }
+
+    pub(crate) const fn window_not_visible(self) -> bool {
+        self.0 & Self::WINDOW_NOT_VISIBLE != 0
+    }
+
+    pub(crate) const fn window_disabled(self) -> bool {
+        self.0 & Self::WINDOW_DISABLED != 0
+    }
+
+    pub(crate) const fn modal_present(self) -> bool {
+        self.0 & Self::MODAL_PRESENT != 0
+    }
+
+    pub(crate) const fn session_mismatch(self) -> bool {
+        self.0 & Self::SESSION_MISMATCH != 0
+    }
+
+    pub(crate) const fn integrity_incompatible(self) -> bool {
+        self.0 & Self::INTEGRITY_INCOMPATIBLE != 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -354,10 +449,10 @@ fn update_snapshot_binding(mac: &mut HmacSha256, snapshot: &UiSnapshot) {
     update_bool(mac, snapshot.app.integrity_compatible);
     update_bool(mac, snapshot.app.known_ui_profile);
     mac.update(&u64_len(snapshot.app.top_level_window_count).to_le_bytes());
-    update_byte(
-        mac,
-        read_only_window_ambiguity_code(snapshot.app.read_only_window_ambiguity),
-    );
+    let (ambiguity_code, blocker_bits) =
+        read_only_window_ambiguity_binding(snapshot.app.read_only_window_ambiguity);
+    update_byte(mac, ambiguity_code);
+    update_byte(mac, blocker_bits);
     update_bool(mac, snapshot.app.modal_present);
 
     update_byte(mac, target_code(snapshot.target.kind));
@@ -430,14 +525,16 @@ fn target_code(value: TargetKind) -> u8 {
     }
 }
 
-const fn read_only_window_ambiguity_code(value: Option<ReadOnlyWindowAmbiguity>) -> u8 {
+const fn read_only_window_ambiguity_binding(value: Option<ReadOnlyWindowAmbiguity>) -> (u8, u8) {
     match value {
-        None => 0,
-        Some(ReadOnlyWindowAmbiguity::CandidateLimit) => 1,
-        Some(ReadOnlyWindowAmbiguity::DuplicateComposer) => 2,
-        Some(ReadOnlyWindowAmbiguity::ComposerAmbiguous) => 3,
-        Some(ReadOnlyWindowAmbiguity::CandidateNotInspected) => 4,
-        Some(ReadOnlyWindowAmbiguity::NoComposer) => 5,
+        None => (0, 0),
+        Some(ReadOnlyWindowAmbiguity::CandidateLimit) => (1, 0),
+        Some(ReadOnlyWindowAmbiguity::DuplicateComposer) => (2, 0),
+        Some(ReadOnlyWindowAmbiguity::ComposerAmbiguous) => (3, 0),
+        Some(ReadOnlyWindowAmbiguity::CandidateNotInspected(blockers)) => {
+            (4, blockers.binding_bits())
+        }
+        Some(ReadOnlyWindowAmbiguity::NoComposer) => (5, 0),
     }
 }
 
@@ -922,6 +1019,10 @@ mod tests {
 
     const TARGET_CANARY: &str = "SYNTHETIC_TARGET_CANARY";
 
+    fn executable_unverified_blocker() -> ReadOnlyCandidateBlockers {
+        ReadOnlyCandidateBlockers::from_observation(false, false, true, true, false, true, true)
+    }
+
     fn target_snapshot() -> UiSnapshot {
         UiSnapshot {
             app: AppSnapshot {
@@ -1042,12 +1143,78 @@ mod tests {
     #[test]
     fn read_only_ambiguity_is_not_part_of_the_serialized_snapshot_schema() {
         let mut snapshot = target_snapshot();
-        snapshot.app.read_only_window_ambiguity =
-            Some(ReadOnlyWindowAmbiguity::CandidateNotInspected);
+        snapshot.app.read_only_window_ambiguity = Some(
+            ReadOnlyWindowAmbiguity::CandidateNotInspected(executable_unverified_blocker()),
+        );
 
         let json = serde_json::to_string(&snapshot).expect("snapshot should serialize");
         assert!(!json.contains("read_only_window_ambiguity"));
         assert!(!json.contains("candidate_not_inspected"));
+    }
+
+    #[test]
+    fn candidate_blockers_are_fixed_bounded_and_union_without_counts() {
+        let first = ReadOnlyCandidateBlockers::from_observation(
+            false, false, false, true, false, false, true,
+        );
+        assert!(first.executable_unverified());
+        assert!(!first.ui_profile_unknown());
+        assert!(first.window_not_visible());
+        assert!(!first.window_disabled());
+        assert!(!first.modal_present());
+        assert!(first.session_mismatch());
+        assert!(!first.integrity_incompatible());
+
+        let second = ReadOnlyCandidateBlockers::from_observation(
+            true, false, true, false, true, true, false,
+        );
+        let aggregate = first.union(second);
+        assert!(aggregate.executable_unverified());
+        assert!(aggregate.ui_profile_unknown());
+        assert!(aggregate.window_not_visible());
+        assert!(aggregate.window_disabled());
+        assert!(aggregate.modal_present());
+        assert!(aggregate.session_mismatch());
+        assert!(aggregate.integrity_incompatible());
+        assert_eq!(
+            format!("{aggregate:?}"),
+            "ReadOnlyCandidateBlockers(<fixed>)"
+        );
+    }
+
+    #[test]
+    fn candidate_blockers_preserve_the_existing_composer_inspection_gate() {
+        for state in 0_u8..=0x7f {
+            let executable_verified = state & (1 << 0) != 0;
+            let known_ui_profile = state & (1 << 1) != 0;
+            let visible = state & (1 << 2) != 0;
+            let enabled = state & (1 << 3) != 0;
+            let modal_present = state & (1 << 4) != 0;
+            let interactive_session_match = state & (1 << 5) != 0;
+            let integrity_compatible = state & (1 << 6) != 0;
+            let blockers = ReadOnlyCandidateBlockers::from_observation(
+                executable_verified,
+                known_ui_profile,
+                visible,
+                enabled,
+                modal_present,
+                interactive_session_match,
+                integrity_compatible,
+            );
+            let existing_gate = executable_verified
+                && known_ui_profile
+                && visible
+                && enabled
+                && !modal_present
+                && interactive_session_match
+                && integrity_compatible;
+
+            assert_eq!(
+                blockers.is_empty(),
+                existing_gate,
+                "gate mismatch for synthetic state {state:#04x}"
+            );
+        }
     }
 
     #[test]
@@ -1145,8 +1312,9 @@ mod tests {
             value.app.top_level_window_count += 1
         });
         assert_binding_rejects_mutation(&permit, &bound, |value| {
-            value.app.read_only_window_ambiguity =
-                Some(ReadOnlyWindowAmbiguity::CandidateNotInspected)
+            value.app.read_only_window_ambiguity = Some(
+                ReadOnlyWindowAmbiguity::CandidateNotInspected(executable_unverified_blocker()),
+            )
         });
         assert_binding_rejects_mutation(&permit, &bound, |value| value.app.modal_present = true);
 
@@ -1176,6 +1344,26 @@ mod tests {
         assert_binding_rejects_mutation(&permit, &bound, |value| {
             value.input.selector_profile_id = None
         });
+    }
+
+    #[test]
+    fn target_binding_commits_candidate_blocker_details() {
+        let (request, permit) = InspectRequest::bound_self_chat(TARGET_CANARY, [0x7c; 32]);
+        let mut bound = target_snapshot();
+        let initial = executable_unverified_blocker();
+        bound.app.read_only_window_ambiguity =
+            Some(ReadOnlyWindowAmbiguity::CandidateNotInspected(initial));
+        let observed: Vec<u16> = TARGET_CANARY.encode_utf16().collect();
+        bound.target.target_binding = request.bind_observed_target_utf16(&observed, &bound);
+        assert!(permit.verifies_snapshot(&bound));
+
+        let mut changed = bound.clone();
+        let profile_unknown =
+            ReadOnlyCandidateBlockers::from_observation(true, false, true, true, false, true, true);
+        changed.app.read_only_window_ambiguity = Some(
+            ReadOnlyWindowAmbiguity::CandidateNotInspected(initial.union(profile_unknown)),
+        );
+        assert!(!permit.verifies_snapshot(&changed));
     }
 
     #[test]

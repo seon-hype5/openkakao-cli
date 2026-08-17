@@ -97,6 +97,14 @@ HWND/PID, title, label, UIA identity, and selector value are not emitted. Any
 ambiguity class remains a policy refusal and is bound into target evidence; the
 diagnostic cannot become mutation authority.
 
+If a candidate was not inspected, already-computed boolean blockers are ORed
+across every candidate and lose their candidate association. Output can state
+only whether any blocker belonged to one of seven fixed classes: executable
+trust, UI profile, visibility, enabled state, modal state, session, or
+integrity. It emits neither the private bitset nor a count, and the blocker set
+is included in the target-evidence HMAC. This refinement makes no new OS/UIA
+query and does not relax selection.
+
 The modal scan begins only after exact executable-name verification and reads
 only HWND/PID, visibility, owner, and root-owner relationships. Its callback
 retains no candidate list, title, class, or UIA property and publishes only the

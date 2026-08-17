@@ -731,3 +731,29 @@ fields are forged as acceptable, and the request-scoped target HMAC commits to
 the reason. This is diagnostic-only fail-closed state. It neither ignores an
 unknown candidate nor supplies self-chat, draft, submit-selector, or send
 evidence, and it authorizes no live retry or later gate.
+
+## ADR-049: Union fixed blocker classes for uninspected candidates
+
+The next separately approved L10 on `84955a8` returned
+`read_only_candidate_not_inspected`. That primary class proves only that one or
+more visible exact-class candidates could not enter composer discovery; it does
+not distinguish a rejected executable, unsupported profile, concurrent
+visibility change, disabled/modal state, session mismatch, or integrity
+incompatibility.
+
+When the primary class is `CandidateNotInspected`, carry a private bounded
+bitset formed only from booleans the existing inspection already computed.
+Across candidates, union the classes without retaining counts or candidate
+associations. The report may append only these fixed codes, in fixed order:
+`read_only_candidate_executable_unverified`,
+`read_only_candidate_ui_profile_unknown`,
+`read_only_candidate_not_visible`, `read_only_candidate_disabled`,
+`read_only_candidate_modal_present`,
+`read_only_candidate_session_mismatch`, and
+`read_only_candidate_integrity_incompatible`.
+
+No new native/UIA call, title/name/value read, raw identifier, or per-candidate
+record is introduced. Snapshot serde omits the primary reason and its blocker
+set; Debug redacts the private bits. The target-binding HMAC commits to every
+blocker bit, and the primary ambiguity continues to force policy refusal. This
+diagnostic successor authorizes no live retry, UI mutation, or send gate.

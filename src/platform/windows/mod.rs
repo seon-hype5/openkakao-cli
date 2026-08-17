@@ -31,8 +31,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AppSnapshot, ApprovedSend, ChatTargetSnapshot, InputSnapshot, InspectRequest, MessageSender,
-    PlatformProbe, ProcessFingerprint, ReadOnlyWindowAmbiguity, SendOutcome, TargetKind,
-    UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    PlatformProbe, ProcessFingerprint, ReadOnlyCandidateBlockers, ReadOnlyWindowAmbiguity,
+    SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind, UiPlatform, UiSnapshot,
 };
 
 const INSPECTION_TIMEOUT: Duration = Duration::from_secs(8);
@@ -187,7 +187,7 @@ struct NativeComposer {
 
 #[derive(Clone, PartialEq, Eq)]
 enum ComposerDiscovery {
-    NotInspected,
+    NotInspected(ReadOnlyCandidateBlockers),
     Absent,
     Unique(NativeComposer),
     Ambiguous(usize),
@@ -228,7 +228,7 @@ fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery
             let mut selected_index = None;
             let mut unique_count = 0_usize;
             let mut composer_ambiguous = false;
-            let mut candidate_not_inspected = false;
+            let mut candidate_blockers: Option<ReadOnlyCandidateBlockers> = None;
             for (index, candidate) in candidates.iter().enumerate() {
                 match &candidate.composer {
                     ComposerDiscovery::Unique(_) => {
@@ -236,7 +236,12 @@ fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery
                         selected_index.get_or_insert(index);
                     }
                     ComposerDiscovery::Ambiguous(_) => composer_ambiguous = true,
-                    ComposerDiscovery::NotInspected => candidate_not_inspected = true,
+                    ComposerDiscovery::NotInspected(blockers) => {
+                        candidate_blockers = Some(
+                            candidate_blockers
+                                .map_or(*blockers, |aggregate| aggregate.union(*blockers)),
+                        );
+                    }
                     ComposerDiscovery::Absent => {}
                 }
             }
@@ -249,8 +254,8 @@ fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery
                 Some(ReadOnlyWindowAmbiguity::ComposerAmbiguous)
             } else if unique_count > 1 {
                 Some(ReadOnlyWindowAmbiguity::DuplicateComposer)
-            } else if candidate_not_inspected {
-                Some(ReadOnlyWindowAmbiguity::CandidateNotInspected)
+            } else if let Some(blockers) = candidate_blockers {
+                Some(ReadOnlyWindowAmbiguity::CandidateNotInspected(blockers))
             } else if unique_count == 0 {
                 Some(ReadOnlyWindowAmbiguity::NoComposer)
             } else {
@@ -693,7 +698,7 @@ fn map_unique_window(
                 },
                 None,
             ),
-            ComposerDiscovery::Absent | ComposerDiscovery::NotInspected => {
+            ComposerDiscovery::Absent | ComposerDiscovery::NotInspected(_) => {
                 (unavailable_input(Some(profile.id)), None)
             }
         }
@@ -767,6 +772,10 @@ mod tests {
 
     fn window(version: Option<FileVersion>, composer: ComposerDiscovery) -> NativeWindow {
         window_with_fingerprint("run:synthetic-window", version, composer)
+    }
+
+    fn profile_unknown_blocker() -> ReadOnlyCandidateBlockers {
+        ReadOnlyCandidateBlockers::from_observation(true, false, true, true, false, true, true)
     }
 
     fn window_with_fingerprint(
@@ -1056,16 +1065,40 @@ mod tests {
             (
                 vec![
                     window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
-                    window(None, ComposerDiscovery::NotInspected),
+                    window(
+                        None,
+                        ComposerDiscovery::NotInspected(profile_unknown_blocker()),
+                    ),
                 ],
-                ReadOnlyWindowAmbiguity::CandidateNotInspected,
+                ReadOnlyWindowAmbiguity::CandidateNotInspected(profile_unknown_blocker()),
             ),
             (
                 vec![
                     window(Some(FileVersion::KNOWN), exact_composer()),
-                    window(None, ComposerDiscovery::NotInspected),
+                    window(
+                        None,
+                        ComposerDiscovery::NotInspected(profile_unknown_blocker()),
+                    ),
                 ],
-                ReadOnlyWindowAmbiguity::CandidateNotInspected,
+                ReadOnlyWindowAmbiguity::CandidateNotInspected(profile_unknown_blocker()),
+            ),
+            (
+                vec![
+                    window(Some(FileVersion::KNOWN), ComposerDiscovery::Absent),
+                    window(
+                        Some(FileVersion::KNOWN),
+                        ComposerDiscovery::NotInspected(
+                            ReadOnlyCandidateBlockers::from_observation(
+                                true, true, true, true, false, true, true,
+                            ),
+                        ),
+                    ),
+                ],
+                ReadOnlyWindowAmbiguity::CandidateNotInspected(
+                    ReadOnlyCandidateBlockers::from_observation(
+                        true, true, true, true, false, true, true,
+                    ),
+                ),
             ),
             (
                 vec![
@@ -1097,7 +1130,10 @@ mod tests {
         };
         let candidates = vec![
             window(Some(FileVersion::KNOWN), exact_composer()),
-            window(None, ComposerDiscovery::NotInspected),
+            window(
+                None,
+                ComposerDiscovery::NotInspected(profile_unknown_blocker()),
+            ),
             window(Some(FileVersion::KNOWN), exact_composer()),
             window(Some(FileVersion::KNOWN), ComposerDiscovery::Ambiguous(2)),
         ];
@@ -1124,7 +1160,7 @@ mod tests {
                         patch: 0,
                         build: 1,
                     }),
-                    ComposerDiscovery::NotInspected,
+                    ComposerDiscovery::NotInspected(profile_unknown_blocker()),
                 )),
             },
             20,

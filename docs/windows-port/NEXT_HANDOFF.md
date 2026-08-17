@@ -22,7 +22,7 @@ cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-`L10` was subsequently approved and attempted in three separate read-only
+`L10` was subsequently approved and attempted in four separate read-only
 sessions; all failed closed and it is not complete. Not completed or
 authorized now: a new `L10` attempt, `L20`, `L30`, `L40`, and final post-live
 task `R00`. A green I20 does not carry authority into any live gate.
@@ -142,6 +142,26 @@ handle/value, title, label, composer value, screenshot, or trace was printed or
 persisted. No dry-run, retry, input, stage, commit, or send followed. This third
 failure supplied no authority for another live attempt.
 
+### Fourth L10 with primary ambiguity reason
+
+After the ambiguity-reason successor `84955a8` passed Windows run
+`31998321030` and Linux/macOS run `31998321066`, the user granted another
+fresh L10-only approval under the same manually prepared self-chat and
+no-capture conditions. Root reverified the clean local/fork head and exact
+default-feature release binary (SHA-256
+`80d4a7e2dae7927119d68b49ef5ecc810f6f9c617e5c27ec941503b267841b6f`),
+then ran one `doctor --ui --json`.
+
+The command exited 0 with schema v1, `ui_profile=null`, `attempted=false`,
+`not_submitted`, the primary `top_level_window_ambiguous`, and
+`read_only_candidate_not_inspected`. This establishes only that at least one
+visible exact-class candidate could not enter composer inspection; the
+predecessor did not retain its fixed blocker class. Foreground, focus, Z-order
+neighbors, and clipboard sequence were all stable, and focus observation was
+available. No label/title/value, handle, PID, raw count, screenshot, trace,
+input, stage, commit, or send occurred. The session ended without a retry and
+supplied no authority for another live attempt.
+
 ## Offline remediation after the failed L10
 
 The failed sessions retained only fixed booleans, so they did not preserve a
@@ -179,6 +199,14 @@ not inspected, or no composer. The reason is omitted from snapshot serde,
 included in request-scoped target binding, and independently forces a policy
 refusal. Candidate order cannot change the chosen reason. No raw count or
 native/private value is emitted.
+
+The fourth result narrowed the primary reason but still combined all
+uninspected-candidate causes. The next offline successor therefore unions only
+already-computed candidate blocker booleans and emits fixed supplemental codes
+for executable trust, UI profile, visibility, enabled/modal state, session,
+and integrity. It keeps no count or candidate association, performs no new
+native/UIA call, redacts the private bitset in Debug and serde, binds every bit
+into target evidence, and leaves the same `AmbiguousTarget` policy refusal.
 
 This is not a self-chat selector and does not authorize a live retry. All
 target-identity booleans remain false, `send_open_chat` remains false, and the
@@ -431,7 +459,7 @@ and snapshot-only change.
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 196 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --lib` | 200 passed; 1 bounded qualification child ignored |
 | `cargo test --locked --lib --all-features platform::windows` | 118 passed; 1 bounded qualification child ignored |
 | `cargo test --locked --bin openkakao-cli` | 178 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
@@ -481,8 +509,8 @@ passed locally and in hosted run `31996648242`.
 
 ## Safety ledger for this implementation session
 
-- live KakaoTalk/UIA doctor probes: 3;
-- documented live before/after read-only guard snapshots: 4;
+- live KakaoTalk/UIA doctor probes: 4;
+- documented live before/after read-only guard snapshots: 6;
 - KakaoTalk UI mutations: 0;
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
@@ -576,13 +604,13 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-The visibility-narrowed predecessor `caed3f2` passes the fully executed hosted
-Windows safe matrix in run `31996648242` and the paired Linux/macOS workflow in
-run `31996648201`. GitHub authentication is stored through the platform
+The primary ambiguity predecessor `84955a8` passes the fully executed hosted
+Windows safe matrix in run `31998321030` and the paired Linux/macOS workflow in
+run `31998321066`. GitHub authentication is stored through the platform
 credential manager, the fork exists, and that commit is pushed on
-`integration/windows-mvp`. The next safe step is to commit and push the
-content-free ambiguity-diagnostic successor, then require its Windows, Linux,
-and macOS hosted runs to pass. That work does not require a desktop session,
+`integration/windows-mvp`. The next safe step is to commit and push the fixed
+candidate-blocker diagnostic successor, then require its Windows, Linux, and
+macOS hosted runs to pass. That work does not require a desktop session,
 product installation, KakaoTalk path/signature observation, or a trust-store
 change.
 

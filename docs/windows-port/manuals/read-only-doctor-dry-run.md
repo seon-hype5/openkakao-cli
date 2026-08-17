@@ -52,6 +52,10 @@ At a separately approved session, root performs these steps:
    candidate limit, duplicate composer, internally ambiguous composer,
    candidate not inspected, or no composer. This visibility narrowing and its
    diagnostic reasons are not used by the mutation path.
+   For `read_only_candidate_not_inspected`, the report may additionally state
+   any applicable fixed aggregate blocker classes for executable trust, UI
+   profile, visibility, enabled/modal state, session, and integrity. It must
+   never emit a count, candidate association, raw bitset, or native value.
 2. Run only `doctor --ui`; never run legacy `doctor` on Windows.
 3. Review the console report without persisting it. Confirm fixed schema,
    allowlisted evidence, and absence of private material.

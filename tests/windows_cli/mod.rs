@@ -11,7 +11,8 @@ use crate::output::windows::{
 use crate::platform::fake::FakeBackend;
 use crate::platform::{
     AppSnapshot, BackendKind, ChatTargetSnapshot, ExitCode, InputSnapshot, ProcessFingerprint,
-    ReadOnlyWindowAmbiguity, SendOutcome, TargetKind, UiError, UiErrorKind, UiPlatform, UiSnapshot,
+    ReadOnlyCandidateBlockers, ReadOnlyWindowAmbiguity, SendOutcome, TargetKind, UiError,
+    UiErrorKind, UiPlatform, UiSnapshot,
 };
 
 const TARGET_CANARY: &str = "SENSITIVE_TARGET_CANARY";
@@ -489,7 +490,7 @@ fn refusal_errors_map_to_stable_exit_codes_and_separate_streams() {
 }
 
 #[test]
-fn doctor_maps_each_read_only_ambiguity_to_one_fixed_evidence_code() {
+fn doctor_maps_each_primary_read_only_ambiguity_to_one_fixed_evidence_code() {
     let cases = [
         (
             ReadOnlyWindowAmbiguity::CandidateLimit,
@@ -502,10 +503,6 @@ fn doctor_maps_each_read_only_ambiguity_to_one_fixed_evidence_code() {
         (
             ReadOnlyWindowAmbiguity::ComposerAmbiguous,
             "read_only_composer_ambiguous",
-        ),
-        (
-            ReadOnlyWindowAmbiguity::CandidateNotInspected,
-            "read_only_candidate_not_inspected",
         ),
         (ReadOnlyWindowAmbiguity::NoComposer, "read_only_no_composer"),
     ];
@@ -528,6 +525,47 @@ fn doctor_maps_each_read_only_ambiguity_to_one_fixed_evidence_code() {
         assert!(rendered.stdout.contains(expected));
         assert!(!rendered.stdout.contains("read_only_window_ambiguity"));
     }
+}
+
+#[test]
+fn doctor_maps_candidate_blockers_only_to_fixed_aggregate_evidence_codes() {
+    let blockers =
+        ReadOnlyCandidateBlockers::from_observation(false, false, false, true, false, false, true)
+            .union(ReadOnlyCandidateBlockers::from_observation(
+                true, false, true, false, true, true, false,
+            ));
+    let mut snapshot = safe_snapshot();
+    snapshot.app.top_level_window_count = 2;
+    snapshot.app.read_only_window_ambiguity =
+        Some(ReadOnlyWindowAmbiguity::CandidateNotInspected(blockers));
+
+    let report = build_action_report(ReportAction::UiDoctor, BackendKind::Fake, &snapshot);
+    let reasons = report
+        .evidence
+        .iter()
+        .filter(|code| code.starts_with("read_only_"))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        reasons,
+        vec![
+            "read_only_candidate_not_inspected",
+            "read_only_candidate_executable_unverified",
+            "read_only_candidate_ui_profile_unknown",
+            "read_only_candidate_not_visible",
+            "read_only_candidate_disabled",
+            "read_only_candidate_modal_present",
+            "read_only_candidate_session_mismatch",
+            "read_only_candidate_integrity_incompatible",
+        ]
+    );
+
+    let rendered = render_report(&report, OutputMode::Json);
+    for reason in reasons {
+        assert!(rendered.stdout.contains(reason));
+    }
+    assert!(!rendered.stdout.contains("read_only_window_ambiguity"));
+    assert!(!rendered.stdout.contains("binding_bits"));
 }
 
 #[test]
