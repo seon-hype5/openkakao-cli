@@ -9,10 +9,10 @@ use the clipboard, or force focus or Z-order.
 
 Wave 2 adds a guarded transaction implementation, but not a usable production
 send profile. The default build excludes native UI write call sites. Even an
-all-feature build advertises `send_open_chat=false` because the current
-profile cannot privately prove self-chat identity and has no measured unique
-send-button selector. Production stage and commit therefore refuse before
-stdin or UI inspection.
+all-feature build advertises `send_open_chat=false` because the new private
+self-target selector candidate is not yet measurement-qualified and there is
+no measured unique send-button selector. Production stage and commit therefore
+refuse before stdin or UI inspection.
 
 ```text
 Windows CLI / redacted output
@@ -60,6 +60,9 @@ The Windows backend may:
   candidates without guessing;
 - perform a server-side exact UI Automation search for composer metadata on a
   dedicated windowless MTA thread; and
+- for a target-bound request only, compare the selected root's UIA Name in
+  scrub-on-drop UTF-16 memory and, after an exact match only, reduce the exact
+  composer's Value to an empty/nonempty bit; and
 - return run-local fingerprints and structured refusal evidence.
 
 Read-only workers are process-wide single-flight. If a third-party UIA
@@ -85,11 +88,17 @@ Edit fallback. This matches Microsoft's standard-control mapping of RichEdit
 to the UI Automation Document control type. Unknown or ambiguous profiles fail
 closed.
 
-The normal inspection path does not read window titles, UIA Name or Value
+The normal `doctor --ui` path does not read window titles, UIA Name or Value
 properties, room/profile labels, or draft text. It consequently leaves
 `exact_match`, `unique_match`, `self_chat_verified`, and `draft_empty` false.
-`doctor --ui` can return this redacted diagnostic state; production
-`local-send` cannot turn it into an approval.
+The renderer reports this as `draft_unobserved`, not `draft_present`.
+A target-bound `local-send` inspection is narrower: it accepts no target on the
+command line, requires exactly one configured allowlist entry, and reads only
+the selected root's `CurrentName` BSTR for an exact UTF-16 comparison. The
+process/root/modal/composer path is revalidated on both sides of that read. A
+successful match alone permits one exact-composer `CurrentValue` read, reduced
+to `draft_empty`. The root Name is read and bound again afterward; a mismatch
+discards the bit and refuses. All BSTRs are scrubbed without decoding or output.
 
 Only after exact executable-name verification, modal discovery separately
 enumerates top-level windows but retains only a boolean. A candidate blocks
@@ -106,8 +115,13 @@ tag are hidden inside `InspectRequest`. A probe receives no raw configured
 label. It can return opaque evidence only after an exact UTF-16 candidate
 match; that evidence commits to the entire redacted snapshot and is omitted
 from every serialized report. Replays under another request key and evidence
-moved to another state refuse. This is an offline contract only: the Windows
-probe has no observed-label reader and returns no proof.
+moved to another state refuse. When the draft bit changes after its guarded
+read, a second scrubbed Name observation must match before evidence is
+recomputed against the complete final snapshot.
+
+This selector remains a candidate, not production proof. Twenty separately
+opened positive observations and the ordinary/group/open/main/popup/duplicate
+negative matrix are still required, so `send_open_chat` remains false.
 
 Read-only narrowing does not apply to the native transaction path. Fresh
 write observation and final mutation preflight still require raw top-level
@@ -181,14 +195,16 @@ negative live measurements and any version-specific rule needed for those
 states.
 
 The native mutation port borrows the same `ApprovedSend` for the entire
-synchronous transaction. Any future ephemeral target label is compared only
+synchronous transaction. The ephemeral target label is compared only
 through that approval, whose verifier is permanently tied to its private
 policy snapshot; a native caller cannot supply a different snapshot. The
 observer immediately reduces the result to booleans and retains no label.
 Selection uses a closed internal state, and only its exact-unique variant may
 carry a label or invoke the verifier; exactness and uniqueness are not supplied
-as independent caller booleans. The current profile constructs only the absent
-state and therefore keeps the fresh and final target gates closed.
+as independent caller booleans. The current candidate constructs exact-unique
+only after raw enumeration itself contains one root and its Name matches the
+approval-owned permit. Its qualification gate remains closed until the required
+positive and negative observations pass.
 
 Stage-only is designed as:
 

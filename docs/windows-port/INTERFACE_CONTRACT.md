@@ -29,14 +29,16 @@ candidate count or native identifier is added to the report schema.
 ## Inspection semantics
 
 `PlatformProbe::inspect` is read-only: no focus, Z-order, clipboard, input
-value, room selection, network change, or submission. `inspect_dry_run`
-accepts only that trait.
+value mutation, room selection, network change, or submission.
+`inspect_dry_run` accepts only that trait.
 
-The Windows implementation does not read window titles, UIA Name/Value,
-room/profile names, or draft text during normal inspection. It may return a
-diagnostic snapshot for cleanly observed absent, ambiguous, or unknown-profile
-states; native/COM failures remain `UiError`. Target identity and draft-empty
-claims stay false in the current production profile.
+Plain `doctor --ui` does not read window titles, UIA Name/Value, room/profile
+names, or draft text. A target-bound inspection may read only the uniquely
+selected root's Name for an exact in-memory UTF-16 comparison and, after a
+successful binding, the exact composer's Value reduced to an empty/nonempty
+bit. It may return a diagnostic snapshot for cleanly observed absent,
+ambiguous, unknown-profile, or mismatched-target states; native/COM failures
+remain `UiError`.
 
 When multiple visible exact-class candidates cannot be narrowed, the internal
 snapshot distinguishes only five content-free classes: candidate limit,
@@ -81,9 +83,16 @@ request-scoped binding challenge. A probe can mint evidence only by supplying
 an exact observed UTF-16 label to the request. HMAC-SHA-256 binds the match to
 the complete redacted process/window/composer/time/input snapshot; the policy
 retains the key and rejects missing, replayed, mismatched, or moved evidence.
-The configured label is streamed through UTF-16 encoding without a secondary
-buffer. The current Windows probe does not read a label and therefore returns
-no binding evidence.
+When constructing the opaque binding, the configured label is streamed through
+UTF-16 encoding without a secondary UTF-16 buffer and must fit the same
+512-unit bound as an observed Name. The Windows candidate reads the selected
+root Name into a scrubbed BSTR before and after the guarded draft read. Both
+observations must bind to the same request; otherwise the draft bit is discarded
+and inspection refuses.
+Reports emit `draft_empty` or `draft_present` only when that guarded read is
+proven to have occurred. Plain doctor, mismatch, focus, or any other skipped
+read emits `draft_unobserved`; the fail-closed internal false bit is not
+misreported as evidence of a real draft.
 
 ## Mutation capability semantics
 
@@ -125,10 +134,19 @@ its label verifier is fixed to the approval's private policy-bound snapshot and
 accepts no caller-selected snapshot. The state machine requires independently
 fresh `target_binding_verified` evidence in addition to separate exact and
 unique claims before draft access or any mutation, and repeats the same
-approval-owned check in final native preflight. Current production observation
-constructs only a closed absent-selection state and always leaves that evidence
-false. Only a future exact-unique state may carry a label to the verifier;
-inexact and ambiguous states cannot call it or supply contradictory booleans.
+approval-owned check in final native preflight. A target-bound inspection may
+now carry the selected root's ephemeral UTF-16 UIA Name only from an exact
+profile/root/composer path. Exact match creates opaque evidence; mismatch is
+unique-inexact. The Name BSTR is never decoded or retained and is scrubbed
+before COM release. Plain doctor inspection carries no binding request and
+continues to read no Name or Value. Inexact and ambiguous states cannot mint
+evidence or supply contradictory booleans.
+
+Only a valid exact binding can authorize a guarded exact-composer Value read.
+The Value BSTR becomes one empty/nonempty bit and is scrubbed; target evidence
+is then rebound to the complete final snapshot. This selector is not yet
+positive/negative measurement-qualified, so these interfaces still supply no
+production capability.
 
 The native transaction is compiled only by the default-off
 `windows-ui-write` feature. This feature is not authorization. Runtime also
@@ -164,7 +182,7 @@ The Windows surface is:
 
 ```text
 openkakao-cli doctor --ui [--json]
-openkakao-cli local-send SELF_CHAT_NAME --stdin --opened-only \
+openkakao-cli local-send --stdin --opened-only \
   [--dry-run | --stage-only --yes | --commit --yes] [--json]
 ```
 
@@ -174,9 +192,10 @@ Windows-specific runtime gate and backend capability are present. The current
 backend capability is absent, so production writes remain unavailable.
 
 Stdin is the only Windows message path and is capped at 4,000 valid UTF-8 bytes
-and 1,000 Unicode scalar values. Mode, config, backend capability, policy
-configuration, and requested-label allowlist checks occur before message
-acquisition where applicable. A rejected positional message is never echoed
+and 1,000 Unicode scalar values. Windows accepts neither a target nor message
+positional; it resolves only a sole configured allowlist entry. Mode, config,
+backend capability, policy configuration, and allowlist checks occur before
+message acquisition where applicable. Any rejected positional is never echoed
 in parse output.
 
 The safety policy performs one inspection. Dry-run reports the exact retained

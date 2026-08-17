@@ -128,8 +128,9 @@ performs no UI mutation, and cannot read user or application state.
 `windows-ui-write` is a real, default-off build boundary rather than an
 authorization switch. Enabling it compiles the reviewed transaction and
 native call sites, but the production profile still advertises
-`send_open_chat=false` because no privacy-safe self-target proof or measured
-send-button selector is configured. Content-free replay and executable-trust
+`send_open_chat=false` because the privacy-bounded self-target candidate has no
+required live qualification matrix and no measured send-button selector is
+configured. Content-free replay and executable-trust
 decision seams are covered synthetically. The production ledger is composed
 through a side-effect-free lazy factory strictly behind executable-trust
 verification. General CI has no approved live process/window, so it never

@@ -81,7 +81,8 @@ Production mutation must remain unreachable:
 - `windows-ui-write` defaults off;
 - `allow_windows_ui_write` defaults false;
 - the Windows backend advertises `send_open_chat=false`;
-- native target identity remains unverified; and
+- the native target candidate remains unqualified by the required live
+  positive/negative matrix; and
 - the commit selector remains unconfigured.
 
 ## Exit evidence

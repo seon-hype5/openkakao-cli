@@ -29,9 +29,9 @@ A Windows UI write is unavailable unless every independent layer permits it:
   matches immediately before the atomic execution claim.
 
 The current production backend deliberately advertises no send capability.
-It has no privacy-safe target identity proof and no measured commit selector,
-so no amount of CLI flags or configuration can currently reach `SetValue` or
-`Invoke`.
+Its privacy-bounded target identity selector is an unqualified candidate and it
+has no measured commit selector, so no amount of CLI flags or configuration can
+currently reach `SetValue` or `Invoke`.
 
 ## Target, state, and replay rules
 
@@ -49,6 +49,16 @@ so no amount of CLI flags or configuration can currently reach `SetValue` or
 - Target selection is a closed native state. Only exact-unique selection may
   carry a label to the permit verifier; absent, inexact, and ambiguous states
   cannot invoke it or construct contradictory evidence flags.
+- Windows accepts no target or message positional for this path. The sole
+  configured allowlist entry is bound internally so target material never
+  appears in the process command line.
+- Plain doctor inspection reads no target Name or Value. A target-bound probe
+  may read only the selected root Name as UTF-16 for exact comparison and, only
+  after success, reduce the exact composer Value to an empty/nonempty bit. Both
+  BSTRs are scrubbed before COM release; neither is decoded, output, or stored.
+- Output distinguishes an unobserved fail-closed draft bit from an observed
+  nonempty draft: only a successfully bound guarded read may emit
+  `draft_empty`/`draft_present`; all skipped reads emit `draft_unobserved`.
 - PID alone is insufficient. A run-local digest includes executable identity
   and process creation time, and native preflight requeries both.
 - Existing, unknown, or changed drafts; stale snapshots; user focus; modals;
@@ -84,12 +94,15 @@ buffers are scrubbed on release. Debug, Display, JSON, human output, errors,
 fixtures, screenshots, and committed artifacts must never contain message
 text, real room/profile names, draft text, HWND, or UIA runtime IDs.
 
-The production read-only probe does not read window titles, UIA Name/Value,
-room/profile labels, or draft contents. Reports contain only fixed allowlisted
-action/profile/evidence/operation codes and run-local fingerprints. Unknown
-operation strings are replaced with `redacted_operation` in both streams.
-A rejected legacy positional message is handled by generic parse output so
-clap cannot echo it.
+Plain doctor inspection does not read window titles, UIA Name/Value,
+room/profile labels, or draft contents. A target-bound probe may compare only
+the uniquely selected root Name as UTF-16 and reduce the exact composer Value
+to an empty/nonempty bit after a successful match. It repeats the Name binding
+after the Value read; a concurrent target change discards the bit and refuses.
+Reports contain only fixed allowlisted action/profile/evidence/operation codes
+and run-local fingerprints. Unknown operation strings are replaced with
+`redacted_operation` in both streams. A rejected Windows target/message
+positional is handled by generic parse output so clap cannot echo it.
 
 Read-only multi-window ambiguity is retained only as one fixed content-free
 class and translated to one allowlisted report code. The raw candidate count,
@@ -130,13 +143,14 @@ retains no candidate list, title, class, or UIA property and publishes only the
 final boolean. Positive modal evidence also suppresses composer identity and
 input-availability evidence.
 
-The offline target-binding contract uses a new random HMAC-SHA-256 key for
+The target-binding contract uses a new random HMAC-SHA-256 key for
 each policy inspection. It streams the configured label through UTF-16 without
 allocating a second label buffer. Returned proof bytes have no public accessor,
 format only as redacted, are never serialized, commit to the full snapshot,
-and cannot validate under another request key. The native observer currently
-passes no label to the approval-owned verifier, so no production label read was
-added and production cannot currently create such proof.
+and cannot validate under another request key. The native candidate passes only
+borrowed scrubbed UTF-16 Name units to the approval-owned verifier. It can
+create proof for an exact target-bound inspection, but remains ineligible for
+production send capability until its live positive and negative matrix passes.
 
 No KakaoTalk data directory, database, token, cookie, credential, process
 memory, injection, hook, unofficial login, or telemetry is used by this port.

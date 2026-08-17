@@ -9,10 +9,14 @@ an already-open self-chat. It may not activate or focus a window, alter
 Z-order, set a value, invoke a control, synthesize input, touch the clipboard,
 open/search a room, or persist a UI dump.
 
-The production probe intentionally cannot prove self-chat identity or an empty
-draft without crossing the privacy boundary. Therefore a redacted UI doctor
-report can succeed while production local-send dry-run is expected to refuse.
-That refusal is a correct result, not permission to weaken evidence.
+Plain `doctor --ui` intentionally does not cross the private Name/Value
+boundary. A separately target-bound dry-run has an implemented candidate: it
+can compare one selected root Name in scrubbed UTF-16 memory and, after exact
+binding only, reduce the exact composer Value to an empty/nonempty bit. The
+root Name must bind again after that Value read or the bit is discarded. The
+candidate is not qualified until the required 20 positive and complete negative
+observations, including a deliberately colliding same-display-name non-self
+chat, pass. Refusal remains correct and is not permission to weaken evidence.
 
 ## Entry gate
 
@@ -35,7 +39,7 @@ copy/paste instruction for this session:
 
 ```text
 openkakao-cli doctor --ui --json
-<synthetic canary via stdin> | openkakao-cli local-send <SELF_CHAT_LABEL_IN_MEMORY> --stdin --opened-only --dry-run --json
+<synthetic canary via stdin> | openkakao-cli local-send --stdin --opened-only --dry-run --json
 ```
 
 At a separately approved session, root performs these steps:
@@ -62,13 +66,17 @@ At a separately approved session, root performs these steps:
    from existence checks for the three exact two-property subsets of the
    reviewed selector. They never
    expose the observed value, element, count, association, Name, or Value.
-2. Run only `doctor --ui`; never run legacy `doctor` on Windows.
+2. Run only `doctor --ui`; never run legacy `doctor` on Windows. This first
+   command carries no target binding and reads no Name or Value.
 3. Review the console report without persisting it. Confirm fixed schema,
    allowlisted evidence, and absence of private material.
-4. Generate one session-specific synthetic canary in memory and feed it only
-   through stdin to the dry-run shape.
-5. Treat target or input-state refusal as expected for the metadata-only
-   backend. Do not retry with weaker matching or alternate selectors.
+4. For the separately named target-bound portion, require exactly one
+   configured allowlist entry. Generate one session-specific synthetic canary
+   in memory and feed it only through stdin to the dry-run shape; never put the
+   target or message in argv.
+5. The candidate may emit only redacted target/input evidence. Treat mismatch,
+   focus, existing/unknown draft, or other refusal as final for that observation.
+   Do not retry with weaker matching or alternate selectors.
 6. Compare the after-state to the before-state. Every mutation indicator must
    be unchanged.
 7. Discard the canary and execution-scoped fingerprint secret from memory.
@@ -77,12 +85,12 @@ At a separately approved session, root performs these steps:
 
 - UI doctor output contains only schema-version-1 fixed fields and redacted
   evidence.
-- Dry-run produces either an intended plan from a separately approved safe
-  fake or a stable production refusal; it never stages or commits.
+- Dry-run produces either a fully validated redacted plan or a stable
+  production refusal; it never stages or commits.
 - Inspect count is bounded by the reviewed path and mutation counts are zero.
 - The before-state, doctor report, and after-state agree on one narrowed
-  composer-bearing diagnostic window; this remains only composer evidence,
-  not proof of self-chat identity.
+  composer-bearing diagnostic window. A target-bound exact result counts only
+  as one candidate observation, not as completed selector qualification.
 - Foreground, focus, Z-order, clipboard sequence, and composer value length are
   unchanged.
 - No persistent artifact is created by default.

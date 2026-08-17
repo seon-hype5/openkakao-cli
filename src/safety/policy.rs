@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroize;
 
 use super::ApprovalToken;
-use crate::platform::contract::TargetBindingPermit;
+use crate::platform::contract::{TargetBindingPermit, MAX_TARGET_LABEL_UTF16_UNITS};
 use crate::platform::{
     exact_unique_match, ApprovedSend, ExactMatch, InspectRequest, MessageSender, PlatformProbe,
     SendIntent, SendMode, SendOutcome, TargetKind, UiCapabilities, UiError, UiErrorKind,
@@ -74,8 +74,8 @@ pub struct WindowsPolicyConfig {
 }
 
 impl WindowsPolicyConfig {
-    /// Build an exact allowlist. Empty lists, empty/control-bearing entries,
-    /// and byte-for-byte duplicate entries are rejected.
+    /// Build an exact allowlist. Empty lists, empty/control-bearing or
+    /// over-bound entries, and byte-for-byte duplicate entries are rejected.
     pub fn new<I, S>(labels: I) -> Result<Self, UiError>
     where
         I: IntoIterator<Item = S>,
@@ -89,6 +89,7 @@ impl WindowsPolicyConfig {
                 label.is_empty()
                     || label.chars().all(char::is_whitespace)
                     || label.chars().any(char::is_control)
+                    || label.encode_utf16().count() > MAX_TARGET_LABEL_UTF16_UNITS
             })
         {
             allowed_self_chat_labels.zeroize();
@@ -727,11 +728,11 @@ fn validate_input_snapshot(snapshot: &UiSnapshot) -> Result<(), UiError> {
             OP_INPUT_SNAPSHOT,
         ));
     }
-    if !input.draft_empty {
-        return Err(policy_error(UiErrorKind::ExistingDraft, OP_INPUT_SNAPSHOT));
-    }
     if input.focused {
         return Err(policy_error(UiErrorKind::UserActive, OP_INPUT_SNAPSHOT));
+    }
+    if !input.draft_empty {
+        return Err(policy_error(UiErrorKind::ExistingDraft, OP_INPUT_SNAPSHOT));
     }
     if input.selector_profile_id.as_deref() != Some(SUPPORTED_SELECTOR_PROFILE_ID) {
         return Err(policy_error(

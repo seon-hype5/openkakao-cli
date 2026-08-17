@@ -9,15 +9,19 @@ Current production capability: `send_open_chat=false`
 ## Purpose
 
 This document turns the remaining activation blockers into reviewable
-contracts. It deliberately supplies no guessed KakaoTalk selector and changes
-no capability. Target identity and submit metadata require future live
-measurement under new explicit approval; durable replay and executable trust
-can be implemented and tested offline only after this RFC is accepted.
+contracts. It changes no capability. A privacy-bounded target selector
+candidate is now implemented but remains unqualified; submit metadata still
+requires future live measurement. Durable replay and executable trust remain
+independent activation requirements.
 
 ## Non-goals
 
-- Do not read or persist a room title, profile name, message, draft, UI tree,
-  KakaoTalk file, database, credential, token, cookie, or process memory.
+- Do not persist or output a room title, profile name, message, draft, UI tree,
+  or any KakaoTalk file, database, credential, token, cookie, or process memory.
+- Do not read conversation history. The only candidate private reads are the
+  selected root's UIA Name for an in-memory exact comparison and, only after
+  that binding succeeds, the exact composer's Value reduced to an
+  empty/nonempty bit. Both BSTR allocations are scrubbed before release.
 - Do not infer self-chat from process, window class, composer presence, focus,
   screen position, or a caller-supplied boolean.
 - Do not use keyboard input, Enter, clipboard, focus/Z-order changes, OCR,
@@ -26,7 +30,8 @@ can be implemented and tested offline only after this RFC is accepted.
 
 ## A. Requested self-chat binding
 
-Offline contract status: implemented synthetically, not activated. Each
+Candidate status: implemented, synthetically covered, not measured or
+activated. Each
 policy inspection now creates an opaque request-scoped HMAC key/label tag. A
 probe can produce nonserializing redacted evidence only from an exact observed
 UTF-16 candidate, and the proof commits to the complete redacted snapshot.
@@ -39,26 +44,43 @@ private snapshot, accepts no caller-selected snapshot, and retains no observed
 label. Native selection is a closed state rather than an optional label plus
 caller-chosen booleans; only an exact-unique state can invoke the verifier.
 
-The production self-target observer remains deliberately disconnected: it reads
-no title/Name/label, passes no candidate to the verifier, produces no proof,
-leaves target binding false, and cannot read draft Value. Synthetic absent,
-mismatch, unique-inexact, ambiguous-inexact, and ambiguous-exact cases cover
-the permit seam and prove that non-exact/non-unique states never call the
-verifier. This scaffold satisfies no measurement requirement below and grants
-no live or write authority.
+The candidate observer runs only for a target-bound `local-send` inspection;
+plain `doctor --ui` still reads no Name or Value. Windows accepts no target
+positional argument. Exactly one configured allowlist entry is HMAC-bound into
+the request without copying it into the command line; configured and observed
+labels are capped at 512 UTF-16 units. After executable trust,
+one selected exact-profile top-level root, one exact v2 composer, no modal,
+matching session/integrity, and pre-read revalidation, the worker reads only
+the root element's `CurrentName` BSTR. It never decodes or formats that BSTR.
+An exact UTF-16 match creates state-bound evidence; a mismatch retains only a
+unique-inexact state. The same process instance, root, modal state, and composer
+are revalidated while the BSTR is alive.
 
-The current policy checks that a requested label occurs exactly once in the
-configured allowlist, while the native snapshot independently leaves
-`self_chat_verified=false`. A future implementation must bind the exact
-allowlist entry to independently observed live target evidence; setting the
-three target booleans together is not a proof.
+Only a successful binding can authorize one `CurrentValue` read from the same
+exact composer. That BSTR is reduced to `draft_empty`, scrubbed, and the target
+Name is independently read and bound again afterward. A mismatch discards the
+draft bit and refuses; a match rebinds evidence to the complete changed
+snapshot. The mutation observer and final preflight bracket their draft reads
+with the same exact Name comparison, and actual SetValue/Invoke entry repeats
+it once more through the approval-owned permit. No raw Name, Value, label,
+handle, or fingerprint enters output or persistence.
+
+This candidate still satisfies none of the positive/negative measurement
+counts below. It does not establish that KakaoTalk's root Name is a stable
+self-chat discriminator, and it grants no write authority. Synthetic absent,
+mismatch, unique-inexact, ambiguous-inexact, and ambiguous-exact cases continue
+to prove that non-exact/non-unique states cannot mint usable evidence.
+Pre/post Name bracketing also cannot prove that an element changed away and
+back between observations; activation review must either rule that transition
+out with stronger identity/navigation evidence or retain it as a blocker.
 
 An acceptable target profile must provide all of the following:
 
 1. version-bound, case-sensitive selector fields and a bounded ancestor path;
 2. an exact and unique result in 20 separately opened self-chat observations;
 3. zero matches in negative observations covering ordinary direct, group,
-   open-chat, main-window, popup, and duplicate-window states;
+   open-chat, main-window, popup, duplicate-window, and deliberately colliding
+   same-display-name states;
 4. a fresh run-local fingerprint bound to process creation time, HWND, and the
    composer selected by the same profile;
 5. byte-exact binding to the configured requested target without Unicode,
@@ -66,12 +88,12 @@ An acceptable target profile must provide all of the following:
 6. no raw label, title, UIA Name/Value, handle, runtime ID, or fingerprint in
    output or a persistent artifact.
 
-If no stable non-content property can distinguish self-chat, reading a label
-only for an in-memory exact comparison is a new privacy boundary. It needs a
-separate named approval and RFC amendment; ordinary L10 does not authorize it.
-The buffer would have to remain UTF-16/zeroizing, never become a Rust `String`,
-and be scrubbed before COM release. Until that design is approved and measured,
-target identity remains false.
+The separate `target-label-in-memory-exact-compare` privacy boundary was
+approved for implementation in the 2026-08-17 user session. This amendment
+implements its UTF-16-only, scrub-before-release design. That approval does not
+substitute for requirements 2 and 3 above, does not qualify the candidate, and
+does not authorize stage, commit, or a send capability. Until the measurement
+matrix passes and is reviewed, production activation remains false.
 
 ### A.1 Approval lifetime
 
@@ -133,7 +155,7 @@ may unblock the client, but custom marshaling may expose no cancel object and a
 server may continue processing. The worker therefore retains the process-wide
 single-flight lease until the native call actually returns; unsupported hangs
 still block later probes rather than accumulating threads. Cancellation is
-restricted to metadata-only inspection and is never enabled for the joined
+restricted to bounded read-only inspection and is never enabled for the joined
 mutation worker. Pure duration, HRESULT, and channel-order tests invoke no COM
 or desktop API. This containment adds no selector, target evidence, send
 capability, or live authorization.

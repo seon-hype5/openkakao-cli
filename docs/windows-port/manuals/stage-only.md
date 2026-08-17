@@ -6,8 +6,9 @@ L20 may be considered only after L10 passes in a separately approved session
 and a privacy-preserving design deterministically proves exact unique
 self-chat identity and empty draft state. A transaction implementation now
 exists behind the default-off `windows-ui-write` build feature, but the
-production profile proves neither prerequisite and therefore advertises no
-send capability. Do not run it merely to observe the refusal.
+production target candidate has not completed its live qualification matrix,
+and no submit selector is configured. The backend therefore advertises no send
+capability. Do not run it merely to observe the refusal.
 
 ## Required fresh approval
 

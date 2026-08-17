@@ -74,6 +74,8 @@ const OPERATION_CODES: &[&str] = &[
     "windows_process_open",
     "windows_process_session",
     "windows_read_only_inspect",
+    "windows_self_chat_allowlist_empty",
+    "windows_self_chat_allowlist_not_unique",
     "windows_stage_not_in_wave_1",
     "windows_stage_after_set_value_uncertain",
     "windows_stdin_invalid_utf8",
@@ -83,6 +85,7 @@ const OPERATION_CODES: &[&str] = &[
     "windows_token_integrity_sid",
     "windows_token_integrity_size",
     "windows_token_open",
+    "windows_target_changed_during_draft_read",
     "windows_transaction_thread_uncertain",
     "windows_ui_doctor_required",
     "windows_ui_inspect_unavailable",
@@ -164,6 +167,7 @@ const EVIDENCE_CODES: &[&str] = &[
     "composer_not_writable",
     "draft_empty",
     "draft_present",
+    "draft_unobserved",
     "composer_focused",
     "composer_not_focused",
     "selector_profile_observed",
@@ -551,12 +555,25 @@ fn redacted_evidence(snapshot: &UiSnapshot) -> Vec<String> {
         "composer_writable",
         "composer_not_writable",
     );
-    push_state(
-        &mut evidence,
-        snapshot.input.draft_empty,
-        "draft_empty",
-        "draft_present",
-    );
+    let draft_observed = snapshot.target.target_binding.is_some()
+        && snapshot.target.self_chat_verified
+        && snapshot.target.exact_match
+        && snapshot.target.unique_match
+        && snapshot.input.present
+        && snapshot.input.unique
+        && snapshot.input.enabled
+        && snapshot.input.writable
+        && !snapshot.input.focused;
+    if draft_observed {
+        push_state(
+            &mut evidence,
+            snapshot.input.draft_empty,
+            "draft_empty",
+            "draft_present",
+        );
+    } else {
+        evidence.push("draft_unobserved".to_string());
+    }
     push_state(
         &mut evidence,
         snapshot.input.focused,

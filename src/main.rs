@@ -789,6 +789,21 @@ fn windows_transaction_nonce() -> String {
 }
 
 #[cfg(target_os = "windows")]
+fn resolve_windows_self_chat_label(config: &config::OpenKakaoConfig) -> Result<&str, UiError> {
+    match config.safety.allowed_send_chats.as_slice() {
+        [label] => Ok(label.as_str()),
+        [] => Err(UiError::new(
+            UiErrorKind::TargetNotFound,
+            "windows_self_chat_allowlist_empty",
+        )),
+        _ => Err(UiError::new(
+            UiErrorKind::AmbiguousTarget,
+            "windows_self_chat_allowlist_not_unique",
+        )),
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn run_windows_local_send(
     options: &WindowsLocalSendOptions,
     config: &config::OpenKakaoConfig,
@@ -845,12 +860,16 @@ where
         }
     }
 
+    let requested_label = match resolve_windows_self_chat_label(config) {
+        Ok(label) => label,
+        Err(error) => return render_error(&error, output_mode),
+    };
     let policy_config =
         match WindowsPolicyConfig::new(config.safety.allowed_send_chats.iter().cloned()) {
             Ok(config) => config,
             Err(error) => return render_error(&error, output_mode),
         };
-    if let Err(error) = policy_config.validate_requested_label(options.self_chat_name_secret()) {
+    if let Err(error) = policy_config.validate_requested_label(requested_label) {
         return render_error(&error, output_mode);
     }
 
@@ -867,8 +886,7 @@ where
     );
     let policy = WindowsSafetyPolicy::new(policy_config);
     match mode {
-        SendMode::DryRun => match policy.dry_run(backend, options.self_chat_name_secret(), &intent)
-        {
+        SendMode::DryRun => match policy.dry_run(backend, requested_label, &intent) {
             Ok(plan) => render_report(
                 &build_action_report(
                     ReportAction::LocalSend,
@@ -880,7 +898,7 @@ where
             Err(error) => render_error(&error, output_mode),
         },
         SendMode::StageOnly | SendMode::Commit => {
-            match policy.authorize(backend, options.self_chat_name_secret(), intent) {
+            match policy.authorize(backend, requested_label, intent) {
                 Ok(approval) => {
                     let snapshot = approval.snapshot().clone();
                     match approval.execute(backend) {
@@ -2735,17 +2753,10 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_local_send_command_parses_without_argv_message() {
-        let cli = Cli::try_parse_from([
-            "openkakao-cli",
-            "local-send",
-            "SYNTHETIC_SELF_CHAT",
-            "--stdin",
-            "--opened-only",
-        ])
-        .expect("Windows local-send should parse");
+        let cli = Cli::try_parse_from(["openkakao-cli", "local-send", "--stdin", "--opened-only"])
+            .expect("Windows local-send should parse");
         match cli.command {
             Commands::LocalSend(options) => {
-                assert_eq!(options.self_chat_name_secret(), "SYNTHETIC_SELF_CHAT");
                 assert_eq!(
                     options.mode().expect("mode should validate"),
                     SendMode::DryRun
@@ -2757,12 +2768,48 @@ mod tests {
         assert!(Cli::try_parse_from([
             "openkakao-cli",
             "local-send",
-            "SYNTHETIC_SELF_CHAT",
-            "SENSITIVE_ARGV_MESSAGE",
+            "SENSITIVE_ARGV_TARGET_OR_MESSAGE",
             "--stdin",
             "--opened-only",
         ])
         .is_err());
+
+        let config_only =
+            Cli::try_parse_from(["openkakao-cli", "local-send", "--stdin", "--opened-only"])
+                .expect("Windows local-send may resolve one configured allowlist entry");
+        match config_only.command {
+            Commands::LocalSend(_) => {}
+            other => panic!("expected local-send, got {other:?}"),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_local_send_resolves_only_one_configured_target_without_argv_label() {
+        let cli = Cli::try_parse_from(["openkakao-cli", "local-send", "--stdin", "--opened-only"])
+            .expect("config-only Windows local-send should parse");
+        let Commands::LocalSend(_options) = cli.command else {
+            panic!("expected local-send");
+        };
+
+        let mut config = config::OpenKakaoConfig::default();
+        config.safety.allowed_send_chats = vec!["SYNTHETIC_SELF_CHAT".to_string()];
+        assert_eq!(
+            resolve_windows_self_chat_label(&config).expect("one allowlist entry must resolve"),
+            "SYNTHETIC_SELF_CHAT"
+        );
+
+        config.safety.allowed_send_chats.clear();
+        let empty = resolve_windows_self_chat_label(&config)
+            .expect_err("an empty allowlist must fail closed");
+        assert_eq!(empty.kind, UiErrorKind::TargetNotFound);
+        assert_eq!(empty.operation, "windows_self_chat_allowlist_empty");
+
+        config.safety.allowed_send_chats = vec!["ONE".to_string(), "TWO".to_string()];
+        let multiple = resolve_windows_self_chat_label(&config)
+            .expect_err("multiple implicit targets must remain ambiguous");
+        assert_eq!(multiple.kind, UiErrorKind::AmbiguousTarget);
+        assert_eq!(multiple.operation, "windows_self_chat_allowlist_not_unique");
     }
 
     #[cfg(target_os = "windows")]
@@ -2770,7 +2817,6 @@ mod tests {
         let cli = Cli::try_parse_from([
             "openkakao-cli",
             "local-send",
-            "SYNTHETIC_SELF_CHAT",
             "--stdin",
             "--opened-only",
             mode,
@@ -2947,7 +2993,7 @@ mod tests {
             .with_observed_target_label("SYNTHETIC_SELF_CHAT");
         let mut input = ReaderMessageInput::new(std::io::Cursor::new(b"SYNTHETIC_BODY".to_vec()));
         let mut config = windows_write_test_config();
-        config.safety.allowed_send_chats = vec!["DIFFERENT_SYNTHETIC_TARGET".to_string()];
+        config.safety.allowed_send_chats.clear();
 
         let output = run_windows_local_send_with(
             &options,
@@ -2965,7 +3011,6 @@ mod tests {
         assert_eq!(backend.commit_calls(), 0);
         for canary in [
             "SYNTHETIC_SELF_CHAT",
-            "DIFFERENT_SYNTHETIC_TARGET",
             "SYNTHETIC_BODY",
             "SYNTHETIC_NONCE_CANARY",
         ] {

@@ -13,7 +13,7 @@ authorization.
 
 | Gate | Manual | Effect ceiling | Current status |
 |---|---|---|---|
-| L10 | [Read-only doctor and dry-run](read-only-doctor-dry-run.md) | Metadata-only UI inspection; zero mutation | Not authorized |
+| L10 | [Read-only doctor and dry-run](read-only-doctor-dry-run.md) | Bounded read-only UI inspection; zero mutation | Not authorized |
 | L20 | [Stage-only](stage-only.md) | Place one synthetic canary in an empty composer, then safely restore | Not authorized; product support absent |
 | L30 | [User-manual-submit](user-manual-submit.md) | User submits one staged synthetic canary | Not authorized; product support absent |
 | L40 | [One-shot automatic smoke](one-shot-automatic-smoke.md) | Automation issues exactly one approved commit | Not authorized; product support absent |

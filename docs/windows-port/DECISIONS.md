@@ -805,3 +805,37 @@ remain refusals.
 This is an evidence-backed candidate correction, not proof of a unique live
 composer, self-chat identity, draft state, or send control. It authorizes no
 live retry, stage, commit, or message send.
+
+## ADR-052: Bracket a draft read with ephemeral root-Name binding
+
+The user separately approved the named
+`target-label-in-memory-exact-compare` privacy boundary on 2026-08-17. Remove
+the Windows target positional entirely: `local-send` may resolve only one exact
+configured allowlist entry, so neither target nor message material enters the
+process command line. Zero entries fail not-found and multiple entries fail
+ambiguous before native inspection.
+
+For a target-bound request only, require accepted executable trust, a selected
+exact-class root, no modal, matching session/integrity, and one exact v2
+composer. Revalidate the process creation instance, root, modal group, and
+composer before and after reading the root element's read-only
+[`CurrentName`](https://learn.microsoft.com/en-us/windows/win32/api/uiautomationclient/nf-uiautomationclient-iuiautomationelement-get_currentname).
+Keep that BSTR as UTF-16, compare without normalization, decoding, formatting,
+or persistence, and scrub it before releasing the root/automation interfaces.
+Plain `doctor --ui` has no binding request and continues to read no Name or
+Value.
+
+Only exact state-bound target evidence can open the draft boundary. Reopen one
+exact composer, revalidate its PID/HWND/fingerprint/enabled/writable/unfocused
+state, read `CurrentValue`, reduce it to one empty/nonempty bit, and scrub that
+BSTR. Read and bind the root Name again afterward; if it changed, discard the
+bit and refuse. Because the target HMAC commits the entire snapshot, the second
+Name observation rebinds it after the draft bit changes. Mutation observation
+and final preflight independently bracket their Value reads, and actual
+SetValue/Invoke entry repeats the Name comparison through the approval-owned
+permit.
+
+This is an implemented selector candidate, not activation. It has not passed
+20 separately opened self-chat observations or the complete direct/group/open/
+main/popup/duplicate negative matrix. It adds no submit selector, keeps
+`send_open_chat=false`, and authorizes no stage, commit, or message send.

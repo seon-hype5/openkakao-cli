@@ -9,6 +9,17 @@ Date: 2026-08-17 KST
 > still uses `UnavailableExecutableTrust` describe predecessor checkpoints.
 > The next live step is still a freshly approved L10 session; no earlier
 > approval carries forward.
+>
+> Latest target-boundary update: a `local-send` request can resolve exactly one
+> allowlist entry without an argv target, compare one selected root UIA Name in
+> scrubbed UTF-16 memory, and inspect only the exact composer's empty/nonempty
+> draft bit after a successful binding. Plain `doctor --ui` still reads neither
+> property. The candidate has not completed 20 positive observations or the
+> required negative matrix; the submit selector is still absent and
+> `send_open_chat=false`.
+> Earlier target-boundary statements below that production supplies no label,
+> reads no Name/Value, or constructs only `Absent` describe predecessor
+> checkpoints and are superseded by this update.
 
 ## Status
 
@@ -22,7 +33,7 @@ cannot embed its own content-derived SHA.
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
 
-`L10` was subsequently approved and attempted in seven separate read-only
+`L10` was subsequently approved and attempted in eight separate read-only
 sessions; all failed closed and it is not complete. Not completed or
 authorized now: a new `L10` attempt, `L20`, `L30`, `L40`, and final post-live
 task `R00`. A green I20 does not carry authority into any live gate.
@@ -286,14 +297,31 @@ mutation path still requires raw enumeration to return exactly one top-level
 window. No live KakaoTalk/UIA call was made while implementing or testing this
 remediation.
 
+### Eighth L10 with the v2 Document composer
+
+After `988fc0f` and both hosted workflows passed, the user granted a fresh
+one-session L10 approval and kept the intended self-chat open. Root reverified
+the exact default-feature release binary (14,246,912 bytes; SHA-256
+`5979d551b9fd1da3fff9aff069e12dbfa2805463aae5e41d77ef6d6877e557b0`) and ran
+one guarded `doctor --ui --json`.
+
+The report established the accepted process/profile, one narrowed top-level
+window, no modal, and one exact v2 Document composer with enabled/writable
+metadata. The composer was focused, while target identity and draft state
+remained unverified; plain doctor read no Name or Value. Foreground, focus,
+Z-order-neighbor, and clipboard-sequence guards were stable. No input, stage,
+commit, send, screenshot, trace, or retry followed. This eighth result supplied
+no authority for the later private target-boundary read.
+
 The latest offline successor also closes the policy contract gap between a
 configured requested label and independently observed target evidence. Every
 policy inspection now uses a fresh opaque HMAC request; exact UTF-16 evidence
 is bound to the complete redacted snapshot, never serialized, and retained as
 a private approval permit. Fresh transaction state has a fourth independent
-`target_binding_verified` gate. Production has no label observer, emits no
-proof, and remains fail-closed. This is synthetic scaffolding, not target
-profile measurement or live permission.
+`target_binding_verified` gate. A later privacy-approved successor connects the
+bounded root-Name candidate described in the top update, but its required live
+matrix is still incomplete and production remains fail-closed. Neither version
+is target-profile qualification or write permission.
 An exhaustive synthetic mutation test now changes every current app, process,
 target, time, and input snapshot field independently and proves that each
 invalidates the request-scoped permit.
@@ -388,7 +416,7 @@ This request is not proof that provider work stopped. Standard marshaling may
 unblock the client, while custom marshaling may expose no cancel object and a
 server may continue. The worker therefore retains the process-wide
 single-flight lease until its native call actually returns. Cancellation is
-restricted to metadata-only inspection; mutation workers remain synchronous,
+restricted to bounded read-only inspection; mutation workers remain synchronous,
 joined, and cancellation-disabled. Pure tests call no native COM or desktop
 API, and no live provider compatibility was measured.
 
@@ -441,13 +469,17 @@ product, or live adapter call occurs.
 - Windows CI statically validates documentation links, action/toolchain pins,
   and runs the synthetic compatibility targets plus default/all-feature debug
   and release builds and optimized Windows tests without invoking an artifact.
-- Inspection is metadata-only and redacted. It does not read titles, UIA
-  Name/Value, room/profile names, draft text, KakaoTalk data, or credentials.
+- Plain doctor inspection is metadata-only and redacted. A target-bound probe
+  may compare only the selected root Name and, after exact binding, reduce the
+  exact composer Value to an empty/nonempty bit. It binds the Name again after
+  the Value read and discards the bit on mismatch; no raw private value leaves
+  the worker.
 - Modal evidence covers a disabled selected window plus visible same-process
   owned popups in its root-owner group. Positive evidence prevents composer
   traversal and is rechecked at final and actual mutation boundaries.
 - Windows CLI provides `doctor --ui` and stdin-only/opened-only `local-send`,
-  with generic parse failures that cannot echo a rejected positional message.
+  with no Windows target/message positional and generic parse failures that
+  cannot echo rejected private input.
 - Input stops at 4,001 raw bytes, accepts at most 4,000 valid UTF-8 bytes and
   1,000 Unicode scalars, rejects dangerous controls/whitespace forms, and
   zeroizes secret buffers.
@@ -510,8 +542,9 @@ write is not reachable:
 2. `allow_windows_ui_write` defaults false;
 3. `WindowsBackend::capabilities()` reports `send_open_chat=false` even in an
    all-feature build;
-4. native `self_chat_verified`, target-binding, exact-target, and unique-target
-   evidence are always false; and
+4. native target evidence is available only through an unqualified,
+   target-bound candidate and cannot satisfy the production activation gate;
+   and
 5. the commit selector is `Unconfigured` and no InvokePattern is acquired.
 
 Thus production stage/commit refuse before stdin or UI inspection in root
@@ -523,17 +556,16 @@ must not be weakened merely to make a live test possible.
 ## Final non-live verification
 
 The Rust and static-documentation rows below were rerun locally for the
-exact Document-selector successor. The native-assumption PowerShell
-qualification remains the separately recorded predecessor/hosted result; no
-execution-policy bypass or trust-store change was made for this documentation
-and snapshot-only change.
+target-boundary successor. The native-assumption PowerShell qualification
+remains the separately recorded predecessor/hosted result; no execution-policy
+bypass or trust-store change was made for this read-only boundary change.
 
 | Gate | Result |
 |---|---|
 | `cargo fmt --all -- --check` | passed |
-| `cargo test --locked --lib` | 205 passed; 1 bounded qualification child ignored |
-| `cargo test --locked --lib --all-features platform::windows` | 119 passed; 1 bounded qualification child ignored |
-| `cargo test --locked --bin openkakao-cli` | 178 passed |
+| `cargo test --locked --lib` | 208 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --lib --all-features platform::windows` | 121 passed; 1 bounded qualification child ignored |
+| `cargo test --locked --bin openkakao-cli` | 179 passed |
 | `cargo test --locked --test windows_backend` | 2 passed |
 | `cargo test --locked --test windows_policy` | 24 passed |
 | `cargo test --locked --test windows_cli` | 1 passed |
@@ -548,10 +580,10 @@ and snapshot-only change.
 | `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
 | debug build, default and all features | passed |
 | release build, default and all features | passed |
-| release all-feature Windows synthetic tests | 119 passed; 1 bounded qualification child ignored |
+| release all-feature Windows synthetic tests | 121 passed; 1 bounded qualification child ignored |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
 | Windows-port Markdown local links and pinned-action policy | 52 files, 70 local links, 0 broken; 13 action refs pinned |
-| `actionlint` 1.7.12 on both non-release workflows | passed |
+| `actionlint` 1.7.12 on all three non-release safe/qualification workflows | passed |
 | final `git diff --check` | passed |
 | successor `cargo test --locked --lib --no-run` | passed; test executable compiled only |
 | successor `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
@@ -564,6 +596,8 @@ and snapshot-only change.
 | hosted cross-platform CI at `b7df418` | run `32000123938` passed Linux and macOS jobs |
 | hosted Windows safe CI at `54c1381` | run `32004418562` passed every step |
 | hosted cross-platform CI at `54c1381` | run `32004418502` passed Linux and macOS jobs |
+| hosted Windows safe CI at `988fc0f` | run `32006211269` passed every step |
+| hosted cross-platform CI at `988fc0f` | run `32006211297` passed Linux and macOS jobs |
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -628,10 +662,11 @@ implementation; it likewise authorizes no probe or production wiring.
 - The request/proof and fresh transaction gates for privacy-safe target
   binding are implemented synthetically, and the native port now keeps the
   approval-owned permit through fresh observation and final preflight. A
-  closed state now ensures only exact-unique selection can invoke that permit.
-  Design and measure the exact native self-chat selector, and add an ephemeral
-  UTF-16 observer only if a separately approved RFC amendment permits it; no
-  room/profile text may be exposed or retained.
+  closed state ensures only exact-unique selection can invoke that permit. The
+  separately approved ephemeral UTF-16 observer is implemented and brackets
+  each draft read with root-Name comparisons, but it still requires 20 positive
+  and the complete direct/group/open/main/popup/duplicate/same-name-collision
+  negative observations. No room/profile text may be exposed or retained.
 - Measure and review an exact unique send-button selector and InvokePattern;
   no keyboard fallback is permitted.
 - Review and complete the proposed privacy-safe durable replay ledger. Its
@@ -639,29 +674,24 @@ implementation; it likewise authorizes no probe or production wiring.
   Windows DPAPI/protected-ACL/write-through store are synthetically tested.
   The LocalAppData/fixed-volume/parent-chain constructor is now connected to
   the native port through a lazy, side-effect-free factory. Executable trust is
-  checked before the first ledger method; current unavailable trust therefore
-  keeps every production locator/store call unreachable. No real LocalAppData
-  path has been resolved or written.
-- Complete architecture-specific target/signature/root evidence. The pure
-  verifier now requires a source-static complete target SHA-256 as well as
-  exact version, leaf SPKI, root relation, candidate identities, NTFS, and the
-  SHA-2-only WinTrust policy. The disconnected native adapter hashes the
-  guarded file, retains `CERT_STRONG_SIGN_PARA` through VERIFY/CLOSE, re-queries
-  the process image path while the first candidate is locked, and rejects
-  canonical/file-ID disagreement. Independent unsafe review found this
-  suitable for a disconnected merge but not activation.
+  checked before the first ledger method. Normal production dispatch remains
+  unreachable because `send_open_chat=false`; no real LocalAppData path has
+  been resolved or written in this target-boundary work.
+- Maintain architecture-specific target/signature/root evidence. The accepted
+  x64 bundle requires the source-static complete target SHA-256, exact version,
+  leaf SPKI, ProgramFiles64 relation, candidate identities, NTFS, SHA-2-only
+  WinTrust policy, and exact `0x80003080` provider result. The wired native
+  adapter hashes the guarded file, retains `CERT_STRONG_SIGN_PARA` through
+  VERIFY/CLOSE, re-queries the process image path while the first candidate is
+  locked, and rejects canonical/file-ID disagreement. x86, relocated, altered,
+  and unknown-provider shapes fail closed.
 
-  The public 26.7 x86/x64 installer hashes were reproduced independently and
-  preserved as corroboration; neither architecture has an accepted installed
-  target hash/SPKI/root bundle. Windows `10.0.26200.0`/NTFS passed the
-  signed-PowerShell strong-hash and before/between/after-query matrix. The same
-  committed tests also passed the pinned GitHub-hosted Windows image and must
-  still pass every declared supported Windows build; the local unsigned Rust
-  test was not allowed to enter. Activation also requires a trusted timestamped
-  provider-path run and isolated weak-signed WinTrust end-to-end refusal. The
-  current exact provider flag comparison may conservatively reject a legitimate
-  RFC3161 high-word flag. All of these failures remain closed because production has zero profile
-  values/references and uses `UnavailableExecutableTrust`.
+  The public 26.7 x86/x64 installer hashes remain corroboration, while only the
+  independently extracted x64 installed target has an accepted bundle. Windows
+  `10.0.26200.0`/NTFS and the pinned hosted Windows image passed the strong-hash
+  and before/between/after-query matrix. Activation still requires maintaining
+  the declared OS/filesystem qualification matrix and isolated weak-signed
+  refusal coverage for future profile changes.
 - Generic Win32 owner-chain modal evidence cannot identify an unowned custom
   dialog or an overlay drawn inside the selected window. Future activation
   needs negative live measurements and a reviewed version-specific rule if
@@ -673,31 +703,30 @@ implementation; it likewise authorizes no probe or production wiring.
   later probes until it returns or the process exits. Native cancellation
   compatibility and performance have not been measured against a live UIA
   provider.
-- Re-run both hosted workflows after the compile-parity successor and require
-  green Windows, Linux, and macOS results before upstream release work.
+- Re-run both hosted workflows for the target-boundary successor and require
+  green Windows, Linux, and macOS results before any live qualification work.
 - Live read-only observation proves that the v1 Edit triple is incompatible
-  with the visible input and that exact class plus AutomationId still match at
-  least one descendant. The evidence-backed v2 Document triple has not yet
-  been live-tested. Target identity, empty-draft proof, stage restoration, and
-  submission result remain unmeasured.
+  with the visible input. The v2 Document triple was then observed as one exact
+  enabled writable composer in the selected window. The newly bracketed target
+  Name binding and empty-draft proof have not been live-qualified; stage
+  restoration and submission remain unmeasured.
 
 ## Next permissible step
 
-The composer-diagnostic predecessor `54c1381` passes the fully executed hosted
-Windows safe matrix in run `32004418562` and the paired Linux/macOS workflow in
-run `32004418502`. GitHub authentication is stored through the platform
-credential manager, the fork exists, and that commit is pushed on
-`integration/windows-mvp`. The next safe step is to commit and push the fixed
-Document-selector profile-v2 successor, then require its Windows, Linux, and
-macOS hosted runs to pass. That work does not require a desktop session,
-product installation, KakaoTalk path/signature observation, or a trust-store
-change.
+The pre-boundary parent `988fc0f` passes the fully executed hosted Windows safe
+matrix in run `32006211269` and the paired Linux/macOS workflow in run
+`32006211297`. GitHub authentication is stored through the platform credential
+manager, the fork exists, and that commit is pushed on
+`integration/windows-mvp`. The next safe step is to commit and push this
+target-boundary successor, then require its Windows, Linux, and macOS hosted
+runs to pass. That work does not require a desktop session, product
+installation, KakaoTalk path/signature observation, or a trust-store change.
 
-After hosted CI, the next activation work is a newly approved one-session L10
-against the exact v2 default-feature release binary. It may only determine
-whether the Document triple is absent, unique, or ambiguous and whether its
-non-content capability booleans are available. The seventh result does not
-authorize that new live observation.
+After hosted CI, the next activation work is a newly approved, target-bound L10
+against the exact successor default-feature release binary. It may collect one
+redacted positive or negative observation for the bracketed Name/draft
+candidate, but it may not stage, commit, or submit. Existing composer-only
+results do not authorize that new private read boundary.
 
 A future retry of DAG node L10, documented in
 [`manuals/read-only-doctor-dry-run.md`](manuals/read-only-doctor-dry-run.md),

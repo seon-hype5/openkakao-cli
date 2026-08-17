@@ -168,7 +168,6 @@ impl fmt::Debug for FingerprintKey {
 struct NativeProcess {
     pid: u32,
     executable_fingerprint: String,
-    #[cfg(feature = "windows-ui-write")]
     creation_time_100ns: u64,
     executable_verified: bool,
     version: Option<FileVersion>,
@@ -221,10 +220,36 @@ enum WindowDiscovery {
 ///
 /// This helper is deliberately not used by the mutation path, which retains
 /// its stricter requirement that native enumeration itself return one window.
+#[cfg(test)]
 fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery {
+    match classify_read_only_windows(&candidates) {
+        ReadOnlyWindowSelection::Absent => WindowDiscovery::Absent,
+        ReadOnlyWindowSelection::Unique(index) => {
+            WindowDiscovery::Unique(candidates.swap_remove(index))
+        }
+        ReadOnlyWindowSelection::Ambiguous { count, reason } => {
+            WindowDiscovery::Ambiguous { count, reason }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReadOnlyWindowSelection {
+    Absent,
+    Unique(usize),
+    Ambiguous {
+        count: usize,
+        reason: ReadOnlyWindowAmbiguity,
+    },
+}
+
+/// Classifies without consuming candidates so the native worker can retain
+/// the selected candidate's HWND only until its ephemeral label comparison is
+/// complete. Native handles still never enter a platform-neutral snapshot.
+fn classify_read_only_windows(candidates: &[NativeWindow]) -> ReadOnlyWindowSelection {
     match candidates.len() {
-        0 => WindowDiscovery::Absent,
-        1 => WindowDiscovery::Unique(candidates.remove(0)),
+        0 => ReadOnlyWindowSelection::Absent,
+        1 => ReadOnlyWindowSelection::Unique(0),
         candidate_count => {
             let mut selected_index = None;
             let mut unique_count = 0_usize;
@@ -265,11 +290,11 @@ fn select_read_only_window(mut candidates: Vec<NativeWindow>) -> WindowDiscovery
 
             reason.map_or_else(
                 || {
-                    WindowDiscovery::Unique(candidates.swap_remove(
+                    ReadOnlyWindowSelection::Unique(
                         selected_index.expect("one unique composer has a selected index"),
-                    ))
+                    )
                 },
-                |reason| WindowDiscovery::Ambiguous {
+                |reason| ReadOnlyWindowSelection::Ambiguous {
                     count: candidate_count,
                     reason,
                 },
@@ -283,9 +308,9 @@ struct NativeInspection {
     window: WindowDiscovery,
 }
 
-enum ReadOnlyProbeEvent {
+enum ReadOnlyProbeEvent<T> {
     CancellationReady(u32),
-    Complete(Result<NativeInspection, UiError>),
+    Complete(Result<T, UiError>),
 }
 
 /// Process-wide single-flight guard for the detached read-only worker. A
@@ -326,11 +351,11 @@ fn remaining_inspection_timeout(budget: Duration, elapsed: Duration) -> Duration
     budget.saturating_sub(elapsed)
 }
 
-fn finish_read_only_probe(
+fn finish_read_only_probe<T>(
     worker: std::thread::JoinHandle<()>,
     release_sender: mpsc::Sender<()>,
-    result: Result<NativeInspection, UiError>,
-) -> Result<NativeInspection, UiError> {
+    result: Result<T, UiError>,
+) -> Result<T, UiError> {
     // The worker waits only to keep its thread ID alive until the caller has
     // either consumed the result or attempted cancellation. Dropping the last
     // sender releases that wait before the join.
@@ -339,15 +364,15 @@ fn finish_read_only_probe(
     result
 }
 
-fn await_read_only_probe(
+fn await_read_only_probe<T>(
     started: Instant,
     timeout: Duration,
     worker: std::thread::JoinHandle<()>,
     release_sender: mpsc::Sender<()>,
     inspection_sender: mpsc::Sender<()>,
-    event_receiver: mpsc::Receiver<ReadOnlyProbeEvent>,
+    event_receiver: mpsc::Receiver<ReadOnlyProbeEvent<T>>,
     cancel: impl FnOnce(u32),
-) -> Result<NativeInspection, UiError> {
+) -> Result<T, UiError> {
     let first =
         event_receiver.recv_timeout(remaining_inspection_timeout(timeout, started.elapsed()));
     let thread_id = match first {
@@ -440,11 +465,14 @@ impl fmt::Debug for WindowsBackend {
 }
 
 impl WindowsBackend {
-    fn inspect_on_mta(&self) -> Result<NativeInspection, UiError> {
+    fn inspect_on_mta(&self, request: InspectRequest) -> Result<UiSnapshot, UiError> {
         let probe_lease = ReadOnlyProbeLease::claim(&READ_ONLY_PROBE_IN_FLIGHT)?;
         let fingerprints = self.fingerprints;
+        let observe_target_label = request.requires_target_binding();
+        let target_kind = request.target;
         let started = Instant::now();
-        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (event_sender, event_receiver) =
+            mpsc::sync_channel::<ReadOnlyProbeEvent<UiSnapshot>>(1);
         let (release_sender, release_receiver) = mpsc::channel::<()>();
         let (inspection_sender, inspection_receiver) = mpsc::channel::<()>();
         let spawn_result = std::thread::Builder::new()
@@ -454,19 +482,38 @@ impl WindowsBackend {
                 // thread ID before the caller has made its cancellation
                 // decision. Native RAII guards still unwind before the fixed
                 // error is published.
+                let rebind_request = request.clone_for_worker();
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    native::inspect(fingerprints, |thread_id| {
-                        event_sender
-                            .send(ReadOnlyProbeEvent::CancellationReady(thread_id))
-                            .map_err(|_| read_only_worker_failed_error())?;
-                        inspection_receiver
-                            .recv()
-                            .map_err(|_| read_only_worker_failed_error())?;
-                        if started.elapsed() >= INSPECTION_TIMEOUT {
-                            return Err(read_only_timeout_error());
-                        }
-                        Ok(())
-                    })
+                    native::inspect(
+                        fingerprints,
+                        observe_target_label,
+                        |thread_id| {
+                            event_sender
+                                .send(ReadOnlyProbeEvent::CancellationReady(thread_id))
+                                .map_err(|_| read_only_worker_failed_error())?;
+                            inspection_receiver
+                                .recv()
+                                .map_err(|_| read_only_worker_failed_error())?;
+                            if started.elapsed() >= INSPECTION_TIMEOUT {
+                                return Err(read_only_timeout_error());
+                            }
+                            Ok(())
+                        },
+                        |native, observed_label_utf16| {
+                            bind_observed_target(
+                                map_native(target_kind, native, unix_now_ms()),
+                                &request,
+                                observed_label_utf16,
+                            )
+                        },
+                        |snapshot, observed_label_utf16| {
+                            rebind_observed_target_after_draft(
+                                snapshot,
+                                &rebind_request,
+                                observed_label_utf16,
+                            )
+                        },
+                    )
                 }))
                 .unwrap_or_else(|_| Err(read_only_worker_failed_error()));
                 let _ = event_sender.send(ReadOnlyProbeEvent::Complete(result));
@@ -552,8 +599,7 @@ impl PlatformProbe for WindowsBackend {
             ));
         }
 
-        let native = self.inspect_on_mta()?;
-        Ok(map_native(request.target, native, unix_now_ms()))
+        self.inspect_on_mta(request.clone_for_worker())
     }
 }
 
@@ -612,6 +658,73 @@ fn map_native(target_kind: TargetKind, native: NativeInspection, observed_at: u6
             map_unique_window(target_kind, window, observed_at, expires_at)
         }
     }
+}
+
+/// Converts one ephemeral, uniquely selected live label into request-scoped
+/// evidence. The label is borrowed only while the native COM worker owns its
+/// scrub-on-drop buffer; this function never decodes, formats, or retains it.
+fn bind_observed_target(
+    mut snapshot: UiSnapshot,
+    request: &InspectRequest,
+    observed_label_utf16: Option<&[u16]>,
+) -> UiSnapshot {
+    if !request.requires_target_binding()
+        || snapshot.target.kind != TargetKind::SelfChat
+        || snapshot.target.window.is_none()
+        || snapshot.target.composer.is_none()
+        || !snapshot.input.present
+        || !snapshot.input.unique
+    {
+        return snapshot;
+    }
+
+    let Some(observed_label_utf16) = observed_label_utf16 else {
+        return snapshot;
+    };
+
+    // The native side supplies a label only after selecting one exact-profile
+    // root/composer path. Preserve that unique-but-inexact state on mismatch.
+    snapshot.target.unique_match = true;
+    snapshot.target.self_chat_verified = true;
+    snapshot.target.exact_match = true;
+    snapshot.target.target_binding =
+        request.bind_observed_target_utf16(observed_label_utf16, &snapshot);
+    if snapshot.target.target_binding.is_none() {
+        snapshot.target.self_chat_verified = false;
+        snapshot.target.exact_match = false;
+    }
+    snapshot
+}
+
+fn bound_snapshot_authorizes_draft_read(snapshot: &UiSnapshot) -> bool {
+    snapshot.target.kind == TargetKind::SelfChat
+        && snapshot.target.self_chat_verified
+        && snapshot.target.exact_match
+        && snapshot.target.unique_match
+        && snapshot.target.target_binding.is_some()
+        && snapshot.input.present
+        && snapshot.input.unique
+        && snapshot.input.enabled
+        && snapshot.input.writable
+        && !snapshot.input.focused
+}
+
+/// Rebinds the final snapshot from a second root-Name observation made after
+/// the draft read. A mismatch is returned only as a fixed refusal, so the
+/// empty/nonempty bit read from a concurrently selected room is never emitted.
+fn rebind_observed_target_after_draft(
+    snapshot: UiSnapshot,
+    request: &InspectRequest,
+    observed_label_utf16: &[u16],
+) -> Result<UiSnapshot, UiError> {
+    let rebound = bind_observed_target(snapshot, request, Some(observed_label_utf16));
+    if !bound_snapshot_authorizes_draft_read(&rebound) {
+        return Err(UiError::new(
+            UiErrorKind::TargetNotSelf,
+            "windows_target_changed_during_draft_read",
+        ));
+    }
+    Ok(rebound)
 }
 
 fn empty_snapshot(
@@ -681,8 +794,9 @@ fn map_unique_window(
                     unique: true,
                     enabled: composer.enabled,
                     writable: composer.value_pattern_present && composer.writable,
-                    // Reading CurrentValue would expose a private draft. Wave 1
-                    // therefore leaves this false (unverified) and fails closed.
+                    // The mapper starts fail-closed. A bound native inspection
+                    // may replace this with the sole empty/nonempty bit only
+                    // after an exact ephemeral target-label match.
                     draft_empty: false,
                     focused: composer.focused,
                     selector_profile_id: Some(profile.id.to_string()),
@@ -766,7 +880,6 @@ mod tests {
         NativeProcess {
             pid: 42,
             executable_fingerprint: "run:synthetic-process".to_string(),
-            #[cfg(feature = "windows-ui-write")]
             creation_time_100ns: 123,
             executable_verified: true,
             version,
@@ -878,7 +991,7 @@ mod tests {
 
     #[test]
     fn read_only_timeout_cancels_before_releasing_the_worker_thread() {
-        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (event_sender, event_receiver) = mpsc::sync_channel::<ReadOnlyProbeEvent<()>>(1);
         let (release_sender, release_receiver) = mpsc::channel();
         let (inspection_sender, inspection_receiver) = mpsc::channel();
         let (published_sender, published_receiver) = mpsc::sync_channel(0);
@@ -936,7 +1049,7 @@ mod tests {
 
     #[test]
     fn read_only_timeout_before_readiness_closes_the_inspection_permit() {
-        let (event_sender, event_receiver) = mpsc::sync_channel(1);
+        let (event_sender, event_receiver) = mpsc::sync_channel::<ReadOnlyProbeEvent<()>>(1);
         let (release_sender, release_receiver) = mpsc::channel();
         let (inspection_sender, inspection_receiver) = mpsc::channel();
         let (done_sender, done_receiver) = mpsc::sync_channel(0);
@@ -1227,6 +1340,99 @@ mod tests {
         assert!(snapshot.input.writable);
         assert!(!snapshot.input.draft_empty);
         assert_eq!(snapshot.target.expires_at_unix_ms, 5_030);
+    }
+
+    #[test]
+    fn exact_ephemeral_target_label_mints_only_redacted_state_bound_evidence() {
+        const LABEL: &str = "SYNTHETIC_SELF_TARGET";
+        let (request, permit) = InspectRequest::bound_self_chat(LABEL, [0x61; 32]);
+        let snapshot = map_native(
+            TargetKind::SelfChat,
+            NativeInspection {
+                window: WindowDiscovery::Unique(window(
+                    Some(FileVersion::KNOWN),
+                    ComposerDiscovery::Unique(NativeComposer {
+                        fingerprint: "run:synthetic-composer".to_string(),
+                        enabled: true,
+                        value_pattern_present: true,
+                        writable: true,
+                        focused: false,
+                    }),
+                )),
+            },
+            40,
+        );
+        let observed: Vec<u16> = LABEL.encode_utf16().collect();
+        let bound = bind_observed_target(snapshot, &request, Some(&observed));
+
+        assert!(bound.target.self_chat_verified);
+        assert!(bound.target.exact_match);
+        assert!(bound.target.unique_match);
+        assert!(bound.target.target_binding.is_some());
+        assert!(permit.verifies_snapshot(&bound));
+        assert!(bound_snapshot_authorizes_draft_read(&bound));
+        let mut user_active = bound.clone();
+        user_active.input.focused = true;
+        assert!(!bound_snapshot_authorizes_draft_read(&user_active));
+        let mut draft_observed = bound.clone();
+        draft_observed.input.draft_empty = true;
+        assert!(!permit.verifies_snapshot(&draft_observed));
+        let draft_observed =
+            rebind_observed_target_after_draft(draft_observed, &request, &observed)
+                .expect("a second exact observation must bind the changed snapshot");
+        assert!(permit.verifies_snapshot(&draft_observed));
+        assert!(draft_observed.input.draft_empty);
+
+        let mut changed_during_read = bound.clone();
+        changed_during_read.input.draft_empty = true;
+        let different: Vec<u16> = "SYNTHETIC_DIFFERENT_TARGET".encode_utf16().collect();
+        let error = rebind_observed_target_after_draft(changed_during_read, &request, &different)
+            .expect_err("a target change during the draft read must fail closed");
+        assert_eq!(error.kind, UiErrorKind::TargetNotSelf);
+        assert_eq!(error.operation, "windows_target_changed_during_draft_read");
+        let json = serde_json::to_string(&bound).expect("snapshot must serialize");
+        assert!(!json.contains(LABEL));
+        assert!(!json.contains("target_binding"));
+    }
+
+    #[test]
+    fn mismatched_or_unrequested_target_label_never_claims_exact_self_chat() {
+        const EXPECTED: &str = "SYNTHETIC_EXPECTED_TARGET";
+        let make_snapshot = || {
+            map_native(
+                TargetKind::SelfChat,
+                NativeInspection {
+                    window: WindowDiscovery::Unique(window(
+                        Some(FileVersion::KNOWN),
+                        ComposerDiscovery::Unique(NativeComposer {
+                            fingerprint: "run:synthetic-composer".to_string(),
+                            enabled: true,
+                            value_pattern_present: true,
+                            writable: true,
+                            focused: false,
+                        }),
+                    )),
+                },
+                41,
+            )
+        };
+        let (request, permit) = InspectRequest::bound_self_chat(EXPECTED, [0x62; 32]);
+        let wrong: Vec<u16> = "SYNTHETIC_OTHER_TARGET".encode_utf16().collect();
+        let mismatched = bind_observed_target(make_snapshot(), &request, Some(&wrong));
+        assert!(!mismatched.target.self_chat_verified);
+        assert!(!mismatched.target.exact_match);
+        assert!(mismatched.target.unique_match);
+        assert!(mismatched.target.target_binding.is_none());
+        assert!(!permit.verifies_snapshot(&mismatched));
+        assert!(!bound_snapshot_authorizes_draft_read(&mismatched));
+
+        let unbound =
+            bind_observed_target(make_snapshot(), &InspectRequest::self_chat(), Some(&wrong));
+        assert!(!unbound.target.self_chat_verified);
+        assert!(!unbound.target.exact_match);
+        assert!(!unbound.target.unique_match);
+        assert!(unbound.target.target_binding.is_none());
+        assert!(!bound_snapshot_authorizes_draft_read(&unbound));
     }
 
     #[test]

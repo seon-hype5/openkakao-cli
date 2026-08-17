@@ -41,14 +41,12 @@ impl UiDoctorOptions {
 
 /// Windows-only `local-send` arguments.
 ///
-/// There is intentionally no positional message field. Message bytes enter
-/// through [`MessageInput`] only. The target name is kept private and this
-/// type's `Debug` implementation always redacts it.
+/// There are intentionally no positional target or message fields. Message
+/// bytes enter through [`MessageInput`] only, and root resolves exactly one
+/// configured allowlist entry without placing a private label in the process
+/// command line.
 #[derive(Args)]
 pub struct LocalSendOptions {
-    #[arg(value_name = "SELF_CHAT_NAME", value_parser = parse_self_chat_name)]
-    self_chat_name: String,
-
     /// Read the message from standard input.
     #[arg(long, required = true)]
     stdin: bool,
@@ -75,12 +73,6 @@ pub struct LocalSendOptions {
 }
 
 impl LocalSendOptions {
-    /// Returns the sensitive target only for composition with the safety
-    /// policy. Callers must never format, log, or serialize this value.
-    pub fn self_chat_name_secret(&self) -> &str {
-        &self.self_chat_name
-    }
-
     pub const fn reads_stdin(&self) -> bool {
         self.stdin
     }
@@ -126,7 +118,6 @@ impl fmt::Debug for LocalSendOptions {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("LocalSendOptions")
-            .field("self_chat_name", &"<redacted>")
             .field("stdin", &self.stdin)
             .field("opened_only", &self.opened_only)
             .field("dry_run", &self.dry_run)
@@ -134,14 +125,6 @@ impl fmt::Debug for LocalSendOptions {
             .field("commit", &self.commit)
             .field("yes", &self.yes)
             .finish()
-    }
-}
-
-fn parse_self_chat_name(value: &str) -> Result<String, String> {
-    if value.is_empty() || value.chars().any(char::is_control) {
-        Err("SELF_CHAT_NAME must be non-empty and contain no control characters".to_string())
-    } else {
-        Ok(value.to_string())
     }
 }
 

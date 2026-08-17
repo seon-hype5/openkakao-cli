@@ -82,13 +82,7 @@ fn safe_snapshot() -> UiSnapshot {
 }
 
 fn parsed_local_send(extra: &[&str]) -> LocalSendOptions {
-    let mut argv = vec![
-        "windows-cli-test",
-        "local-send",
-        TARGET_CANARY,
-        "--stdin",
-        "--opened-only",
-    ];
+    let mut argv = vec!["windows-cli-test", "local-send", "--stdin", "--opened-only"];
     argv.extend_from_slice(extra);
     let harness = Harness::try_parse_from(argv).expect("synthetic arguments should parse");
     match harness.command {
@@ -118,12 +112,10 @@ fn local_send_defaults_to_dry_run_and_has_no_message_positional() {
     assert!(options.opened_only());
     assert!(!options.explicit_yes());
     assert!(!options.dry_run_was_explicit());
-    assert_eq!(options.self_chat_name_secret(), TARGET_CANARY);
 
     let extra_message = Harness::try_parse_from([
         "windows-cli-test",
         "local-send",
-        TARGET_CANARY,
         MESSAGE_CANARY,
         "--stdin",
         "--opened-only",
@@ -144,11 +136,10 @@ fn explicit_dry_run_parses_as_dry_run() {
 #[test]
 fn clap_rejects_missing_required_and_write_mode_conflicts() {
     let invalid = [
-        vec!["windows-cli-test", "local-send", TARGET_CANARY],
+        vec!["windows-cli-test", "local-send"],
         vec![
             "windows-cli-test",
             "local-send",
-            TARGET_CANARY,
             "--stdin",
             "--opened-only",
             "--stage-only",
@@ -156,7 +147,6 @@ fn clap_rejects_missing_required_and_write_mode_conflicts() {
         vec![
             "windows-cli-test",
             "local-send",
-            TARGET_CANARY,
             "--stdin",
             "--opened-only",
             "--commit",
@@ -164,7 +154,6 @@ fn clap_rejects_missing_required_and_write_mode_conflicts() {
         vec![
             "windows-cli-test",
             "local-send",
-            TARGET_CANARY,
             "--stdin",
             "--opened-only",
             "--stage-only",
@@ -174,7 +163,6 @@ fn clap_rejects_missing_required_and_write_mode_conflicts() {
         vec![
             "windows-cli-test",
             "local-send",
-            TARGET_CANARY,
             "--stdin",
             "--opened-only",
             "--dry-run",
@@ -213,7 +201,6 @@ impl MessageInput for CountingInput {
 #[test]
 fn runtime_validation_precedes_input_and_backend_calls() {
     let options = LocalSendOptions {
-        self_chat_name: TARGET_CANARY.to_string(),
         stdin: true,
         opened_only: true,
         dry_run: false,
@@ -345,10 +332,30 @@ fn dry_run_uses_only_probe_and_has_zero_mutations() {
         .expect("synthetic dry-run preparation should succeed");
 
     assert!(prepared.snapshot().target.self_chat_verified);
+    let report = build_action_report(
+        ReportAction::LocalSend,
+        BackendKind::Fake,
+        prepared.snapshot(),
+    );
+    assert!(report.evidence.contains(&"draft_unobserved".to_string()));
+    assert!(!report.evidence.contains(&"draft_empty".to_string()));
     assert_eq!(input.reads.get(), 1);
     assert_eq!(backend.inspect_calls(), 1);
     assert_eq!(backend.stage_calls(), 0);
     assert_eq!(backend.commit_calls(), 0);
+}
+
+#[test]
+fn report_distinguishes_bound_draft_evidence_from_an_unobserved_false_bit() {
+    let backend = FakeBackend::new(safe_snapshot()).with_observed_target_label(TARGET_CANARY);
+    let (request, _permit) = InspectRequest::bound_self_chat(TARGET_CANARY, [0x5d; 32]);
+    let observed = backend
+        .inspect(&request)
+        .expect("the synthetic exact target must bind");
+    let report = build_action_report(ReportAction::LocalSend, BackendKind::Fake, &observed);
+
+    assert!(report.evidence.contains(&"draft_empty".to_string()));
+    assert!(!report.evidence.contains(&"draft_unobserved".to_string()));
 }
 
 #[test]
@@ -377,6 +384,8 @@ fn doctor_preserves_negative_snapshot_state_as_redacted_evidence() {
     assert!(report
         .evidence
         .contains(&"self_chat_unverified".to_string()));
+    assert!(report.evidence.contains(&"draft_unobserved".to_string()));
+    assert!(!report.evidence.contains(&"draft_present".to_string()));
     assert_eq!(backend.inspect_calls(), 1);
     assert_eq!(backend.stage_calls(), 0);
     assert_eq!(backend.commit_calls(), 0);
@@ -398,6 +407,11 @@ fn json_report_is_schema_v1_and_redacts_sensitive_snapshot_fields() {
     assert_eq!(value["outcome"], "dry_run");
     assert_eq!(value["retry_safe"], true);
     assert!(value["evidence"].is_array());
+    assert!(value["evidence"]
+        .as_array()
+        .expect("evidence must remain an array")
+        .iter()
+        .any(|item| item == "draft_unobserved"));
     assert!(rendered.stderr.is_empty());
     assert_eq!(rendered.exit_code, ExitCode::Success);
 

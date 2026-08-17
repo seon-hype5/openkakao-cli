@@ -227,6 +227,15 @@ fn allowlist_requires_exact_bytes_and_rejects_duplicates() {
     assert_eq!(whitespace.kind, UiErrorKind::InvalidInput);
     assert_eq!(whitespace.operation, "policy_allowlist_config");
 
+    let exact_utf16_bound = "\u{1f642}".repeat(256);
+    WindowsPolicyConfig::new([exact_utf16_bound])
+        .expect("512 UTF-16 units must remain within the native label bound");
+    let over_utf16_bound = "\u{1f642}".repeat(257);
+    let overlong = WindowsPolicyConfig::new([over_utf16_bound])
+        .expect_err("513 or more UTF-16 units must fail before inspection");
+    assert_eq!(overlong.kind, UiErrorKind::InvalidInput);
+    assert_eq!(overlong.operation, "policy_allowlist_config");
+
     for variant in [
         "SYNTHETIC",
         "synthetic_self_chat",
@@ -484,6 +493,11 @@ fn target_and_input_snapshot_refusal_mapping_is_deterministic() {
 
     let mut state = safe_snapshot();
     state.input.focused = true;
+    cases.push((state, UiErrorKind::UserActive, "policy_input_snapshot"));
+
+    let mut state = safe_snapshot();
+    state.input.focused = true;
+    state.input.draft_empty = false;
     cases.push((state, UiErrorKind::UserActive, "policy_input_snapshot"));
 
     let mut state = safe_snapshot();

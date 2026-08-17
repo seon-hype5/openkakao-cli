@@ -11,6 +11,10 @@ use zeroize::Zeroize;
 
 use crate::safety::ApprovalToken;
 
+/// Shared privacy bound for configured and observed Windows target labels.
+/// Measured UIA Name values above this UTF-16 unit count fail closed.
+pub(crate) const MAX_TARGET_LABEL_UTF16_UNITS: usize = 512;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UiPlatform {
@@ -311,6 +315,24 @@ impl InspectRequest {
         self.target_binding.is_some()
     }
 
+    /// Creates an owned copy for the bounded Windows inspection worker.
+    ///
+    /// The copy shares only the opaque request-scoped binding secret. It does
+    /// not expose the requested label and remains unable to serialize or format
+    /// that secret. This avoids moving a raw label into a second allocation
+    /// merely to satisfy the worker thread's `'static` lifetime.
+    pub(crate) fn clone_for_worker(&self) -> Self {
+        Self {
+            target: self.target,
+            target_binding: self
+                .target_binding
+                .as_ref()
+                .map(|binding| TargetBindingRequest {
+                    secret: Arc::clone(&binding.secret),
+                }),
+        }
+    }
+
     /// Produces opaque evidence only when `observed_label_utf16` is an exact
     /// code-unit match for the policy-configured target. The caller must keep
     /// the observed buffer ephemeral and zeroize it after this call.
@@ -441,7 +463,7 @@ impl TargetBindingPermit {
             .is_ok()
     }
 
-    #[allow(dead_code)] // Future native target observer consumes this seam.
+    #[allow(dead_code)] // Consumed only by the feature-gated native mutation observer.
     pub(crate) fn verifies_observed_target_utf16(
         &self,
         observed_label_utf16: &[u16],

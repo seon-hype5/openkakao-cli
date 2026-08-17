@@ -10,7 +10,6 @@ use openkakao_cli::platform::{
     UiPlatform, UiSnapshot,
 };
 
-const TARGET_CANARY: &str = "SYNTHETIC_SELF_CHAT";
 const MESSAGE_CANARY: &str = "SYNTHETIC_MESSAGE";
 
 #[derive(Parser)]
@@ -25,13 +24,7 @@ enum HarnessCommand {
 }
 
 fn options(extra: &[&str]) -> LocalSendOptions {
-    let mut arguments = vec![
-        "windows-cli-test",
-        "local-send",
-        TARGET_CANARY,
-        "--stdin",
-        "--opened-only",
-    ];
+    let mut arguments = vec!["windows-cli-test", "local-send", "--stdin", "--opened-only"];
     arguments.extend_from_slice(extra);
     match Harness::try_parse_from(arguments)
         .expect("synthetic Windows local-send arguments should parse")

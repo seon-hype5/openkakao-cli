@@ -1,8 +1,10 @@
 //! Small native Windows boundary for process, window, and UIA data.
 //!
-//! Inspection never reads UIA Value or mutates UI state. Production Value and
-//! Invoke calls exist only with the `windows-ui-write` build feature and behind
-//! the transaction state machine. No function sends a window message, changes
+//! Inspection reads UIA Value only after an exact request-scoped self-target
+//! binding and reduces it to an empty/nonempty bit; the private BSTR is scrubbed
+//! in place. Inspection never mutates UI state. Production SetValue and Invoke
+//! calls exist only with the `windows-ui-write` build feature and behind the
+//! transaction state machine. No function sends a window message, changes
 //! focus/Z-order, synthesizes input, or touches the clipboard. COM objects stay
 //! on the dedicated MTA thread that created them.
 
@@ -15,7 +17,6 @@ use std::ptr;
 #[cfg(feature = "windows-ui-write")]
 use std::time::Instant;
 
-#[cfg(feature = "windows-ui-write")]
 use windows::core::BSTR;
 use windows::core::{w, Error as WindowsError, BOOL, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
@@ -59,12 +60,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowThreadProcessId, IsWindowVisible, GA_ROOTOWNER, GWL_STYLE, GW_OWNER, WS_DISABLED,
 };
 
-#[cfg(feature = "windows-ui-write")]
 use zeroize::Zeroize;
 #[cfg(any(feature = "windows-ui-write", test))]
 use zeroize::Zeroizing;
 
 use super::executable_trust_native::verify_accepted_x64_process;
+use super::{
+    bound_snapshot_authorizes_draft_read, classify_read_only_windows, profile_for,
+    ComposerDiscovery, FileVersion, FingerprintKey, NativeComposer, NativeInspection,
+    NativeProcess, NativeWindow, ReadOnlyCandidateBlockers, ReadOnlyComposerSelectorEvidence,
+    ReadOnlyWindowAmbiguity, ReadOnlyWindowSelection, UiProfile, WindowDiscovery, TOP_LEVEL_CLASS,
+};
 #[cfg(feature = "windows-ui-write")]
 use super::{
     executable_trust::ExecutableTrustBoundary,
@@ -73,15 +79,10 @@ use super::{
     transaction::{self, CommitSelectorState, DraftState, ExpectedState, FreshState, MutationPort},
     unix_now_ms, KNOWN_PROFILE,
 };
-use super::{
-    profile_for, select_read_only_window, ComposerDiscovery, FileVersion, FingerprintKey,
-    NativeComposer, NativeInspection, NativeProcess, NativeWindow, ReadOnlyCandidateBlockers,
-    ReadOnlyComposerSelectorEvidence, ReadOnlyWindowAmbiguity, UiProfile, WindowDiscovery,
-    TOP_LEVEL_CLASS,
-};
+use crate::platform::contract::MAX_TARGET_LABEL_UTF16_UNITS;
 #[cfg(feature = "windows-ui-write")]
 use crate::platform::{ApprovedSend, SendOutcome};
-use crate::platform::{UiError, UiErrorKind};
+use crate::platform::{UiError, UiErrorKind, UiSnapshot};
 
 const CLASS_BUFFER_UNITS: usize = 256;
 const PROCESS_PATH_BUFFER_UNITS: usize = 32_768;
@@ -94,10 +95,23 @@ enum ComposerNearMatchDiagnostics {
     Collect,
 }
 
+struct ReadOnlyTargetContext {
+    hwnd: HWND,
+    pid: u32,
+    creation_time_100ns: u64,
+    executable_fingerprint: String,
+    session_id: u32,
+    composer: NativeComposer,
+    profile: &'static UiProfile,
+}
+
 pub(super) fn inspect(
     fingerprints: FingerprintKey,
+    observe_target_label: bool,
     await_inspection_permit: impl FnOnce(u32) -> Result<(), UiError>,
-) -> Result<NativeInspection, UiError> {
+    finish: impl FnOnce(NativeInspection, Option<&[u16]>) -> UiSnapshot,
+    rebind_after_draft: impl FnOnce(UiSnapshot, &[u16]) -> Result<UiSnapshot, UiError>,
+) -> Result<UiSnapshot, UiError> {
     // The caller creates a fresh, windowless worker thread for every probe.
     // Every successful S_OK/S_FALSE initialization is balanced by this guard,
     // and no COM interface leaves the scope guarded by `_apartment`.
@@ -118,26 +132,67 @@ pub(super) fn inspect(
     let inspection = (|| {
         let windows = enumerate_read_only_top_level_windows()?;
 
-        let window = match windows.len() {
-            0 => WindowDiscovery::Absent,
-            count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => WindowDiscovery::Ambiguous {
-                count,
-                reason: ReadOnlyWindowAmbiguity::CandidateLimit,
-            },
+        let (window, selected_hwnd) = match windows.len() {
+            0 => (WindowDiscovery::Absent, None),
+            count if count > MAX_READ_ONLY_WINDOW_CANDIDATES => (
+                WindowDiscovery::Ambiguous {
+                    count,
+                    reason: ReadOnlyWindowAmbiguity::CandidateLimit,
+                },
+                None,
+            ),
             _ => {
                 let mut inspected = Vec::with_capacity(windows.len());
-                for hwnd in windows {
+                for hwnd in windows.iter().copied() {
                     inspected.push(inspect_unique_window(
                         hwnd,
                         fingerprints,
                         ComposerNearMatchDiagnostics::Collect,
                     )?);
                 }
-                select_read_only_window(inspected)
+                match classify_read_only_windows(&inspected) {
+                    ReadOnlyWindowSelection::Absent => (WindowDiscovery::Absent, None),
+                    ReadOnlyWindowSelection::Unique(index) => {
+                        let hwnd = windows[index];
+                        (
+                            WindowDiscovery::Unique(inspected.swap_remove(index)),
+                            Some(hwnd),
+                        )
+                    }
+                    ReadOnlyWindowSelection::Ambiguous { count, reason } => {
+                        (WindowDiscovery::Ambiguous { count, reason }, None)
+                    }
+                }
             }
         };
 
-        Ok(NativeInspection { window })
+        let target_context = if observe_target_label {
+            selected_hwnd.and_then(|hwnd| read_only_target_context(hwnd, &window))
+        } else {
+            None
+        };
+        let inspection = NativeInspection { window };
+        match target_context {
+            Some(context) => with_read_only_target_label(&context, fingerprints, |label| {
+                let mut snapshot = finish(inspection, Some(label));
+                if bound_snapshot_authorizes_draft_read(&snapshot) {
+                    snapshot.input.draft_empty =
+                        read_exact_composer_draft_empty(&context, fingerprints)?;
+                    // Target evidence commits the complete snapshot. Read and
+                    // bind the root Name again after CurrentValue so a room
+                    // switch during the draft read cannot reuse the first
+                    // label. Both scrubbed BSTRs remain alive only inside the
+                    // worker and are released before this inspection returns.
+                    snapshot = with_read_only_target_label(
+                        &context,
+                        fingerprints,
+                        |label_after_draft| rebind_after_draft(snapshot, label_after_draft),
+                    )??;
+                }
+                Ok(snapshot)
+            })?,
+            None => Ok(finish(inspection, None)),
+        }
     })();
 
     // Disable while the apartment is still initialized. A disable failure
@@ -661,7 +716,6 @@ fn inspect_unique_window(
         process: NativeProcess {
             pid,
             executable_fingerprint,
-            #[cfg(feature = "windows-ui-write")]
             creation_time_100ns,
             executable_verified,
             version,
@@ -671,6 +725,252 @@ fn inspect_unique_window(
         },
         composer,
     })
+}
+
+fn read_only_target_context(
+    hwnd: HWND,
+    selection: &WindowDiscovery,
+) -> Option<ReadOnlyTargetContext> {
+    let WindowDiscovery::Unique(window) = selection else {
+        return None;
+    };
+    let profile = window
+        .process
+        .executable_verified
+        .then(|| profile_for(window.process.version))
+        .flatten()?;
+    let ComposerDiscovery::Unique(composer) = &window.composer else {
+        return None;
+    };
+    if !window.visible
+        || !window.enabled
+        || window.modal_present
+        || !window.process.interactive_session_match
+        || !window.process.integrity_compatible
+    {
+        return None;
+    }
+
+    Some(ReadOnlyTargetContext {
+        hwnd,
+        pid: window.process.pid,
+        creation_time_100ns: window.process.creation_time_100ns,
+        executable_fingerprint: window.process.executable_fingerprint.clone(),
+        session_id: window.process.session_id,
+        composer: composer.clone(),
+        profile,
+    })
+}
+
+fn revalidate_read_only_target_context(
+    context: &ReadOnlyTargetContext,
+    fingerprints: FingerprintKey,
+) -> Result<(), UiError> {
+    revalidate_window(context.hwnd, context.pid)?;
+    if !unsafe { IsWindowVisible(context.hwnd).as_bool() }
+        || !window_enabled(context.hwnd)?
+        || process_modal_present(context.hwnd, context.pid, true)?
+    {
+        return Err(stale_window_error());
+    }
+
+    let process = OwnedHandle::open_process(context.pid)?;
+    let creation_time_100ns = process_creation_time(process.raw())?;
+    let image = query_process_image(process.raw())?;
+    if creation_time_100ns != context.creation_time_100ns
+        || fingerprints.executable(&image.utf16, creation_time_100ns)
+            != context.executable_fingerprint
+        || process_session_id(context.pid)? != context.session_id
+    {
+        return Err(stale_window_error());
+    }
+
+    match discover_composer(
+        context.hwnd,
+        context.pid,
+        fingerprints,
+        context.profile,
+        ComposerNearMatchDiagnostics::Skip,
+    )? {
+        ComposerDiscovery::Unique(composer) if composer == context.composer => Ok(()),
+        _ => Err(stale_window_error()),
+    }
+}
+
+fn with_read_only_target_label<T>(
+    context: &ReadOnlyTargetContext,
+    fingerprints: FingerprintKey,
+    consume: impl FnOnce(&[u16]) -> T,
+) -> Result<T, UiError> {
+    revalidate_read_only_target_context(context, fingerprints)?;
+
+    // SAFETY: the selected HWND, process instance, exact UI profile, and exact
+    // unique composer were validated immediately above. CurrentName is a
+    // read-only UIA property. The returned BSTR is never decoded or formatted.
+    let automation: IUIAutomation =
+        unsafe { CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|error| map_windows_error(error, "windows_target_uia_create"))?;
+    let root = unsafe { automation.ElementFromHandle(context.hwnd) }
+        .map_err(|error| map_windows_error(error, "windows_target_uia_window"))?;
+    let root_pid = unsafe { root.CurrentProcessId() }
+        .map_err(|error| map_windows_error(error, "windows_target_uia_process"))?;
+    let root_hwnd = unsafe { root.CurrentNativeWindowHandle() }
+        .map_err(|error| map_windows_error(error, "windows_target_uia_handle"))?;
+    if u32::try_from(root_pid).ok() != Some(context.pid) || root_hwnd != context.hwnd {
+        return Err(stale_window_error());
+    }
+
+    let label = ScrubbedBstr::new(
+        unsafe { root.CurrentName() }
+            .map_err(|error| map_windows_error(error, "windows_target_uia_name"))?,
+    );
+    if label.units().len() > MAX_TARGET_LABEL_UTF16_UNITS {
+        return Err(UiError::new(
+            UiErrorKind::TargetNotFound,
+            "windows_target_label_too_long",
+        ));
+    }
+
+    // Recheck the complete non-content path while the private BSTR is still
+    // owned. `label` is declared after the COM interfaces, so its Drop scrubs
+    // the allocation before either interface is released on scope exit.
+    revalidate_read_only_target_context(context, fingerprints)?;
+    Ok(consume(label.units()))
+}
+
+fn read_exact_composer_draft_empty(
+    context: &ReadOnlyTargetContext,
+    fingerprints: FingerprintKey,
+) -> Result<bool, UiError> {
+    revalidate_read_only_target_context(context, fingerprints)?;
+
+    // Reopen only the exact profile-bound composer after the target label has
+    // matched its request-scoped permit. No neighboring element or UI tree
+    // property is materialized in this process.
+    let automation: IUIAutomation =
+        unsafe { CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|error| map_windows_error(error, "windows_draft_uia_create"))?;
+    let class_value = VARIANT::from(context.profile.composer_class);
+    let automation_id_value = VARIANT::from(context.profile.composer_automation_id);
+    let control_type_value = VARIANT::from(context.profile.composer_control_type);
+    let class_condition =
+        unsafe { automation.CreatePropertyCondition(UIA_ClassNamePropertyId, &class_value) }
+            .map_err(|error| map_windows_error(error, "windows_draft_uia_class_condition"))?;
+    let id_condition = unsafe {
+        automation.CreatePropertyCondition(UIA_AutomationIdPropertyId, &automation_id_value)
+    }
+    .map_err(|error| map_windows_error(error, "windows_draft_uia_id_condition"))?;
+    let type_condition = unsafe {
+        automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &control_type_value)
+    }
+    .map_err(|error| map_windows_error(error, "windows_draft_uia_type_condition"))?;
+    let class_and_id = unsafe { automation.CreateAndCondition(&class_condition, &id_condition) }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_selector"))?;
+    let selector = unsafe { automation.CreateAndCondition(&class_and_id, &type_condition) }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_selector"))?;
+    let root = unsafe { automation.ElementFromHandle(context.hwnd) }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_window"))?;
+    let elements = unsafe { root.FindAll(TreeScope_Descendants, &selector) }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_find_composer"))?;
+    let raw_count = unsafe { elements.Length() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_count"))?;
+    if raw_count != 1 {
+        return Err(stale_window_error());
+    }
+    let element = unsafe { elements.GetElement(0) }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer"))?;
+
+    let class_name = unsafe { element.CurrentClassName() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_class"))?;
+    let automation_id = unsafe { element.CurrentAutomationId() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_id"))?;
+    let control_type = unsafe { element.CurrentControlType() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_type"))?;
+    let element_pid = unsafe { element.CurrentProcessId() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_process"))?;
+    let element_hwnd = unsafe { element.CurrentNativeWindowHandle() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_handle"))?;
+    if !context.profile.matches_selector(
+        &class_name.to_string(),
+        &automation_id.to_string(),
+        control_type.0,
+    ) || control_type != UIA_DocumentControlTypeId
+        || u32::try_from(element_pid).ok() != Some(context.pid)
+        || element_hwnd.0.is_null()
+        || fingerprints.composer(element_hwnd.0 as usize, context.pid)
+            != context.composer.fingerprint
+    {
+        return Err(stale_window_error());
+    }
+
+    let enabled = unsafe { element.CurrentIsEnabled() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_enabled"))?
+        .as_bool();
+    let focused = unsafe { element.CurrentHasKeyboardFocus() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_composer_focus"))?
+        .as_bool();
+    let pattern =
+        unsafe { element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) }
+            .map_err(|error| map_windows_error(error, "windows_draft_uia_value_pattern"))?;
+    let read_only = unsafe { pattern.CurrentIsReadOnly() }
+        .map_err(|error| map_windows_error(error, "windows_draft_uia_read_only"))?
+        .as_bool();
+    if !enabled || focused || read_only {
+        return Err(UiError::new(
+            UiErrorKind::UserActive,
+            "windows_draft_uia_state_changed",
+        ));
+    }
+
+    // This is the sole default-build draft read. It is unreachable until the
+    // exact target label has produced valid request-scoped evidence. The value
+    // is reduced to one empty/nonempty bit, never decoded or retained, and its
+    // BSTR is scrubbed before the element/pattern interfaces are released.
+    let current = ScrubbedBstr::new(
+        unsafe { pattern.CurrentValue() }
+            .map_err(|error| map_windows_error(error, "windows_draft_uia_current_value"))?,
+    );
+    let empty = current.units().is_empty();
+    revalidate_read_only_target_context(context, fingerprints)?;
+    Ok(empty)
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn with_mutation_target_label<T>(
+    hwnd: HWND,
+    expected_pid: u32,
+    consume: impl FnOnce(&[u16]) -> T,
+) -> Result<T, UiError> {
+    revalidate_window(hwnd, expected_pid)?;
+
+    // SAFETY: the mutation transaction selected exactly one raw top-level
+    // window and just revalidated its class/PID. CurrentName is read-only; its
+    // BSTR is kept opaque and scrubbed before the COM interfaces are released.
+    let automation: IUIAutomation =
+        unsafe { CoCreateInstance(&CUIAutomation8, None, CLSCTX_INPROC_SERVER) }
+            .map_err(|error| map_windows_error(error, "windows_mutation_target_uia_create"))?;
+    let root = unsafe { automation.ElementFromHandle(hwnd) }
+        .map_err(|error| map_windows_error(error, "windows_mutation_target_uia_window"))?;
+    let root_pid = unsafe { root.CurrentProcessId() }
+        .map_err(|error| map_windows_error(error, "windows_mutation_target_uia_process"))?;
+    let root_hwnd = unsafe { root.CurrentNativeWindowHandle() }
+        .map_err(|error| map_windows_error(error, "windows_mutation_target_uia_handle"))?;
+    if u32::try_from(root_pid).ok() != Some(expected_pid) || root_hwnd != hwnd {
+        return Err(stale_window_error());
+    }
+
+    let label = ScrubbedBstr::new(
+        unsafe { root.CurrentName() }
+            .map_err(|error| map_windows_error(error, "windows_mutation_target_uia_name"))?,
+    );
+    if label.units().len() > MAX_TARGET_LABEL_UTF16_UNITS {
+        return Err(UiError::new(
+            UiErrorKind::TargetNotFound,
+            "windows_mutation_target_label_too_long",
+        ));
+    }
+    revalidate_window(hwnd, expected_pid)?;
+    Ok(consume(label.units()))
 }
 
 fn revalidate_window(hwnd: HWND, expected_pid: u32) -> Result<(), UiError> {
@@ -1091,8 +1391,9 @@ fn discover_composer(
         .map_err(|error| map_windows_error(error, "windows_uia_composer_focus"))?
         .as_bool();
 
-    // GetCurrentPatternAs and CurrentIsReadOnly inspect metadata only. We never
-    // call CurrentValue or SetValue. Any pattern uncertainty becomes unwritable.
+    // GetCurrentPatternAs and CurrentIsReadOnly inspect metadata only. This
+    // discovery pass never calls CurrentValue or SetValue. Any pattern
+    // uncertainty becomes unwritable.
     let (value_pattern_present, writable) = match unsafe {
         element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId)
     } {
@@ -1441,16 +1742,12 @@ impl<'operation> NativeMutationPort<'operation> {
             ));
         }
 
-        // Current profile has no independently verified non-content self-chat
-        // selector. Refuse before CurrentValue so an arbitrary room's draft is
-        // never read, even when a public caller forges approval booleans.
-        if !verify_self_target(identity.hwnd, self.approved)? {
-            return Err(UiError::new(
-                UiErrorKind::TargetNotSelf,
-                "windows_mutation_target_unverified",
-            ));
-        }
+        // Bracket CurrentValue with two independent scrub-on-drop root-Name
+        // comparisons. A room switch during the read must fail before the
+        // resulting draft classification can influence a mutation decision.
+        ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
         let draft = classify_current_value(pattern, self.message_utf16)?;
+        ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
         if draft != required_draft {
             return Err(UiError::new(
                 UiErrorKind::ExistingDraft,
@@ -1606,17 +1903,17 @@ impl MutationPort for NativeMutationPort<'_> {
         fresh.composer_focused = opened.focused;
 
         // Process, window, and composer claims come from fresh native evidence.
-        // Target identity must additionally match the request-scoped approval
-        // binding. No measured self-chat selector exists for this profile, so
-        // the native observer cannot assert target identity and must not read
-        // Value.
-        let target = observe_self_target(hwnd, self.approved)?;
+        // Target identity additionally requires an exact ephemeral UIA Name
+        // match against this request-scoped approval binding.
+        let target = observe_self_target(hwnd, process.pid, self.approved)?;
         fresh.self_chat_verified = target.self_chat_verified;
         fresh.target_binding_verified = target.target_binding_verified;
         fresh.exact_target = target.exact;
         fresh.unique_target = target.unique;
         fresh.draft = if target.authorizes_target_access() {
-            classify_current_value(&opened.value_pattern, self.message_utf16)?
+            let draft = classify_current_value(&opened.value_pattern, self.message_utf16)?;
+            ensure_self_target(hwnd, process.pid, self.approved)?;
+            draft
         } else {
             DraftState::Unobserved
         };
@@ -1656,10 +1953,10 @@ impl MutationPort for NativeMutationPort<'_> {
     }
 
     fn set_value(&mut self, value_utf16: &[u16]) -> Result<(), UiError> {
-        let required_preparation = if value_utf16.is_empty() {
-            PreparedMutation::Clear
+        let (required_preparation, required_draft) = if value_utf16.is_empty() {
+            (PreparedMutation::Clear, DraftState::ExactMessage)
         } else if value_utf16 == self.message_utf16 {
-            PreparedMutation::SetMessage
+            (PreparedMutation::SetMessage, DraftState::Empty)
         } else {
             return Err(UiError::new(
                 UiErrorKind::InvalidInput,
@@ -1672,6 +1969,11 @@ impl MutationPort for NativeMutationPort<'_> {
                 "windows_mutation_preflight_missing",
             ));
         }
+        // The transaction claim and durable-ledger transition occur after
+        // prepare_set_value. Repeat the complete process/window/composer/focus/
+        // draft/target preflight at the actual Value boundary rather than
+        // treating the earlier preparation as current state.
+        self.revalidate_before_mutation(required_draft)?;
         let pattern = self.value_pattern.as_ref().ok_or_else(|| {
             UiError::new(
                 UiErrorKind::PermissionDenied,
@@ -1684,9 +1986,10 @@ impl MutationPort for NativeMutationPort<'_> {
                 "windows_mutation_identity_missing",
             )
         })?;
-        let value = ScrubbedBstr::from_wide(value_utf16);
         ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
         ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
+        ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
+        let value = ScrubbedBstr::from_wide(value_utf16);
         // SAFETY: the exact writable ValuePattern was freshly revalidated in
         // this MTA apartment while the named mutex is held. The BSTR remains
         // alive through the synchronous call and is scrubbed before free.
@@ -1715,6 +2018,10 @@ impl MutationPort for NativeMutationPort<'_> {
                 "windows_commit_preflight_missing",
             ));
         }
+        // A durable commit marker exists between prepare_invoke and this call.
+        // Repeat the complete bracketed target/draft preflight immediately at
+        // the Invoke boundary before borrowing the selector interface.
+        self.revalidate_before_mutation(DraftState::ExactMessage)?;
         let pattern = self.invoke_pattern.as_ref().ok_or_else(|| {
             UiError::new(
                 UiErrorKind::UnsupportedCapability,
@@ -1729,6 +2036,7 @@ impl MutationPort for NativeMutationPort<'_> {
         })?;
         ensure_mutation_modal_clear(identity.hwnd, identity.pid)?;
         ensure_mutation_time(self.approved, self.expires_at_unix_ms)?;
+        ensure_self_target(identity.hwnd, identity.pid, self.approved)?;
         // SAFETY: this interface can only be stored after an exact, unique,
         // profile-bound send selector and InvokePattern are verified. The
         // current profile stores none, so production cannot reach this call.
@@ -1856,22 +2164,57 @@ fn target_evidence_from_observation(
 }
 
 #[cfg(feature = "windows-ui-write")]
-fn observe_self_target(_hwnd: HWND, approved: &ApprovedSend) -> Result<TargetEvidence, UiError> {
-    // Profile 26.7.0.5255 has no privacy-safe, measured self-chat identity
-    // selector. Pass no observed label, which deterministically refuses without
-    // inspecting Name/title text or substituting process identity. A future
-    // selector must keep the label ephemeral and use the approval's own bound
-    // snapshot through this callback.
-    Ok(target_evidence_from_observation(
-        ObservedTargetSelection::Absent,
-        |observed_label_utf16| approved.target_binding_matches_observed_utf16(observed_label_utf16),
-    ))
+fn observe_self_target(
+    hwnd: HWND,
+    expected_pid: u32,
+    approved: &ApprovedSend,
+) -> Result<TargetEvidence, UiError> {
+    let windows = enumerate_raw_top_level_windows()?;
+    if windows.is_empty() || !windows.contains(&hwnd) {
+        return Ok(target_evidence_from_observation(
+            ObservedTargetSelection::Absent,
+            |_| false,
+        ));
+    }
+    if windows.len() != 1 {
+        return Ok(target_evidence_from_observation(
+            ObservedTargetSelection::AmbiguousInexact,
+            |_| false,
+        ));
+    }
+
+    with_mutation_target_label(hwnd, expected_pid, |observed_label_utf16| {
+        target_evidence_from_observation(
+            ObservedTargetSelection::ExactUnique(observed_label_utf16),
+            |label| approved.target_binding_matches_observed_utf16(label),
+        )
+    })
 }
 
 #[cfg(feature = "windows-ui-write")]
-fn verify_self_target(hwnd: HWND, approved: &ApprovedSend) -> Result<bool, UiError> {
-    let target = observe_self_target(hwnd, approved)?;
+fn verify_self_target(
+    hwnd: HWND,
+    expected_pid: u32,
+    approved: &ApprovedSend,
+) -> Result<bool, UiError> {
+    let target = observe_self_target(hwnd, expected_pid, approved)?;
     Ok(target.authorizes_target_access())
+}
+
+#[cfg(feature = "windows-ui-write")]
+fn ensure_self_target(
+    hwnd: HWND,
+    expected_pid: u32,
+    approved: &ApprovedSend,
+) -> Result<(), UiError> {
+    if verify_self_target(hwnd, expected_pid, approved)? {
+        Ok(())
+    } else {
+        Err(UiError::new(
+            UiErrorKind::TargetNotSelf,
+            "windows_mutation_target_unverified",
+        ))
+    }
 }
 
 #[cfg(feature = "windows-ui-write")]
@@ -2048,15 +2391,14 @@ fn classify_current_value(
     })
 }
 
-#[cfg(feature = "windows-ui-write")]
 struct ScrubbedBstr(BSTR);
 
-#[cfg(feature = "windows-ui-write")]
 impl ScrubbedBstr {
     fn new(value: BSTR) -> Self {
         Self(value)
     }
 
+    #[cfg(feature = "windows-ui-write")]
     fn from_wide(value: &[u16]) -> Self {
         // Callers encode secrets directly into a Zeroizing UTF-16 Vec. This
         // avoids BSTR::from(&str), whose internal temporary is not scrubbed.
@@ -2067,12 +2409,12 @@ impl ScrubbedBstr {
         &self.0
     }
 
+    #[cfg(feature = "windows-ui-write")]
     fn as_bstr(&self) -> &BSTR {
         &self.0
     }
 }
 
-#[cfg(feature = "windows-ui-write")]
 impl Drop for ScrubbedBstr {
     fn drop(&mut self) {
         let len = self.0.len();

@@ -106,9 +106,10 @@ request outcomes. Absence of a cancel object, disabled cancellation, or any
 other failure does not release the single-flight lease: the worker owns that
 lease until its native call really returns or unwinds. COM may unblock a
 standard-marshaled client without stopping server work, and custom marshaling
-may not support cancellation. This is acceptable only because inspection is
-metadata-only. The joined mutation worker never enables cancellation and its
-outcome rules do not change.
+may not support cancellation. This remains bounded to non-mutating inspection;
+any private Name/Value BSTR stays inside the worker and is scrubbed before
+release. The joined mutation worker never enables cancellation and its outcome
+rules do not change.
 
 Enabling cancellation can degrade synchronous marshaled-call performance, so
 its lifetime is restricted to one bounded read-only probe and balanced with
@@ -120,12 +121,12 @@ enumeration, or application process.
 
 ## Process owner-group modal boundary
 
-Offline status: implemented in read-only inspection and the disconnected
-mutation path. Read-only enumeration begins only after exact executable-name
-verification. A disabled selected window is blocking. Otherwise a second
-top-level HWND blocks only when it is visible, reports the selected PID, has a
-non-null owner, and resolves to the same root-owner HWND as the selected
-window. Hidden, foreign-process, unowned, and different-root-owner candidates
+Offline status: implemented in read-only inspection and the inactive,
+feature-gated mutation path. Read-only enumeration begins only after exact
+executable-name verification. A disabled selected window is blocking.
+Otherwise a second top-level HWND blocks only when it is visible, reports the
+selected PID, has a non-null owner, and resolves to the same root-owner HWND as
+the selected window. Hidden, foreign-process, unowned, and different-root-owner candidates
 are ignored. A visible owned popup is conservatively blocking even if it is
 modeless. An owner/root-owner query failure after relevant PID and visibility
 evidence is stale uncertainty, not absence.
@@ -154,7 +155,7 @@ live-session permission.
 
 ## Native target-binding permit boundary
 
-Offline status: the mutation port now borrows the same `ApprovedSend` used by
+Candidate status: the mutation port borrows the same `ApprovedSend` used by
 the guarded transaction for the whole synchronous stage or commit call. Fresh
 target observation and final native target revalidation invoke an exact UTF-16
 comparison through that approval. The comparison is fixed to the private
@@ -169,13 +170,33 @@ combinations cannot be represented. Neither `TargetEvidence` nor
 `NativeMutationPort` retains the label. The same four-way conjunction gates
 draft Value access and the final preflight before `SetValue` or `Invoke`.
 
-The current profile has no measured privacy-safe selector. Its observer
-constructs only the absent state, performs no title/UIA Name/room text read,
-and therefore derives false exact/unique claims and refuses deterministically.
-Pure synthetic tests exercise every closed state and prove that only exact-
-unique selection invokes the binding callback; a mismatched exact-unique label
-still fails. This plumbing authorizes no selector measurement, native label
-read, L10 retry, or mutation.
+The current profile now has an unqualified privacy-bounded candidate. Only a
+target-bound inspection with exactly one configured allowlist entry can read
+the selected root's `CurrentName`. The BSTR remains UTF-16, is never decoded or
+formatted, and is scrubbed before the root/automation interfaces are released.
+The process instance, exact root, modal state, and exact v2 composer are checked
+before and after the read. An exact match mints opaque evidence; mismatch emits
+no label and remains unique-inexact. Plain `doctor --ui` supplies no binding
+request and therefore still reads neither Name nor Value.
+
+After exact binding only, the same worker reopens exactly one v2 composer,
+rechecks PID/HWND/fingerprint/enabled/writable/unfocused state, reads
+`CurrentValue`, reduces it to one empty/nonempty bit, and scrubs that BSTR. It
+then reads and binds the root Name a second time; mismatch discards the bit and
+refuses. Because target evidence commits the complete snapshot, the second Name
+observation rebinds it after the draft bit changes. The mutation observer and
+final preflight bracket their Value reads, and SetValue/Invoke entry repeats the
+Name check through the approval-owned permit.
+
+Pure synthetic tests exercise every closed target state, mismatches, state
+movement, and draft-read authorization. The required 20 separately opened
+positive observations and the full matrix—including a deliberately colliding
+same-display-name non-self chat—have not run, so this candidate authorizes no
+`send_open_chat`, stage, commit, or message send.
+The two Name observations do not make the Value read atomic with room identity:
+an away-and-back transition between them is not observable. A stronger native
+identity/navigation invariant or explicit proof that this transition cannot
+occur remains an activation blocker.
 
 ## Durable ledger boundary
 
@@ -185,9 +206,10 @@ retained-base-handle, and fixed child-directory protocol below is implemented.
 `NativeMutationPort` references it only through a lazy factory. Port
 construction performs no I/O, transaction ordering checks executable trust
 before the first ledger method, and the accepted x64 trust profile is exact.
-No valid production approval can yet be created because self-target evidence
-remains false. Consequently tests and current reachable production flows never
-call the ledger's `SHGetKnownFolderPath` or write real LocalAppData.
+No valid production approval can yet be created because the self-target
+candidate remains unqualified and the backend reports `send_open_chat=false`.
+Consequently tests and current reachable production flows never call the
+ledger's `SHGetKnownFolderPath` or write real LocalAppData.
 
 The factory is consumed before its first open attempt. An error or unwind can
 never trigger an automatic second attempt in the same transaction object and
