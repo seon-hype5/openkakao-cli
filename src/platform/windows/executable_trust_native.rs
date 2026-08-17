@@ -28,7 +28,8 @@ use windows::Win32::Foundation::{
 };
 #[cfg(test)]
 use windows::Win32::Security::Cryptography::{
-    CertCreateCertificateContext, CertFreeCertificateContext,
+    CertCreateCertificateContext, CertFreeCertificateContext, CertIsStrongHashToSign,
+    BCRYPT_MD5_ALGORITHM, BCRYPT_SHA1_ALGORITHM, BCRYPT_SHA256_ALGORITHM,
 };
 use windows::Win32::Security::Cryptography::{
     CryptEncodeObjectEx, CERT_CONTEXT, CERT_INFO, CERT_STRONG_SIGN_OID_INFO_CHOICE,
@@ -58,6 +59,8 @@ use windows::Win32::Storage::FileSystem::{
     OPEN_EXISTING, VOLUME_NAME_GUID, VS_FIXEDFILEINFO,
 };
 use windows::Win32::System::Com::CoTaskMemFree;
+#[cfg(test)]
+use windows::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetProcessId, GetProcessTimes, QueryFullProcessImageNameW,
     PROCESS_NAME_WIN32,
@@ -84,6 +87,16 @@ use super::FileVersion;
 // used instead of comparing addresses of an inlinable generated `const`, so
 // the exact same NUL-terminated pointer remains stable through VERIFY/CLOSE.
 static STRONG_SIGN_OS_1_OID: &[u8] = b"1.3.6.1.4.1.311.72.1.1\0";
+
+fn os_sha2_strong_sign_policy() -> Result<CERT_STRONG_SIGN_PARA, NativeTrustFailure> {
+    Ok(CERT_STRONG_SIGN_PARA {
+        cbSize: checked_struct_size::<CERT_STRONG_SIGN_PARA>()?,
+        dwInfoChoice: CERT_STRONG_SIGN_OID_INFO_CHOICE,
+        Anonymous: CERT_STRONG_SIGN_PARA_0 {
+            pszOID: PSTR(STRONG_SIGN_OS_1_OID.as_ptr().cast_mut()),
+        },
+    })
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WinTrustStrongSignPolicy {
@@ -555,6 +568,25 @@ impl WindowsNativeExecutableTrustApi {
     }
 }
 
+fn require_requeried_process_image_candidate(
+    process: HANDLE,
+    canonical_path: &Path,
+    expected_identity: FileIdentity,
+    process_creation_time_100ns: u64,
+) -> Result<(), NativeTrustFailure> {
+    let rebound_source_path = query_process_image_path(process)?;
+    validate_absolute_path(&rebound_source_path)?;
+    let _rebound_parent_guards = open_reparse_free_parent_chain(&rebound_source_path)?;
+    let rebound_candidate_file = open_guarded_regular_file_no_follow(&rebound_source_path)?;
+    validate_regular_file_handle(&rebound_candidate_file)?;
+    if canonical_file_path(&rebound_candidate_file)? != canonical_path
+        || file_identity(&rebound_candidate_file, process_creation_time_100ns)? != expected_identity
+    {
+        return Err(NativeTrustFailure::PathObservation);
+    }
+    Ok(())
+}
+
 impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
     type PathState = WindowsPathState;
     type TrustState = WindowsTrustState;
@@ -592,20 +624,26 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             return Err(NativeTrustFailure::PathObservation);
         }
 
-        // Query the process image again only after the first candidate file is
-        // held without write/delete sharing. On NTFS a source rename updates
-        // the process image name. If the first path was replaced between the
-        // process query and guarded open, it remains locked in place while this
-        // second independently opened candidate resolves to the actual renamed
-        // backing file and the comparison below refuses.
-        let rebound_source_path = query_process_image_path(self.process.raw())?;
-        validate_absolute_path(&rebound_source_path)?;
-        let _rebound_parent_guards = open_reparse_free_parent_chain(&rebound_source_path)?;
-        let rebound_candidate_file = open_guarded_regular_file_no_follow(&rebound_source_path)?;
-        validate_regular_file_handle(&rebound_candidate_file)?;
-        if canonical_file_path(&rebound_candidate_file)? != canonical_path {
+        let process_identity =
+            file_identity(&initial_candidate_file, self.expected_creation_time_100ns)?;
+        let verified_identity =
+            file_identity(&verification_file, self.expected_creation_time_100ns)?;
+        if process_identity != verified_identity {
             return Err(NativeTrustFailure::PathObservation);
         }
+
+        // Query the process image again only after the first candidate file is
+        // held without write/delete sharing. On qualified NTFS builds a source
+        // rename updates the process image name. If the first path was replaced
+        // between the process query and guarded open, it remains locked in
+        // place while this second independently opened candidate resolves to
+        // the renamed backing file and the comparison below refuses.
+        require_requeried_process_image_candidate(
+            self.process.raw(),
+            &canonical_path,
+            verified_identity,
+            self.expected_creation_time_100ns,
+        )?;
 
         let known_folder_source = resolve_known_folder_path(install_root_kind)?;
         let _known_folder_source_parent_guards =
@@ -628,15 +666,6 @@ impl NativeExecutableTrustApi for WindowsNativeExecutableTrustApi {
             &canonical_path,
         )?;
 
-        let process_identity =
-            file_identity(&initial_candidate_file, self.expected_creation_time_100ns)?;
-        let verified_identity =
-            file_identity(&verification_file, self.expected_creation_time_100ns)?;
-        let rebound_identity =
-            file_identity(&rebound_candidate_file, self.expected_creation_time_100ns)?;
-        if process_identity != verified_identity || rebound_identity != verified_identity {
-            return Err(NativeTrustFailure::PathObservation);
-        }
         // Hash the complete target executable through the same guarded handle
         // that WinTrust will verify. Write/delete sharing remains excluded for
         // this handle's full lifetime, and the helper restores its file pointer
@@ -965,13 +994,7 @@ impl WindowsTrustState {
             hFile: file_handle.raw(),
             pgKnownSubject: ptr::null_mut(),
         });
-        let mut crypto_policy = Box::new(CERT_STRONG_SIGN_PARA {
-            cbSize: checked_struct_size::<CERT_STRONG_SIGN_PARA>()?,
-            dwInfoChoice: CERT_STRONG_SIGN_OID_INFO_CHOICE,
-            Anonymous: CERT_STRONG_SIGN_PARA_0 {
-                pszOID: PSTR(STRONG_SIGN_OS_1_OID.as_ptr().cast_mut()),
-            },
-        });
+        let mut crypto_policy = Box::new(os_sha2_strong_sign_policy()?);
         let mut signature_settings = Box::new(WINTRUST_SIGNATURE_SETTINGS {
             cbStruct: checked_struct_size::<WINTRUST_SIGNATURE_SETTINGS>()?,
             dwIndex: 0,
@@ -1896,7 +1919,14 @@ fn query_file_version(path: &Path) -> Option<FileVersion> {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::fs;
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     use windows::Win32::Foundation::E_FAIL;
     use windows::Win32::System::Com::CoTaskMemAlloc;
@@ -1946,7 +1976,183 @@ mod tests {
         0xe6, 0xb5, 0x7e, 0xba, 0xd6, 0x31, 0xcd, 0x39, 0xc3, 0x16, 0x94, 0x6f, 0x60, 0x79, 0x90,
         0xb1, 0x90,
     ];
+    const SYNTHETIC_IMAGE_HELPER_TEST: &str =
+        "platform::windows::executable_trust_native::tests::synthetic_process_image_wait_helper";
+    const SYNTHETIC_IMAGE_HELPER_FLAG: &str = "OPENKAKAO_SYNTHETIC_IMAGE_HELPER";
+    const SYNTHETIC_IMAGE_READY_PATH: &str = "OPENKAKAO_SYNTHETIC_IMAGE_READY_PATH";
+    const SYNTHETIC_IMAGE_EXIT_PATH: &str = "OPENKAKAO_SYNTHETIC_IMAGE_EXIT_PATH";
+    const SYNTHETIC_REPLACEMENT_BYTES: &[u8] = b"OPENKAKAO_SYNTHETIC_REPLACEMENT_V1";
     static SYNTHETIC_KNOWN_FOLDER_RELEASES: AtomicUsize = AtomicUsize::new(0);
+
+    struct SyntheticImageProcess {
+        _temp: tempfile::TempDir,
+        child: Option<Child>,
+        source_path: PathBuf,
+        renamed_path: PathBuf,
+        exit_path: PathBuf,
+    }
+
+    impl SyntheticImageProcess {
+        fn launch() -> Self {
+            let temp = tempfile::tempdir().expect("synthetic image directory must exist");
+            let source_path = temp.path().join("running.exe");
+            let renamed_path = temp.path().join("running-renamed.exe");
+            let ready_path = temp.path().join("ready.signal");
+            let exit_path = temp.path().join("exit.signal");
+            fs::copy(
+                env::current_exe().expect("test executable path must exist"),
+                &source_path,
+            )
+            .expect("synthetic test executable copy must succeed");
+
+            let mut command = Command::new(&source_path);
+            command
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "--test-threads=1",
+                    SYNTHETIC_IMAGE_HELPER_TEST,
+                ])
+                .env(SYNTHETIC_IMAGE_HELPER_FLAG, "1")
+                .env(SYNTHETIC_IMAGE_READY_PATH, &ready_path)
+                .env(SYNTHETIC_IMAGE_EXIT_PATH, &exit_path)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW.0);
+            let child = command.spawn().expect("synthetic image helper must start");
+            let mut fixture = Self {
+                _temp: temp,
+                child: Some(child),
+                source_path,
+                renamed_path,
+                exit_path,
+            };
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                if ready_path.is_file() {
+                    break;
+                }
+                if fixture
+                    .child
+                    .as_mut()
+                    .expect("synthetic child must be retained")
+                    .try_wait()
+                    .expect("synthetic child status must be readable")
+                    .is_some()
+                {
+                    panic!("synthetic image helper exited before readiness");
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "synthetic image helper readiness timed out"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            fixture
+        }
+
+        fn process_handle(&self) -> HANDLE {
+            HANDLE(
+                self.child
+                    .as_ref()
+                    .expect("synthetic child must be retained")
+                    .as_raw_handle(),
+            )
+        }
+
+        fn replace_running_image(&self) {
+            fs::rename(&self.source_path, &self.renamed_path)
+                .expect("synthetic running image rename must succeed");
+            fs::write(&self.source_path, SYNTHETIC_REPLACEMENT_BYTES)
+                .expect("synthetic replacement creation must succeed");
+        }
+    }
+
+    impl Drop for SyntheticImageProcess {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.exit_path, b"stop");
+            let Some(mut child) = self.child.take() else {
+                return;
+            };
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => return,
+                    Ok(None) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                    Ok(None) | Err(_) => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    struct SyntheticGuardedCandidate {
+        _initial_candidate_file: OwnedNativeHandle,
+        _verification_file: OwnedNativeHandle,
+        _canonical_parent_guards: Vec<OwnedNativeHandle>,
+        canonical_path: PathBuf,
+        identity: FileIdentity,
+    }
+
+    fn guarded_candidate_from_source_path(
+        source_path: &Path,
+        process_creation_time_100ns: u64,
+    ) -> Result<SyntheticGuardedCandidate, NativeTrustFailure> {
+        validate_absolute_path(source_path)?;
+        let _source_parent_guards = open_reparse_free_parent_chain(source_path)?;
+        let initial_candidate_file = open_regular_file_no_follow(source_path)?;
+        validate_regular_file_handle(&initial_candidate_file)?;
+        let canonical_path = canonical_file_path(&initial_candidate_file)?;
+        if !is_fixed_local_volume(&canonical_path)? {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let canonical_parent_guards = open_reparse_free_parent_chain(&canonical_path)?;
+        let verification_file = open_guarded_regular_file_no_follow(&canonical_path)?;
+        validate_regular_file_handle(&verification_file)?;
+        if canonical_file_path(&verification_file)? != canonical_path
+            || file_system_kind(&verification_file)? != FileSystemKind::Ntfs
+        {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        let initial_identity = file_identity(&initial_candidate_file, process_creation_time_100ns)?;
+        let identity = file_identity(&verification_file, process_creation_time_100ns)?;
+        if initial_identity != identity {
+            return Err(NativeTrustFailure::PathObservation);
+        }
+        Ok(SyntheticGuardedCandidate {
+            _initial_candidate_file: initial_candidate_file,
+            _verification_file: verification_file,
+            _canonical_parent_guards: canonical_parent_guards,
+            canonical_path,
+            identity,
+        })
+    }
+
+    #[test]
+    #[ignore = "launched only by the bounded NTFS qualification parent"]
+    fn synthetic_process_image_wait_helper() {
+        if env::var(SYNTHETIC_IMAGE_HELPER_FLAG).ok().as_deref() != Some("1") {
+            return;
+        }
+        let ready_path = PathBuf::from(
+            env::var_os(SYNTHETIC_IMAGE_READY_PATH).expect("synthetic ready path must be supplied"),
+        );
+        let exit_path = PathBuf::from(
+            env::var_os(SYNTHETIC_IMAGE_EXIT_PATH).expect("synthetic exit path must be supplied"),
+        );
+        fs::write(ready_path, b"ready").expect("synthetic readiness write must succeed");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !exit_path.is_file() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     fn allocate_synthetic_known_folder_path(path: &Path) -> PWSTR {
         let wide = wide_path(path).unwrap();
@@ -2416,13 +2622,7 @@ mod tests {
         file_info.cbStruct = size_of::<WINTRUST_FILE_INFO>() as u32;
         file_info.pcwszFilePath = PCWSTR(file_path.as_ptr());
         file_info.hFile = file_handle.raw();
-        let mut crypto_policy = Box::new(CERT_STRONG_SIGN_PARA {
-            cbSize: size_of::<CERT_STRONG_SIGN_PARA>() as u32,
-            dwInfoChoice: CERT_STRONG_SIGN_OID_INFO_CHOICE,
-            Anonymous: CERT_STRONG_SIGN_PARA_0 {
-                pszOID: PSTR(STRONG_SIGN_OS_1_OID.as_ptr().cast_mut()),
-            },
-        });
+        let mut crypto_policy = Box::new(os_sha2_strong_sign_policy().unwrap());
         let mut signature_settings = Box::new(WINTRUST_SIGNATURE_SETTINGS::default());
         signature_settings.cbStruct = size_of::<WINTRUST_SIGNATURE_SETTINGS>() as u32;
         signature_settings.dwFlags = WSS_GET_SECONDARY_SIG_COUNT;
@@ -2983,6 +3183,100 @@ mod tests {
         );
         assert_eq!(verification_share().0 & FILE_SHARE_WRITE.0, 0);
         assert_eq!(verification_share().0 & FILE_SHARE_DELETE.0, 0);
+    }
+
+    #[test]
+    fn os_sha2_policy_rejects_md5_and_sha1_but_accepts_sha256_without_a_certificate() {
+        let policy = os_sha2_strong_sign_policy().unwrap();
+        // SAFETY: `policy` and each process-static NUL-terminated algorithm
+        // string remain live for the synchronous calls. A null certificate is
+        // documented to request hash-algorithm strength checking only.
+        unsafe {
+            assert!(
+                CertIsStrongHashToSign(ptr::from_ref(&policy), BCRYPT_MD5_ALGORITHM, None,)
+                    .is_err()
+            );
+            assert!(
+                CertIsStrongHashToSign(ptr::from_ref(&policy), BCRYPT_SHA1_ALGORITHM, None,)
+                    .is_err()
+            );
+            assert!(
+                CertIsStrongHashToSign(ptr::from_ref(&policy), BCRYPT_SHA256_ALGORITHM, None,)
+                    .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn ntfs_process_image_path_requery_qualifies_all_replacement_timings() {
+        // Replacement completed before the first query: the supported image
+        // must report the renamed backing path, never the replacement path.
+        {
+            let fixture = SyntheticImageProcess::launch();
+            fixture.replace_running_image();
+            let process = fixture.process_handle();
+            let creation_time = query_creation_time(process).unwrap();
+            let first_path = query_process_image_path(process).unwrap();
+            let candidate = guarded_candidate_from_source_path(&first_path, creation_time).unwrap();
+            let renamed = open_regular_file_no_follow(&fixture.renamed_path).unwrap();
+            let replacement = open_regular_file_no_follow(&fixture.source_path).unwrap();
+            assert_eq!(
+                candidate.canonical_path,
+                canonical_file_path(&renamed).unwrap()
+            );
+            assert_ne!(
+                candidate.identity,
+                file_identity(&replacement, creation_time).unwrap()
+            );
+            require_requeried_process_image_candidate(
+                process,
+                &candidate.canonical_path,
+                candidate.identity,
+                creation_time,
+            )
+            .unwrap();
+        }
+
+        // Replacement between the first path query and guarded open: the
+        // first candidate is the impostor, while the requery resolves the
+        // renamed backing file and the shared production helper must refuse.
+        {
+            let fixture = SyntheticImageProcess::launch();
+            let process = fixture.process_handle();
+            let creation_time = query_creation_time(process).unwrap();
+            let first_path = query_process_image_path(process).unwrap();
+            fixture.replace_running_image();
+            let candidate = guarded_candidate_from_source_path(&first_path, creation_time).unwrap();
+            assert!(matches!(
+                require_requeried_process_image_candidate(
+                    process,
+                    &candidate.canonical_path,
+                    candidate.identity,
+                    creation_time,
+                ),
+                Err(NativeTrustFailure::PathObservation)
+            ));
+        }
+
+        // Replacement after both queries: the retained verification handle
+        // denies rename until all guarded candidate state is dropped.
+        {
+            let fixture = SyntheticImageProcess::launch();
+            let process = fixture.process_handle();
+            let creation_time = query_creation_time(process).unwrap();
+            let first_path = query_process_image_path(process).unwrap();
+            let candidate = guarded_candidate_from_source_path(&first_path, creation_time).unwrap();
+            require_requeried_process_image_candidate(
+                process,
+                &candidate.canonical_path,
+                candidate.identity,
+                creation_time,
+            )
+            .unwrap();
+            assert!(fs::rename(&fixture.source_path, &fixture.renamed_path).is_err());
+            drop(candidate);
+            fixture.replace_running_image();
+        }
     }
 
     #[test]

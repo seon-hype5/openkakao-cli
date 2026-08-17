@@ -163,15 +163,23 @@ or write authority.
   remain disconnected from KakaoTalk.
 
   Independent unsafe review accepted these additions for a production-
-  disconnected merge, but activation remains blocked. Windows documents
-  `QueryFullProcessImageNameW` as returning a path, not a backing-file identity;
-  the two-query NTFS guard must pass adversarial rename/replacement timing on
-  every supported Windows image. A trusted timestamped fixture must also
-  qualify weak-signature rejection and legal provider high-word flags. The
-  current exact provider flag comparison may conservatively reject RFC3161
-  timestamp state. No architecture-specific Kakao target hash/SPKI/root bundle
-  or production wiring exists. Production refuses at
-  `windows_executable_trust_unavailable` before ledger or UI observation.
+  disconnected merge, but activation remains blocked. On Windows
+  `10.0.26200.0`/NTFS, a signed-PowerShell qualification rejected MD5/SHA-1,
+  accepted SHA-256, and passed replacement before, between, and after the two
+  process-image path queries. The committed OS script and a Rust test now gate
+  those assumptions. Local Smart App Control refused the newly linked unsigned
+  Rust test binary before entry; it was compile/lint checked without bypassing
+  policy, and hosted execution remains required.
+
+  Windows still documents `QueryFullProcessImageNameW` as returning a path,
+  not a backing-file identity, so the NTFS timing matrix must pass on every
+  declared supported Windows image. A trusted timestamped fixture must also
+  qualify real provider traversal, weak-signature rejection, and legal provider
+  high-word flags. The current exact provider flag comparison may
+  conservatively reject RFC3161 timestamp state. No architecture-specific
+  Kakao target hash/SPKI/root bundle or production wiring exists. Production
+  refuses at `windows_executable_trust_unavailable` before ledger or UI
+  observation.
 - Generic owner-chain evidence does not detect an unowned custom dialog or an
   overlay drawn inside the selected window. Activation needs negative live
   measurements and a reviewed version-specific rule if either shape exists.
@@ -202,10 +210,14 @@ weaken the gates.
 Automated gates may compile all features and exercise fake/synthetic ports.
 They may parse the committed synthetic Authenticode fixture in memory and call
 WinTrust on that fixture only with the frozen cache-only/noninteractive policy;
-they must not execute it, change a certificate store, launch a live UI probe,
-open an installed application, or run a product write command. CI has no
-credentials, app setup, secret injection, UI dump, screenshot, trace, or
-artifact upload.
+they must not execute that fixture. The native-assumption gate may launch only
+its owned temporary OS-supplied loopback helper and an exact ignored copy
+of the Rust unit-test harness. Both are bounded, windowless, detached from
+product or user data, stopped by their parent, and retained nowhere; only the
+signed helper sends loopback traffic. Gates must not change a certificate
+store, launch a live UI probe, open an installed application, or run a product
+write command. CI has no credentials, app setup, secret injection, UI dump,
+screenshot, trace, or artifact upload.
 
 L10 read-only inspection and L20-L40 mutation validations require their own
 fresh approvals. I20, a green build, or the existence of guarded native call

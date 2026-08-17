@@ -303,7 +303,12 @@ path and file-identity agreement before trusting the verification handle.
 Symlink/reparse resolution, non-NTFS or non-fixed volumes, path replacement, or
 candidate disagreement fail closed. Because Windows does not document this
 path query as an atomic backing-file identity, hosted adversarial qualification
-on every supported Windows/NTFS image remains mandatory before wiring.
+on every supported Windows/NTFS image remains mandatory before wiring. A
+signed-PowerShell run passed all three replacement timings on Windows
+`10.0.26200.0`/NTFS. The committed OS script and Rust production-helper test
+must still pass on the pinned hosted image and every declared supported build.
+Local Smart App Control blocked the newly linked unsigned Rust test executable
+before entry; the project did not change or bypass that policy.
 
 `WinVerifyTrust` must run with no UI, cache-only URL retrieval, and a live
 `CERT_STRONG_SIGN_PARA` selecting `szOID_CERT_STRONG_SIGN_OS_1`, so trust
@@ -313,6 +318,12 @@ Kakao target SPKI and exact canonical install root obtained from release
 provenance. No value may be guessed from the current machine or printed.
 Unknown target bytes/signer, weak signing, catalog ambiguity, offline revocation
 uncertainty, or install-root mismatch disables writes.
+
+The exact production strong-policy constructor has now been exercised through
+`CertIsStrongHashToSign` with no certificate. On Windows `10.0.26200.0`, MD5
+and SHA-1 were refused and SHA-256 was accepted. This hash-only OS result does
+not qualify a trusted timestamped WinTrust success, real provider traversal,
+or an architecture-specific target bundle.
 
 Adding this boundary requires a dependency-feature RFC for the minimum
 `windows` namespaces, an unsafe ownership/lifetime audit, and synthetic tests

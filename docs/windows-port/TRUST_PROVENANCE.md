@@ -101,10 +101,14 @@ the held impostor cannot be removed and the second process query resolves the
 renamed backing file, so the comparison refuses.
 
 That observed NTFS rename behavior is not a documented kernel identity
-contract. Production wiring remains blocked until the adversarial rename and
-replacement test is reproduced on the exact supported Windows/NTFS image and
-the two-query/guard protocol receives independent review. Merely repeating a
-path query without the held no-delete candidate is not sufficient.
+contract. Independent review of the two-query/guard protocol is complete, and
+a structured signed-PowerShell qualification passed before/between/after-query
+replacement on Windows `10.0.26200.0`. The committed
+[`qualify-windows-trust-assumptions.ps1`](../../scripts/qualify-windows-trust-assumptions.ps1)
+and a Rust test now gate the same assumption. Production wiring remains
+blocked until the test also passes on the pinned hosted image and every exact
+supported Windows/NTFS build. Merely repeating a path query without the held
+no-delete candidate is not sufficient.
 
 The expected root relation is source-static. Observed paths and components are
 evidence only; no API can promote them into a profile. Automated tests use
@@ -133,10 +137,15 @@ and [`CERT_STRONG_SIGN_PARA`](https://learn.microsoft.com/en-us/windows/win32/ap
 
 Pure tests refuse a missing/wrong complete-file digest or absent strong-policy
 evidence. Native inert-state tests refuse null, substituted, wrong-size,
-wrong-choice, or wrong-OID crypto-policy state without calling WinTrust. Before
-activation, an isolated Windows qualification must additionally prove OS
-semantic rejection of MD5/SHA-1 and acceptance of the reviewed SHA-2 target;
-synthetic pointer tests alone do not establish operating-system behavior.
+wrong-choice, or wrong-OID crypto-policy state without calling WinTrust. The
+production policy now reaches
+[`CertIsStrongHashToSign`](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certisstronghashtosign)
+with no certificate;
+the signed-PowerShell equivalent on Windows `10.0.26200.0` rejected MD5/SHA-1
+and accepted SHA-256. Local Smart App Control blocked the newly linked unsigned
+Rust test before entry, so its hosted execution remains required. This
+hash-only OS result does not prove trusted timestamped WinTrust acceptance of
+the reviewed target.
 The same positive trusted timestamped qualification must record
 `CRYPT_PROVIDER_DATA.dwProvFlags`: the low word must preserve the caller flags,
 the revocation high-word choice must remain chain-excluding-root, and any
@@ -179,10 +188,10 @@ The following remain separate decisions:
 
 1. accept the synthetic fixture provenance and reproduce clean pinned-Windows
    structure/lifetime tests;
-2. independently audit the native unsafe, strong-policy, hashing, and
-   process-image revalidation paths;
-3. reproduce the NTFS rename/replacement adversarial case on the supported
-   hosted image and confirm fail-closed behavior;
+2. retain the completed independent audit of native unsafe, strong-policy,
+   hashing, and process-image revalidation paths;
+3. reproduce the now-automated NTFS rename/replacement and strong-hash cases on
+   the supported hosted image and every declared Windows build;
 4. accept one architecture-specific Kakao target provenance bundle;
 5. independently audit runtime root-relation derivation;
 6. connect the native observer while capability remains false;

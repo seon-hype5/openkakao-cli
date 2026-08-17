@@ -5,12 +5,11 @@ Date: 2026-08-17 KST
 ## Status
 
 The non-live Windows release candidate is complete through DAG task `I20` on
-branch `integration/windows-mvp`. Its reviewed pre-hardening parent is
-`1fc9dc3c32c882fbb33fbd195c264a93f9bd6cbe`. The clean commit containing this
-handoff adds branch-push CI safety, exact target-byte/strong-sign trust
-hardening, public installer corroboration, and independent audit evidence; its
-final SHA must be reported externally because a commit cannot embed its own
-content-derived SHA.
+branch `integration/windows-mvp`. Its reviewed predecessor is
+`f7d94c68e875aafcc3722c7199dda2fdf69e1682`. The successor containing this
+handoff adds automated SHA-2 policy and NTFS process-image path qualification;
+its final SHA must be reported externally because a commit cannot embed its
+own content-derived SHA.
 
 Completed tasks: `B00`, `B10`, `B20`, `B30`, `C00`, `C10`, `P10`, `P20`,
 `P30`, `I10`, `P40`, `P50`, `P60`, and `I20`.
@@ -65,7 +64,10 @@ concurrency limit.
 - provider-owned subject/revocation/error/catalog validation before signer
   traversal: `6a4012a6c541c3ebd3a2f8fdd4f5aa84f8f7136b`; and
 - exact provider-to-signer-to-leaf traversal with nested error refusal:
-  `1fc9dc3c32c882fbb33fbd195c264a93f9bd6cbe`.
+  `1fc9dc3c32c882fbb33fbd195c264a93f9bd6cbe`; and
+- branch-push CI containment, target-byte/strong-sign hardening, public
+  installer corroboration, and independent safety review:
+  `f7d94c68e875aafcc3722c7199dda2fdf69e1682`.
 
 The Child A native unsafe audit and Child B adversarial audit were followed by
 a focused re-audit of root's fixes. The re-audit found no correctness blocker
@@ -351,8 +353,13 @@ must not be weakened merely to make a live test possible.
 
 ## Final non-live verification
 
-All recorded final-matrix Rust commands used the ignored
-`C:\Users\ihvna\source\openkakao-dev\repo\.target\wave2-root` directory.
+The fully executed baseline below belongs to predecessor `f7d94c6`. All
+recorded final-matrix Rust commands used the ignored
+`C:\Users\ihvna\source\openkakao-dev\repo\.target\wave2-root` directory. The
+successor compiles the two new trust tests and one ignored helper, but local
+Smart App Control refused the newly linked unsigned test executable before
+entry. The baseline counts therefore remain historical results, not a claim
+that the successor Rust tests executed locally.
 
 | Gate | Result |
 |---|---|
@@ -376,9 +383,14 @@ All recorded final-matrix Rust commands used the ignored
 | release build, default and all features | passed |
 | release all-feature Windows synthetic tests | 113 passed |
 | fixture structure/SPKI and offline WinTrust lifetime | 2 passed; PE never executed |
-| Windows-port Markdown local links and pinned-action policy | 50 files, 60 local links, 0 broken; 12 action refs pinned |
+| Windows-port Markdown local links and pinned-action policy | 51 files, 63 local links, 0 broken; 12 action refs pinned |
 | `actionlint` 1.7.12 on both non-release workflows | passed |
 | final `git diff --check` | passed |
+| successor `cargo test --locked --lib --no-run` | passed; test executable compiled only |
+| successor `cargo clippy --locked --all-targets --all-features -- -D warnings` | passed |
+| successor PowerShell parser and `actionlint` 1.7.12 | passed |
+| successor native-assumption OS qualification | Windows `10.0.26200.0`/NTFS: strong hash and before/between/after timings passed |
+| successor Rust trust-test execution | blocked before entry by Smart App Control, OS error 4551; hosted result pending |
 
 The workflow syntax check used the official actionlint 1.7.12 Windows-amd64
 archive under ignored `.target`. Its SHA-256
@@ -407,7 +419,13 @@ check.
 - production backend stage calls: 0;
 - production backend commit/Invoke calls: 0;
 - actual messages sent: 0;
-- synthetic fixture executable launches: 0;
+- committed Authenticode fixture executable launches: 0;
+- OS-supplied System32 loopback helper launches: 3, all stopped and waited;
+- copied Rust unit-test harness launch attempts: 1, successful entries: 0
+  (Smart App Control error 4551);
+- qualification-helper network destinations: loopback only; no external
+  destination was supplied;
+- App Control, execution-policy, or trust-store changes: 0;
 - executable-trust known-folder resolutions: 0;
 - installed KakaoTalk files/databases read: 0;
 - public official installer downloads: 2, both hash-only/static inspection;
@@ -460,13 +478,15 @@ implementation; it likewise authorizes no probe or production wiring.
 
   The public 26.7 x86/x64 installer hashes were reproduced independently and
   preserved as corroboration; neither architecture has an accepted installed
-  target hash/SPKI/root bundle. Activation additionally requires the NTFS
-  before/between/after-query substitution matrix on every supported Windows
-  image, OS-level MD5/SHA-1 refusal plus SHA-2 acceptance, and a trusted
-  timestamped provider-path run. The current exact provider flag comparison
-  may conservatively reject a legitimate RFC3161 high-word flag. All of these
-  failures remain closed because production has zero profile values/references
-  and uses `UnavailableExecutableTrust`.
+  target hash/SPKI/root bundle. Windows `10.0.26200.0`/NTFS passed the
+  signed-PowerShell strong-hash and before/between/after-query matrix. The same
+  committed tests must still pass on the pinned hosted image and every declared
+  supported Windows build; the local unsigned Rust test was not allowed to
+  enter. Activation also requires a trusted timestamped provider-path run and
+  isolated weak-signed WinTrust end-to-end refusal. The current exact provider
+  flag comparison may conservatively reject a legitimate RFC3161 high-word
+  flag. All of these failures remain closed because production has zero profile
+  values/references and uses `UnavailableExecutableTrust`.
 - Generic Win32 owner-chain modal evidence cannot identify an unowned custom
   dialog or an overlay drawn inside the selected window. Future activation
   needs negative live measurements and a reviewed version-specific rule if
@@ -485,16 +505,18 @@ implementation; it likewise authorizes no probe or production wiring.
 
 ## Next permissible step
 
-All production-disconnected code and documentation above now pass the local
-safe matrix, and independent CI, provenance, and native-unsafe reviews are
-complete. Both branch-push workflows have been narrowed to their non-live
-boundary. The current integration commit is clean, but noninteractive HTTPS
-had no credential and strict-host-key SSH had no authorized public key;
-neither attempt changed the remote. The next safe step is to supply repository
-write authentication, push the current integration head, and review the
-Windows/Linux/macOS hosted results. That work does not require a desktop
-session, product installation, KakaoTalk path/signature observation, or a
-trust-store change.
+The predecessor passes the fully executed local safe matrix, and the successor
+passes formatting, compile-only Rust tests, warnings-denied Clippy, static
+workflow checks, and the signed-PowerShell native-assumption equivalent.
+Independent CI, provenance, and native-unsafe reviews are complete. Local Smart
+App Control deliberately remains unchanged, so successor Rust execution must
+come from hosted Windows CI. Both branch-push workflows have been narrowed to
+their non-live boundary. Noninteractive HTTPS had no credential and strict-
+host-key SSH had no authorized public key; neither attempt changed the remote.
+The next safe step is to supply repository write authentication, push the
+current integration head, and review the Windows/Linux/macOS hosted results.
+That work does not require a desktop session, product installation, KakaoTalk
+path/signature observation, or a trust-store change.
 
 After hosted CI, the next activation work is isolated artifact qualification:
 select one architecture, reproduce the target bundle in a disposable VM, run

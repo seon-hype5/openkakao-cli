@@ -10,6 +10,7 @@ on:
       - "rust-toolchain.toml"
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
+      - "scripts/qualify-windows-trust-assumptions.ps1"
       - ".github/workflows/windows.yml"
       - ".github/workflows/openkakao-cli-ci.yml"
       - "docs/windows-port/**"
@@ -22,6 +23,7 @@ on:
       - "rust-toolchain.toml"
       - ".gitattributes"
       - "scripts/build-windows-authenticode-fixture.ps1"
+      - "scripts/qualify-windows-trust-assumptions.ps1"
       - ".github/workflows/windows.yml"
       - ".github/workflows/openkakao-cli-ci.yml"
       - "docs/windows-port/**"
@@ -127,6 +129,10 @@ jobs:
               $localLinkCount,
               $thirdPartyActionCount
           )
+
+      - name: Qualify Windows strong-sign and NTFS process-image assumptions
+        shell: pwsh
+        run: ./scripts/qualify-windows-trust-assumptions.ps1
 
       - name: Install pinned repository toolchain
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0

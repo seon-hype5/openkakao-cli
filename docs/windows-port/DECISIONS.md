@@ -639,3 +639,29 @@ workflow does not prevent future bad action code from starting first, so a
 same-workflow validate/`needs` topology remains optional hardening. The
 tag/manual release workflow is outside this non-release claim and requires its
 own review before use.
+
+## ADR-045: Automate supported-image native-trust assumption qualification
+
+Treat SHA-2 strong-hash semantics and process-image path freshness as explicit
+supported-Windows evidence rather than implications of pointer layout or one
+manual rename experiment. Run `CertIsStrongHashToSign` with the exact
+production `CERT_STRONG_SIGN_PARA` and no certificate; require MD5/SHA-1
+refusal and SHA-256 acceptance. Exercise replacement completed before the
+first process-image query, between the first query and guarded open, and after
+the second query.
+
+The hosted OS gate may make only a byte-exact copy of the OS-supplied System32
+`ping.exe` inside a generated temporary root, launch it windowlessly against
+`127.0.0.1`, stop every owned process, and delete only that validated root. A
+Rust unit test separately launches an exact ignored copy of its own harness and
+calls the production requery helper. Neither path executes the product, touches
+user or application state, changes a trust store, or performs external network
+access.
+
+The signed-PowerShell equivalent passed on Windows `10.0.26200.0`/NTFS. Local
+Smart App Control refused the newly linked unsigned Rust test executable before
+entry, so do not weaken or bypass that policy; require the committed test on a
+pinned hosted Windows image. These gates qualify only hash-policy and path-
+requery assumptions. A trusted timestamped positive provider traversal,
+weak-signed WinTrust end-to-end refusal, architecture-specific target bundle,
+and separate production wiring review remain mandatory for activation.

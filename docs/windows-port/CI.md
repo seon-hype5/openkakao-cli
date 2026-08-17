@@ -38,9 +38,10 @@ The job runs in this order and stops on the first failure:
 | Gate | Command | Safety basis |
 |---|---|---|
 | Documentation and pins | Inline PowerShell link/action/toolchain validator | Reads only committed Markdown, this workflow, and `rust-toolchain.toml`; rejects broken/out-of-tree links and mutable action refs |
+| Native trust OS assumptions | `scripts/qualify-windows-trust-assumptions.ps1` | Uses a byte-exact temporary copy of the OS-supplied System32 `ping.exe` against loopback only; proves SHA-2 strong-hash semantics plus before/between/after-query NTFS rename behavior without executing the product or changing a trust store |
 | Format | `cargo fmt --all -- --check` | Source-only formatting check |
 | Lint | `cargo clippy --locked --all-targets --all-features -- -D warnings` | Compiles/lints targets; does not execute the product |
-| Library | `cargo test --locked --lib` | Unit tests use synthetic values; the only native trust call targets the committed inert fixture with cache-only/no-UI policy and exactly one CLOSE |
+| Library | `cargo test --locked --lib` | Unit tests use synthetic values; native trust coverage is limited to the inert cache-only/no-UI fixture, hash-only strong-policy semantics, and the owned temporary NTFS harness described below |
 | Guarded transaction | `cargo test --locked --lib --all-features platform::windows` | Runs only the named synthetic Windows unit-test subtree with the default-off write feature compiled, including the same bounded fixture lifetime test |
 | Binary unit | `cargo test --locked --bin openkakao-cli` | Parser and unit coverage; no command dispatch against a live app |
 | Windows contracts | `cargo test --locked --test windows_backend --test windows_policy --test windows_cli` | Capability, fake, policy, redaction, and zero-mutation coverage |
@@ -75,6 +76,18 @@ performs no UI mutation, and cannot read user or application state.
   guards and calls WinTrust with `WTD_CACHE_ONLY_URL_RETRIEVAL`, `WTD_UI_NONE`,
   and the noninteractive HWND. It accepts trust or refusal, closes state once,
   performs no trust-store change, and has no network/UI fallback.
+- The native-assumption qualification script calls
+  `CertIsStrongHashToSign` with no signing certificate and uses three fresh
+  byte-exact temporary copies of the OS-supplied Windows loopback helper. It sends
+  only bounded ICMP traffic to `127.0.0.1`, creates no window, kills and waits
+  for each owned helper, verifies cleanup remains below its generated
+  temporary root, and emits only fixed OS/filesystem/pass metadata. It never
+  opens the product, an installed application, or a user file.
+- The Windows Rust trust subtree also launches a copied unit-test harness as an
+  ignored exact helper. The parent test alone selects it, redirects every
+  stream to null, confines readiness/exit markers to `tempfile`, and always
+  stops its owned child. This exercises the same production path-requery
+  helper; it is not the product binary and performs no UI or network action.
 - Provider-state tests construct only inert in-memory `CRYPT_PROVIDER_DATA`
   values. They prove pointer, SIP subject, offline/revocation flag, error, and
   catalog-recall drift refuses without calling WinTrust or opening a file.

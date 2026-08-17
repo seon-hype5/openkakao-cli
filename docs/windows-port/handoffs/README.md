@@ -84,3 +84,6 @@ executable-trust pins.
 records the independent CI/native/provenance audits, exact target-byte and
 strong-sign hardening, the NTFS rename/replacement experiment, and the
 activation gates that deliberately remain disconnected.
+[`root-windows-trust-qualification.md`](root-windows-trust-qualification.md)
+records the automated SHA-2 and NTFS timing gates, the signed local OS result,
+the unchanged Smart App Control refusal, and the still-required hosted run.

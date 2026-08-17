@@ -383,15 +383,30 @@ best-effort scan.
    those guards, before/after identities alone do not exclude replace/restore.
 
 An NTFS experiment in the ignored repository target directory demonstrated
-that a running synthetic PE can be source-renamed and replaced. On this host,
-both `QueryFullProcessImageNameW` calls followed the renamed backing file and
-the guarded comparison refused the substitution shape. Microsoft documents
-the API as returning a path, however, not an atomic backing-file identity.
-Activation therefore requires the three adversarial timings (replacement
-before observation, between queries, and after the second query) to pass on
-every supported Windows/NTFS image. Supported builds must be limited to that
-matrix; a long-term stronger design would retain a backing-file handle at
-launch or use another documented kernel-backed identity mechanism.
+that a running synthetic PE can be source-renamed and replaced. A successor
+qualification on Windows `10.0.26200.0` exercised all three timings: completed
+before the first query, between the first query and guarded open, and after the
+second query. Both path queries followed the renamed backing file, the shared
+production requery helper refused the between-query impostor shape by exact
+canonical-path/file-ID comparison, and the retained read-only guard denied the
+after-query rename until drop.
+
+The committed `scripts/qualify-windows-trust-assumptions.ps1` repeats the OS
+contract with a byte-exact copy of the OS-supplied System32 `ping.exe` and
+loopback only. A
+Windows Rust unit test uses a copied exact ignored test-harness helper to call
+the production requery function directly. Smart App Control on the current
+host refused the newly linked unsigned Rust test executable before entry, so
+that binary was compile/lint checked but the Rust parent test was not bypassed
+or locally executed. The signed-PowerShell equivalent passed; the hosted
+Windows test remains the independent executable result.
+
+Microsoft documents `QueryFullProcessImageNameW` as returning a path, not an
+atomic backing-file identity. Activation therefore still requires the three
+timings to pass on every supported Windows/NTFS image, including the pinned
+hosted runner. Supported builds must be limited to that matrix; a long-term
+stronger design would retain a backing-file handle at launch or use another
+documented kernel-backed identity mechanism.
 
 Raw paths, file IDs, PIDs, HWNDs, volume identifiers, creation times, or target
 digests never enter `UiError`, output, fixtures, or `Debug`.
@@ -461,6 +476,14 @@ certificate, without calling WinTrust.
 must still equal exactly `WSS_GET_SECONDARY_SIG_COUNT`, only documented
 `WSS_OUT_*` bits may be added, and any other input or unknown bit refuses. This
 distinction is covered by both pure drift tests and the real fixture call.
+
+The production `CERT_STRONG_SIGN_PARA` constructor is also passed directly to
+`CertIsStrongHashToSign` with no certificate. The Windows OS semantic test
+requires MD5 and SHA-1 to return false and SHA-256 to return true. The same
+contract passed through signed PowerShell on Windows `10.0.26200.0`; hosted
+Rust execution is still required because local Smart App Control blocked the
+new unsigned test binary before entry. This hash-only result does not replace
+a trusted timestamped WinTrust/provider success fixture.
 
 The current provider check rejects every additional high-word flag. The SDK
 also defines provider-added `CPD_RFC3161v21` and
@@ -591,6 +614,11 @@ open the installed KakaoTalk binary.
   calls and zero execution claims;
 - exact discovery-versus-verification share modes; verification excludes write,
   delete, and rename sharing;
+- `CertIsStrongHashToSign` hash-only semantics: MD5/SHA-1 false and SHA-256
+  true under the exact production `CERT_STRONG_SIGN_PARA`;
+- three NTFS process-image substitution timings using only a copied synthetic
+  test harness in Rust and an OS-supplied loopback helper in the standalone
+  OS qualification script;
 - root-relation kind/component/order/case domain separation plus every
   ambiguous, nonportable, oversized, or absolute-like component refusal;
 - exact known-folder GUID routing, same-volume strict-descendant derivation,
@@ -613,8 +641,10 @@ files. Within the two non-release safe CI workflows, the only automated
 product-binary executions are the fourteen exact help/version/usage parser
 cases named in both workflows; broad or newly discovered CLI tests are
 forbidden. The separate tag/manual release workflow remains outside this
-claim. Live L10 and all later gates still require a fresh, explicitly named
-approval.
+claim. Synthetic trust qualification may launch only its owned copied unit-test
+harness or OS-supplied loopback helper, with no UI, external network,
+application data, or retained artifact. Live L10 and all later gates still
+require a fresh, explicitly named approval.
 
 ## Implementation order
 
@@ -637,10 +667,11 @@ approval.
    independently audit the unsafe adapter, and review signer/root profile
    material. The fixture, reproducible build record, structural/SPKI test, and
    cache-only VERIFY/CLOSE test now exist as described in
-   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md). Independent review, production
-   provenance, and every production value remain absent. Generic runtime root
-   derivation is complete but the full adapter remains disconnected and has
-   never resolved a real application root.
+   [`TRUST_PROVENANCE.md`](TRUST_PROVENANCE.md). Independent disconnected-code
+   review is complete. Hosted OS qualification, production provenance, and
+   every production value remain absent. Generic runtime root derivation is
+   complete but the full adapter remains disconnected and has never resolved a
+   real application root.
 7. Only after every remaining selector and live gate passes may capability
    activation be considered in a separate change.
 
